@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+	y-snap — window management by hotkey, mouse gesture and overlay.
+
+	Copy this file next to y-snap.exe to keep it portable, or to
+	%APPDATA%\Ypo-Lite\y-snap.xml. Either place is read on start-up and
+	whenever "Reload configuration" is chosen from the tray menu.
+
+	See README.md for every attribute; this file is the default.
+-->
+<y-snap>
+
+	<!--
+		Mouse gestures: hold the modifiers and use the button anywhere in a
+		window, no need to aim for its title bar or its edge.
+	-->
+	<mouse>
+		<drag   button="left"  mod="Alt"/>
+		<resize button="right" mod="Alt"/>
+		<!-- <switch button="wheel" mod="Alt"/> -->
+	</mouse>
+
+	<!--
+		target="pointed" acts on the window under the mouse pointer and falls
+		back to the focused one; target="focused" (the default) only ever acts
+		on the focused window.
+
+		steal-from-shell="true" claims a combination Windows already owns, by
+		swallowing it with a keyboard hook. Use it sparingly: it applies to
+		every keystroke on the machine.
+	-->
+	<hotkeys>
+		<hotkey key="Win+OEM7"     action="minimize"      target="pointed"/>
+		<hotkey key="Win+Escape"   action="close"         target="pointed"/>
+		<hotkey key="Ctrl+Space"    action="overlay"       target="pointed"/>
+		<hotkey key="Ctrl+Shift+P"   action="center-cursor" target="focused"/>
+		<!-- <hotkey key="Win+Alt+Left"  action="desktop-prev"/> -->
+		<!-- <hotkey key="Win+Alt+Right" action="desktop-next"/> -->
+	</hotkeys>
+
+	<!--
+		The overlay: one tile per action, chosen with a single key press.
+		theme="auto" follows the Windows light/dark setting; any colour
+		attribute set here overrides the theme's own.
+	-->
+	<overlay
+		theme="auto"
+		focus-border="true" border-width="2"
+		corner-radius="8"
+		columns="4" tile-width="88" tile-height="64"
+		key-font-size="16" label-font-size="9"
+		icon-font="Segoe UI Emoji" icon-font-size="22">
+
+		<!--
+			A group is laid out on its own row with its own grid. This one
+			exists for the per-desktop tiles below, which want to be small and
+			numerous rather than to sit in the main four-column grid.
+		-->
+		<group id="desktops" columns="9" tile-width="64" tile-height="48"/>
+
+		<!-- label-on is shown instead of label while the toggle is on. -->
+		<action key="M" action="minimize"     label="Minimize"      icon="➖"/>
+		<action key="X" action="maximize"     label="Maximize"      label-on="Restore"          icon="🔲"/>
+		<action key="C" action="close"        label="Close"         icon="❌"/>
+		<action key="T" action="always-on-top" label="On top"       label-on="Remove top"       icon="🔝"/>
+		<action key="I" action="iconize"      label="Iconize"       icon="📥"/>
+		<action key="Y" action="traynize"     label="Traynize"      icon="📤"/>
+		<action key="B" action="borderless"   label="Borderless"    label-on="Restore border"   icon="🖼️"/>
+		<action key="F" action="transparency" label="Fade"          label-on="Un-fade"          icon="🌫️"/>
+		<action key="R" action="shade"        label="Roll up"       label-on="Roll down"        icon="🔼"/>
+		<action key="H" action="hide-taskbar" label="Hide"          label-on="Show in taskbar"  icon="🚫"/>
+		<action key="U" action="pin-toggle"   label="Pin"           label-on="Unpin"            icon="📌"/>
+		<action key="P" action="center-cursor" label="Center cursor" icon="🎯"/>
+
+		<action key="N"     action="desktop-new"  label="New desktop"  icon="➕"/>
+		<action key="Left"  action="desktop-prev" label="Prev desktop" icon="◀️"/>
+		<action key="Right" action="desktop-next" label="Next desktop" icon="▶️"/>
+
+		<!--
+			Expands into one tile per virtual desktop when the overlay opens,
+			so the tiles follow desktops being created and removed. The
+			desktop the window is already on is shown but inert, which keeps
+			the numbering stable whichever desktop is current.
+		-->
+		<action action="desktop-list" label="Desktop" group="desktops"/>
+	</overlay>
+
+	<!--
+		Shown when the pointer hovers a window's minimize button, right below
+		it: a row of one-click actions, no key needed. Leave the section out
+		(or empty) to turn the popup off entirely.
+	-->
+	<minbutton>
+		<action action="traynize"     label="Traynize"     icon="📤"/>
+		<action action="always-on-top" label="On top"      icon="🔝"/>
+	</minbutton>
+
+</y-snap>

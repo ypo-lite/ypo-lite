@@ -1,0 +1,157 @@
+# y-snap
+
+Window management by hotkey, mouse gesture and overlay. The Rust rewrite of
+[HulK](http://glatigny.github.io/guipro/).
+
+PowerToys' "Grab and Move" does a part of this. y-snap is the rest: minimize,
+maximize, close, roll up, fade, strip the frame, hide from the taskbar, hide
+behind a tray icon, pin to every virtual desktop or send to another one — from
+the keyboard, or from one popup, on whichever window the pointer happens to be
+over.
+
+## State
+
+Working: the configuration file, the tray icon and menu, hotkey registration
+(including reclaiming a combination the shell owns), the actions that act
+directly on a window — minimize, maximize, close, always-on-top, borderless,
+transparency, shade, hide-from-taskbar, center-cursor — the mouse hook (drag,
+resize, switch), and the minimize-button popup.
+
+Configured, parsed, and not written yet: the big action overlay, the
+iconize/traynize list, and the virtual desktop actions. Binding one says so
+in a balloon rather than doing nothing.
+
+## The configuration file
+
+y-snap reads `y-snap.xml`, in the first of these that exists:
+
+1. the path after `-config` on the command line, `%VARIABLES%` expanded;
+2. `y-snap.xml` next to `y-snap.exe` — a portable copy stays portable;
+3. `%APPDATA%\Ypo-Lite\y-snap.xml`.
+
+A malformed document stops the load and is reported with its line number.
+Anything else — an unknown action, a key combination that does not parse, an
+attribute nobody recognises — is a warning in a balloon, and the rest of the
+file still loads. `rsc/y-snap.xml` is the default, and is a complete example.
+
+### Keys
+
+One attribute, written the way it reads: `key="Win+Alt+Left"`. Modifiers are
+`Win`, `Ctrl`, `Alt`, `Shift`, in any order and any case. Key names are
+letters and digits, `F1`-`F24`, `Numpad0`-`Numpad9`, `NumAdd`/`NumSub`/…,
+`Esc`, `Space`, `Tab`, `Enter`, `Backspace`, `Insert`, `Delete`, `Home`,
+`End`, `PageUp`, `PageDown`, the arrows, `PrintScreen`, `Pause`, `Menu`,
+`CapsLock`, `ScrollLock`, `NumLock`, the punctuation keys as `OEM1`-`OEM8`
+(or `Semicolon`, `Slash`, `Quote`, … on a US layout), the volume, media and
+browser keys, and `0x…` for a raw virtual-key code.
+
+### Actions
+
+The same names work on a hotkey and on an overlay tile.
+
+| | |
+| --- | --- |
+| `overlay` | show the action overlay for the target window |
+| `reload` `quit` | y-snap itself |
+| `minimize` `maximize` `close` | the obvious ones; `maximize` restores a maximized window |
+| `always-on-top` `borderless` `transparency` `shade` `hide-taskbar` | toggles |
+| `center-cursor` | put the pointer in the middle of the window |
+| `iconize` `traynize` `uniconize` | hide the window behind an icon, and bring it back |
+| `desktop-next` `desktop-prev` `desktop-new` `desktop-move` `pin-toggle` | virtual desktops |
+| `desktop-list` | overlay only: expands into one tile per desktop |
+
+### `<hotkeys>`
+
+```xml
+<hotkey key="Win+Escape" action="close" target="pointed"/>
+```
+
+| Attribute | |
+| --- | --- |
+| `key` | required |
+| `action` | required |
+| `target` | `focused` (default), or `pointed` for the window under the pointer, falling back to the focused one |
+| `desktop` | for `desktop-move`, 1-based |
+| `steal-from-shell` | `true` takes a combination Windows already owns, with a low-level keyboard hook |
+
+`steal-from-shell` is off by default: a combination belonging to another
+application belongs to that application. It is also the only setting here with
+a cost — the hook runs on every keystroke on the machine.
+
+### `<mouse>`
+
+```xml
+<drag button="left" mod="Alt"/>
+```
+
+`<drag>`, `<resize>` and `<switch>`, each with a `button` (`left`, `right`,
+`middle`, `wheel`) and a `mod` (the modifier half of a hotkey, or `none`;
+`Alt` if left out).
+
+All three are driven by one `WH_MOUSE_LL` hook, installed on y-snap's own
+thread rather than injected into other processes — see `mouse.rs`. Drag and
+resize grab and release with the same button; the window under the pointer at
+the moment of the press is the one they act on, same as `target="pointed"`.
+`<switch>`'s wheel steps the foreground window forward or back through the
+visible, unowned, non-topmost top-level windows, roughly what Alt+Tab shows.
+
+### `<minbutton>`
+
+```xml
+<action action="traynize" label="Traynize" icon="📤"/>
+```
+
+A row of one-click tiles shown right under a window's minimize button while
+the pointer hovers it — no hotkey needed, and no `<overlay>` theming (it
+reuses `<overlay>`'s own colours and corner radius). Leave the section out,
+or empty, to turn it off. Each `<action>` takes `action`, `label` and `icon`
+— no `key`, no `group`; only actions that act on a single window are
+allowed (not `desktop-list`, not `overlay` itself).
+
+The button's own location is estimated from the window's caption metrics
+rather than hit-tested against the window — see `mouse::min_button_rect`'s
+doc comment for why: hit-testing another process's window from inside a
+low-level hook risks the 300 ms timeout Windows enforces on one.
+
+### `<overlay>`
+
+One tile per action, chosen with a single key press.
+
+| Attribute | Default | |
+| --- | --- | --- |
+| `theme` | `auto` | `light`, `dark`, or `auto` to follow Windows |
+| `focus-border` `border-width` | `false` `2` | outline the target window while the overlay is open |
+| `corner-radius` | `8` | |
+| `alpha` | `235` | the popup's own background; tiles stay opaque |
+| `columns` `tile-width` `tile-height` | `4` `88` `64` | the default grid |
+| `key-font-size` `label-font-size` `icon-font` `icon-font-size` | `16` `9` `Segoe Fluent Icons` `22` | |
+| `back-color` `text-color` `hover-*` `active-*` `disabled-*` `border-color` | from the theme | `#RGB`, `#RRGGBB` or `#RRGGBBAA` |
+
+A theme only supplies defaults, so a file can pick one and change a single
+colour rather than list all nine.
+
+`<group id="…" columns="…" tile-width="…" tile-height="…"/>` is a row laid out
+on its own with its own grid — what puts the per-desktop tiles on one wide row
+instead of in the main grid. A tile joins one with `group="…"`.
+
+`<action key="…" action="…" label="…" label-on="…" icon="…" group="…"/>` is a
+tile. `label-on` is shown in place of `label` while the toggle is on ("Pin" /
+"Unpin"); `icon` is a glyph from the icon font, shown instead of the key
+letter. Only `desktop-list` may omit `key`: it is not a tile, it becomes tiles.
+
+## Layout
+
+| | |
+| --- | --- |
+| `main.rs` | the tray app: the message loop, hotkey registration, dispatch |
+| `action.rs` | the action vocabulary, shared by hotkeys and the overlay |
+| `config.rs` | reading `y-snap.xml` |
+| `actions.rs` | action → Win32 call, in one place |
+| `target.rs` | choosing the window, and refusing the shell's |
+| `window.rs` | what gets done to a window, and how to undo it |
+| `mouse.rs` | the low-level mouse hook: drag, resize, switch, minimize-button hover |
+| `min_overlay.rs` | the minimize-button popup, and turning a click into an action |
+
+Everything Win32 that is not specific to window management — the hidden
+message window, the tray icon, menus, hotkey registration, the XML reader,
+the overlay surface — is in [`y-core`](../core/README.md).

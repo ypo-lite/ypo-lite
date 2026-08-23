@@ -1,0 +1,21 @@
+[package]
+name = "y-core"
+version.workspace = true
+edition.workspace = true
+description = "Shared Win32 plumbing for the Ypo-Lite applications"
+
+[lib]
+name = "y_core"
+
+[features]
+default = ["win"]
+# The application-side library: everything that talks to Win32.
+win = ["dep:windows"]
+# The build-script helper (`y_core::build`), used from `build.rs`.
+# Kept behind its own feature so a build dependency does not drag the
+# `windows` crate into the host build: see `core/src/build.rs`.
+build = ["dep:embed-resource"]
+
+[dependencies]
+windows = { workspace = true, optional = true }
+embed-resource = { workspace = true, optional = true }

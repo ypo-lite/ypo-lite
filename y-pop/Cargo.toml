@@ -1,0 +1,8 @@
+[package]
+name = "y-pop"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+y-core.workspace = true
+windows.workspace = true
