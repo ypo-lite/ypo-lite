@@ -10,11 +10,13 @@
 //!
 //! Everything the hook procedure itself does has to stay cheap: Windows
 //! silently removes a hook that takes longer than `LowLevelHooksTimeout`
-//! (300 ms by default) to return. Moving and resizing call `SetWindowPos`
-//! directly — fast, and what HulK itself did in its hook. Anything that
-//! draws — showing or repainting the minimize-button popup — is posted to
-//! the owner window instead of done here, so it happens on the next pass
-//! through the ordinary message loop rather than inside the hook.
+//! (300 ms by default) to return. Anything that draws — showing or
+//! repainting the minimize-button popup — is posted to the owner window
+//! instead of done here, so it happens on the next pass through the
+//! ordinary message loop rather than inside the hook. Actually moving or
+//! resizing a window is posted the same way and for the same reason — see
+//! [`gesture`]'s own doc comment for why a resize's `SetWindowPos` in
+//! particular cannot safely happen inside the hook.
 //!
 //! # Two concerns, one hook
 //!
@@ -29,16 +31,34 @@
 //! This module is only the plumbing between them: installing and
 //! uninstalling the hook, owning one of each behind [`HookState`], and
 //! routing each message to whichever one cares about it.
+//!
+//! # The watchdog
+//!
+//! `LowLevelHooksTimeout` (see above) cuts both ways: Windows does not just
+//! decline to wait past 300 ms, it silently *unhooks* a callback that
+//! overruns it, with nothing telling the application that happened. Lost
+//! that way, this hook stops seeing anything at all — clicks, moves, all of
+//! it — until the process reinstalls it, which nothing here otherwise ever
+//! has a reason to do. The symptom is exactly as confusing as it sounds: a
+//! drag that never receives its button-up and so never ends, and normal
+//! clicks nearby that quietly stop registering with this hook, both for no
+//! visible reason. [`MouseHook::check_liveness`] is AltSnap's own recovery
+//! for this (`REHOOK_TIMER`): polled every few seconds from an ordinary
+//! `WM_TIMER`, comparing `GetCursorPos` against the last point
+//! [`mouse_hook`]'s own `WM_MOUSEMOVE` arm recorded. Real mouse movement
+//! reaches a live hook essentially immediately, so any disagreement between
+//! the two means the hook is gone, and it's reinstalled.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 use windows::Win32::{
-    Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM},
+    Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
     System::LibraryLoader::GetModuleHandleW,
     UI::WindowsAndMessaging::{
-        CallNextHookEx, HC_ACTION, HHOOK, MSLLHOOKSTRUCT, SetWindowsHookExW, UnhookWindowsHookEx,
-        WH_MOUSE_LL, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE,
-        WM_MOUSEWHEEL, WM_RBUTTONDOWN, WM_RBUTTONUP,
+        CallNextHookEx, GetCursorPos, HC_ACTION, HHOOK, KillTimer, MSLLHOOKSTRUCT, PostMessageW,
+        SWP_NOACTIVATE, SWP_NOZORDER, SetTimer, SetWindowPos, SetWindowsHookExW,
+        UnhookWindowsHookEx, WH_MOUSE_LL, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN,
+        WM_MBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_RBUTTONDOWN, WM_RBUTTONUP,
     },
 };
 use windows::core::Result;
@@ -49,56 +69,177 @@ use crate::config::{Button, Mouse};
 mod geometry;
 mod gesture;
 mod hover;
+mod modifier_guard;
 
-pub use hover::min_button_rect;
+pub use geometry::visual_window_rect;
+pub use hover::{confirm_min_button, min_button_rect};
 
 /// Posted to the owner window when the window whose minimize button the
-/// pointer is over changes. `wParam` is the target `HWND`, or a null `HWND`
-/// when nothing is hovered any more. Handled in [`crate::min_overlay`].
+/// pointer is over changes — never carries anything worth reading in
+/// `wParam`; it means "hide whatever the popup is showing", both when the
+/// button was just left and when a different one was just entered. Showing
+/// the popup back up happens later, on [`MIN_HOVER_TIMER_ID`] — see
+/// [`hover`]'s module doc comment for why the two are split. Handled by
+/// `crate`'s own `on_min_hover`.
 pub const WM_MIN_HOVER: u32 = WM_APP_FIRST;
 
-/// Posted to the owner window when [`gesture`] activates a drag or resize
-/// using Alt or Win — in *addition* to the direct, in-hook
-/// [`y_core::hotkey::absorb_modifier_tap`] call [`gesture`] already makes.
-/// This one runs its side of the comparison from the ordinary message loop
-/// instead, on the theory that calling `SendInput` from inside the
-/// low-level hook is itself part of what makes the direct call unreliable.
-///
-/// Temporary, for that side-by-side comparison. Delete once it has an
-/// answer, along with its handler in [`crate`]'s message loop.
-pub const WM_ABSORB_MODIFIER: u32 = WM_APP_FIRST + 2;
+/// Posted to the owner window when a plain right-click lands on, and lifts
+/// off, the same minimize button. `wParam` is the target `HWND`. Handled by
+/// `crate`'s own `on_min_rightclick`.
+pub const WM_MIN_RIGHTCLICK: u32 = WM_APP_FIRST + 3;
+
+/// Posted to the owner window when a drag or resize in progress has a new
+/// target rect to apply. The window and rect are read from
+/// [`PENDING_APPLY`], not carried in the message, the same shape as
+/// [`WM_MIN_HOVER`]'s neighbour [`crate::min_overlay::WM_MIN_ACTION`] — see
+/// [`gesture`]'s doc comment for why `SetWindowPos` itself has to happen
+/// here and not inside the hook. Handled in [`crate`]'s message loop.
+pub const WM_APPLY_GESTURE: u32 = WM_APP_FIRST + 2;
+
+thread_local! {
+    /// Set by [`queue_apply`], consumed by [`apply_pending_gesture`]. Always
+    /// holds the *latest* rect a gesture has asked for — a burst of
+    /// `WM_MOUSEMOVE`s between two passes through the message loop overwrite
+    /// each other here rather than queuing up [`WM_APPLY_GESTURE`] messages
+    /// one per move.
+    static PENDING_APPLY: Cell<Option<(HWND, RECT)>> = const { Cell::new(None) };
+}
+
+/// Records `(window, rect)` as the next thing to apply and, unless one is
+/// already queued, posts [`WM_APPLY_GESTURE`] to `owner` to go get it.
+fn queue_apply(owner: HWND, window: HWND, rect: RECT) {
+    let already_queued = PENDING_APPLY.with(|cell| cell.replace(Some((window, rect))).is_some());
+    if !already_queued {
+        let _ = unsafe { PostMessageW(Some(owner), WM_APPLY_GESTURE, WPARAM(0), LPARAM(0)) };
+    }
+}
+
+/// Handles `WM_APPLY_GESTURE` — applies whatever [`queue_apply`] last
+/// recorded, if it hasn't already been superseded by a newer one.
+pub fn apply_pending_gesture() {
+    let Some((window, rect)) = PENDING_APPLY.with(|cell| cell.take()) else {
+        return;
+    };
+    let _ = unsafe {
+        SetWindowPos(
+            window,
+            None,
+            rect.left,
+            rect.top,
+            rect.right - rect.left,
+            rect.bottom - rect.top,
+            SWP_NOZORDER | SWP_NOACTIVATE,
+        )
+    };
+}
+
+/// `wParam` of the `WM_TIMER` that drives [`MouseHook::check_liveness`] —
+/// see this module's doc comment. Handled in [`crate`]'s message loop.
+pub const REHOOK_TIMER_ID: usize = 1;
+
+/// `wParam` of the `WM_TIMER` that fires once the pointer has sat still
+/// over a minimize button for its configured dwell delay — see [`hover`]'s
+/// module doc comment. Armed and reset by [`hover::Hover::update`], read
+/// (and stopped) by [`take_min_hover_target`]. Handled in [`crate`]'s
+/// message loop.
+pub const MIN_HOVER_TIMER_ID: usize = 2;
+
+/// How often the watchdog polls. Frequent enough to notice a dropped hook
+/// well inside the time it would take a user to get confused by it; rare
+/// enough that `GetCursorPos` once per tick is nowhere near worth counting.
+const REHOOK_INTERVAL_MS: u32 = 5_000;
+
+thread_local! {
+    /// The last point [`mouse_hook`]'s own `WM_MOUSEMOVE` arm recorded, kept
+    /// outside [`HookState`] since the watchdog needs it whether or not a
+    /// gesture or hover is using it — see [`MouseHook::check_liveness`].
+    static LAST_POINT: Cell<Option<POINT>> = const { Cell::new(None) };
+}
 
 /// Owns the hook for as long as it lives. Uninstalled on drop.
 pub struct MouseHook {
+    owner: HWND,
     hook: Option<HHOOK>,
 }
 
 impl MouseHook {
-    /// Installs the hook. `owner` is where [`WM_MIN_HOVER`] is posted.
+    /// Installs the hook. `owner` is where [`WM_MIN_HOVER`] is posted, and
+    /// where [`REHOOK_TIMER_ID`] and [`MIN_HOVER_TIMER_ID`] are armed.
     ///
     /// Installs even when every gesture in `mouse` is unset: hovering the
     /// minimize button works on its own, independent of drag/resize/switch.
-    pub fn install(owner: HWND, mouse: Mouse) -> Result<Self> {
+    pub fn install(
+        owner: HWND,
+        mouse: Mouse,
+        min_button: &crate::config::MinButton,
+    ) -> Result<Self> {
         STATE.with(|cell| {
             *cell.borrow_mut() = Some(HookState {
-                gesture: gesture::Gesture::new(owner, mouse),
-                hover: hover::Hover::new(owner),
+                owner,
+                gesture: gesture::Gesture::new(mouse),
+                hover: hover::Hover::new(
+                    owner,
+                    min_button.hover_delay_ms,
+                    !min_button.items.is_empty(),
+                    min_button.right_click_action.is_some(),
+                ),
             });
         });
+        LAST_POINT.with(|cell| cell.set(None));
 
-        // Ignored for a low-level hook per its own documentation, but every
-        // other hook in this codebase passes it, and there is no cost to
-        // matching that.
-        let instance = unsafe { GetModuleHandleW(None)? };
-        let hook =
-            unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook), Some(instance.into()), 0)? };
+        let hook = install_hook()?;
 
-        Ok(Self { hook: Some(hook) })
+        // Ignored beyond firing WM_TIMER at `owner`; failure here just means
+        // no watchdog, not a broken hook, so it is not itself fatal.
+        unsafe { SetTimer(Some(owner), REHOOK_TIMER_ID, REHOOK_INTERVAL_MS, None) };
+
+        Ok(Self {
+            owner,
+            hook: Some(hook),
+        })
     }
+
+    /// Handles `WM_TIMER(REHOOK_TIMER_ID)` — see this module's doc comment.
+    /// A no-op on every ordinary tick; only does anything on the tick where
+    /// the hook has actually gone missing.
+    pub fn check_liveness(&mut self) {
+        let mut cursor = POINT::default();
+        if unsafe { GetCursorPos(&mut cursor) }.is_err() {
+            return;
+        }
+        if LAST_POINT.with(|cell| cell.get()) == Some(cursor) {
+            return;
+        }
+
+        // The cursor moved since the hook's own record of it last changed —
+        // a live hook would have caught up already. Reinstall from scratch;
+        // HookState (gesture, hover) is untouched, it simply starts
+        // receiving events again.
+        if let Some(old) = self.hook.take() {
+            let _ = unsafe { UnhookWindowsHookEx(old) };
+        }
+        if let Ok(hook) = install_hook() {
+            self.hook = Some(hook);
+        }
+
+        // Whether or not the reinstall above succeeded, this is the truth
+        // as of right now — recording it avoids re-triggering on every tick
+        // until the next real move, which would otherwise happen since
+        // nothing updates `LAST_POINT` while the cursor stays put.
+        LAST_POINT.with(|cell| cell.set(Some(cursor)));
+    }
+}
+
+/// Ignored for a low-level hook per its own documentation, but every other
+/// hook in this codebase passes it, and there is no cost to matching that.
+fn install_hook() -> Result<HHOOK> {
+    let instance = unsafe { GetModuleHandleW(None)? };
+    unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook), Some(instance.into()), 0) }
 }
 
 impl Drop for MouseHook {
     fn drop(&mut self) {
+        let _ = unsafe { KillTimer(Some(self.owner), REHOOK_TIMER_ID) };
         if let Some(hook) = self.hook.take() {
             let _ = unsafe { UnhookWindowsHookEx(hook) };
         }
@@ -112,7 +253,22 @@ pub fn set_overlay_hwnd(hwnd: HWND) {
     with_state(|state| state.hover.set_overlay(hwnd));
 }
 
+/// Handles `WM_TIMER(MIN_HOVER_TIMER_ID)`: the window whose minimize button
+/// the dwell delay just elapsed for, and stops the timer so it does not fire
+/// again on its own — [`hover::Hover::update`] is what re-arms it, on the
+/// next move that still warrants one. A null `HWND` means the button was
+/// left in the time it took this message to be handled.
+pub fn take_min_hover_target() -> HWND {
+    let mut target = HWND::default();
+    with_state(|state| {
+        target = state.hover.hovered();
+        let _ = unsafe { KillTimer(Some(state.owner), MIN_HOVER_TIMER_ID) };
+    });
+    target
+}
+
 struct HookState {
+    owner: HWND,
     gesture: gesture::Gesture,
     hover: hover::Hover,
 }
@@ -150,8 +306,9 @@ impl HookState {
     /// A drag or resize in progress owns the pointer entirely; hover
     /// tracking only runs when neither is.
     fn on_move(&mut self, pt: POINT) {
-        if !self.gesture.on_move(pt) {
-            self.hover.update(pt);
+        match self.gesture.on_move(pt) {
+            Some((window, rect)) => queue_apply(self.owner, window, rect),
+            None => self.hover.update(pt),
         }
     }
 }
@@ -163,6 +320,7 @@ unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) 
 
         let consumed = match message {
             WM_MOUSEMOVE => {
+                LAST_POINT.with(|cell| cell.set(Some(info.pt)));
                 with_state(|state| state.on_move(info.pt));
                 false
             }
@@ -170,10 +328,18 @@ unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) 
                 with_state_bool(|state| state.gesture.on_button_down(Button::Left, info.pt))
             }
             WM_LBUTTONUP => with_state_bool(|state| state.gesture.on_button_up(Button::Left)),
-            WM_RBUTTONDOWN => {
-                with_state_bool(|state| state.gesture.on_button_down(Button::Right, info.pt))
-            }
-            WM_RBUTTONUP => with_state_bool(|state| state.gesture.on_button_up(Button::Right)),
+            // A minimize-button right-click gets first refusal — it only
+            // ever claims the event when it actually hits a button and the
+            // feature is configured on, so an Alt+Right resize started over
+            // one (an edge case, not the common shape of either gesture) is
+            // never shadowed by it.
+            WM_RBUTTONDOWN => with_state_bool(|state| {
+                state.hover.on_right_down(info.pt)
+                    || state.gesture.on_button_down(Button::Right, info.pt)
+            }),
+            WM_RBUTTONUP => with_state_bool(|state| {
+                state.hover.on_right_up(info.pt) || state.gesture.on_button_up(Button::Right)
+            }),
             WM_MBUTTONDOWN => {
                 with_state_bool(|state| state.gesture.on_button_down(Button::Middle, info.pt))
             }

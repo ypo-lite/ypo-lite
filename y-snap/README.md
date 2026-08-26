@@ -15,11 +15,15 @@ Working: the configuration file, the tray icon and menu, hotkey registration
 (including reclaiming a combination the shell owns), the actions that act
 directly on a window — minimize, maximize, close, always-on-top, borderless,
 transparency, shade, hide-from-taskbar, center-cursor — the mouse hook (drag,
-resize, switch), and the minimize-button popup.
+resize, switch), the minimize-button popup, the action overlay (grid layout,
+hover, click, key, `Escape`, click-outside), and the virtual desktop actions
+(`desktop-next`/`-prev`/`-new`/`-move`, `pin-toggle`, `desktop-list`'s
+per-desktop tiles) — see [`y-core`'s own `virtual_desktop`
+module](../core/src/virtual_desktop.rs) for how the undocumented COM
+interface behind them is handled across Windows versions.
 
-Configured, parsed, and not written yet: the big action overlay, the
-iconize/traynize list, and the virtual desktop actions. Binding one says so
-in a balloon rather than doing nothing.
+Configured, parsed, and not written yet: the iconize/traynize list. Binding
+one says so in a balloon rather than doing nothing.
 
 ## The configuration file
 
@@ -98,15 +102,31 @@ visible, unowned, non-topmost top-level windows, roughly what Alt+Tab shows.
 ### `<minbutton>`
 
 ```xml
-<action action="traynize" label="Traynize" icon="📤"/>
+<minbutton hover-delay="700" right-click-action="traynize">
+	<action action="traynize" label="Traynize" icon="📤"/>
+</minbutton>
 ```
 
-A row of one-click tiles shown right under a window's minimize button while
-the pointer hovers it — no hotkey needed, and no `<overlay>` theming (it
-reuses `<overlay>`'s own colours and corner radius). Leave the section out,
-or empty, to turn it off. Each `<action>` takes `action`, `label` and `icon`
-— no `key`, no `group`; only actions that act on a single window are
-allowed (not `desktop-list`, not `overlay` itself).
+Two behaviours on a window's minimize button, no hotkey needed for either:
+
+* **Hover** shows a row of one-click tiles right under the button once the
+  pointer has sat still over it for `hover-delay` milliseconds (700 by
+  default) — the delay resets on any movement still inside the button, so it
+  does not flash open while the pointer is only passing through on its way
+  to maximize or close. No `<overlay>` theming of its own; it reuses
+  `<overlay>`'s own colours and corner radius. Each `<action>` takes
+  `action`, `label` and `icon` — no `key`, no `group`; only actions that act
+  on a single window are allowed (not `desktop-list`, not `overlay` itself).
+  An empty tile list turns the popup off without turning off the
+  right-click action below.
+* **A plain right-click** fires `right-click-action` directly — no popup.
+  Defaults to `traynize`; `right-click-action="none"` turns it off.
+
+Leave the whole section out to turn both off entirely. `<minbutton/>` with
+no tiles is not the same thing: the section being present at all is what
+turns `right-click-action`'s default on, so an empty one still fires
+`traynize` on right-click with no popup to show — write
+`right-click-action="none"` alongside it to have neither.
 
 The button's own location is estimated from the window's caption metrics
 rather than hit-tested against the window — see `mouse::min_button_rect`'s
@@ -125,10 +145,12 @@ One tile per action, chosen with a single key press.
 | `alpha` | `235` | the popup's own background; tiles stay opaque |
 | `columns` `tile-width` `tile-height` | `4` `88` `64` | the default grid |
 | `key-font-size` `label-font-size` `icon-font` `icon-font-size` | `16` `9` `Segoe Fluent Icons` `22` | |
-| `back-color` `text-color` `hover-*` `active-*` `disabled-*` `border-color` | from the theme | `#RGB`, `#RRGGBB` or `#RRGGBBAA` |
+| `back-color` `text-color` `hover-*` `active-*` `disabled-*` `border-color` `panel-border-color` | from the theme | `#RGB`, `#RRGGBB` or `#RRGGBBAA` |
 
 A theme only supplies defaults, so a file can pick one and change a single
-colour rather than list all nine.
+colour rather than list all nine — ten, with `panel-border-color`, the thin
+outline traced around the popup itself, separate from `border-color`, which
+outlines the *target* window when `focus-border` is on.
 
 `<group id="…" columns="…" tile-width="…" tile-height="…"/>` is a row laid out
 on its own with its own grid — what puts the per-desktop tiles on one wide row
@@ -137,7 +159,11 @@ instead of in the main grid. A tile joins one with `group="…"`.
 `<action key="…" action="…" label="…" label-on="…" icon="…" group="…"/>` is a
 tile. `label-on` is shown in place of `label` while the toggle is on ("Pin" /
 "Unpin"); `icon` is a glyph from the icon font, shown instead of the key
-letter. Only `desktop-list` may omit `key`: it is not a tile, it becomes tiles.
+letter — the key itself still shows, as a small corner badge, so an iconed
+tile does not hide which key fires it. Only `desktop-list` may omit `key`: it
+is not a tile, it becomes tiles. A tile under the pointer is drawn in
+`hover-back-color`/`hover-text-color`, whether reached by mouse or by the
+overlay having just opened with the pointer already sitting over it.
 
 ## Layout
 
@@ -151,6 +177,7 @@ letter. Only `desktop-list` may omit `key`: it is not a tile, it becomes tiles.
 | `window.rs` | what gets done to a window, and how to undo it |
 | `mouse.rs` | the low-level mouse hook: drag, resize, switch, minimize-button hover |
 | `min_overlay.rs` | the minimize-button popup, and turning a click into an action |
+| `overlay.rs` | the action overlay: tile grid, hover, click, key, focus-driven close |
 
 Everything Win32 that is not specific to window management — the hidden
 message window, the tray icon, menus, hotkey registration, the XML reader,

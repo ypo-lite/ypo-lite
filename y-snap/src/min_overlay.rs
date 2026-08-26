@@ -75,9 +75,17 @@ impl MinOverlay {
             };
             let spec = OverlaySpec::new(CLASS, self.size()).interactive();
             let overlay = Overlay::with_handler(&spec, Box::new(handler))?;
-            mouse::set_overlay_hwnd(overlay.hwnd());
             self.overlay = Some(overlay);
         }
+        // Every show, not only the first: `hide` unconditionally clears this
+        // back to null (see its own doc comment), since it also has to
+        // handle the case where the popup was never created at all. Leaving
+        // it null past the first hide would mean `hover::Hover::update`'s
+        // "the pointer reached the popup" guard never matches again for the
+        // rest of this `MinOverlay`'s life — the popup would hide itself
+        // the instant the pointer left the button on its way down to it,
+        // on every hover after the first.
+        mouse::set_overlay_hwnd(self.overlay.as_ref().expect("created above").hwnd());
 
         self.target = Some(window);
         self.paint(config)?;

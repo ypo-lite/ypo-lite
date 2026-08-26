@@ -61,6 +61,15 @@ pub struct WindowSpec<'a> {
     pub position: (i32, i32),
     pub size: (i32, i32),
     pub icons: WindowIcons,
+    /// A `WS_POPUP`'s owner — unrelated to child-window parenting, this
+    /// only groups the window with another in Z-order (kept directly above
+    /// its owner, moving with it). Two or more owned `WS_EX_TOPMOST` popups
+    /// sharing an owner stay reliably stacked together; two independent,
+    /// owner-less topmost popups from the same process have no such
+    /// relationship for Windows to maintain, and rely on `SetWindowPos`
+    /// call order alone — which is not reliable enough for two that must
+    /// both stay visible at once (see [`y_core`](crate)'s overlay usage).
+    pub owner: Option<HWND>,
 }
 
 impl<'a> WindowSpec<'a> {
@@ -77,6 +86,7 @@ impl<'a> WindowSpec<'a> {
                 large: None,
                 small: None,
             },
+            owner: None,
         }
     }
 
@@ -104,6 +114,11 @@ impl<'a> WindowSpec<'a> {
     pub const fn with_bounds(mut self, position: (i32, i32), size: (i32, i32)) -> Self {
         self.position = position;
         self.size = size;
+        self
+    }
+
+    pub const fn with_owner(mut self, owner: HWND) -> Self {
+        self.owner = Some(owner);
         self
     }
 }
@@ -150,7 +165,7 @@ pub fn create(spec: &WindowSpec<'_>, handler: Box<dyn WindowHandler>) -> Result<
             spec.position.1,
             spec.size.0,
             spec.size.1,
-            None,
+            spec.owner,
             None,
             Some(instance.into()),
             Some(handler as *const c_void),

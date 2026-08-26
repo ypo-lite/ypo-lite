@@ -34,10 +34,35 @@ pub struct Settings {
     pub hotkeys: Vec<Binding>,
     pub mouse: Mouse,
     pub overlay: Overlay,
-    /// Popup shown when the pointer hovers a window's minimize button.
-    pub min_button: Vec<QuickAction>,
+    /// The `<minbutton>` popup, and what a right-click on the button does.
+    pub min_button: MinButton,
     /// Problems that did not stop the file from loading, one line each.
     pub warnings: Vec<String>,
+}
+
+/// The `<minbutton>` section: how long the pointer has to sit still before
+/// its popup appears, what a plain right-click on the button does instead,
+/// and the popup's own tiles.
+#[derive(Clone, Debug)]
+pub struct MinButton {
+    /// How long the pointer has to stop moving over the button before the
+    /// popup appears, in milliseconds.
+    pub hover_delay_ms: u32,
+    /// Fired directly on a right-click over the button — no popup, no dwell.
+    /// `None` (the default when `<minbutton>` is absent, or set to `"none"`)
+    /// turns the behaviour off.
+    pub right_click_action: Option<Action>,
+    pub items: Vec<QuickAction>,
+}
+
+impl Default for MinButton {
+    fn default() -> Self {
+        Self {
+            hover_delay_ms: 700,
+            right_click_action: None,
+            items: Vec::new(),
+        }
+    }
 }
 
 /// One tile of the popup shown when hovering a window's minimize button —
@@ -57,7 +82,6 @@ pub struct Binding {
     pub action: Action,
     pub target: Target,
     /// Which desktop `desktop-move` moves to, 1-based; 0 when unset.
-    #[allow(dead_code, reason = "read once the desktop actions are written")]
     pub desktop: u32,
     /// Take the combination with a low-level keyboard hook when the system
     /// refuses to register it — how a `Win+…` combination the shell already
@@ -157,6 +181,10 @@ pub struct Palette {
     pub disabled_back: Color,
     pub disabled_text: Color,
     pub border: Color,
+    /// A thin outline around the popup itself, distinct from `border` (which
+    /// outlines the *target* window). Subtle by design — a hint that this is
+    /// a floating panel, not another accent-coloured element.
+    pub panel_border: Color,
 }
 
 impl Palette {
@@ -172,6 +200,7 @@ impl Palette {
         disabled_back: Color::rgb(200, 200, 200),
         disabled_text: Color::rgb(130, 130, 130),
         border: Color::rgb(0, 120, 215),
+        panel_border: Color::rgba(120, 120, 120, 160),
     };
 
     pub const DARK: Self = Self {
@@ -180,6 +209,7 @@ impl Palette {
         active_back: Color::rgb(49, 150, 79),
         disabled_back: Color::rgb(58, 58, 58),
         disabled_text: Color::rgb(130, 130, 130),
+        panel_border: Color::rgba(160, 160, 160, 140),
         ..Self::LIGHT
     };
 
@@ -197,10 +227,6 @@ impl Palette {
 /// A `<group>`: a row of tiles laid out on its own, with its own grid. What
 /// puts the per-desktop tiles on one wide row instead of in the main grid.
 #[derive(Clone, Debug)]
-#[allow(
-    dead_code,
-    reason = "laid out by the overlay, which is not written yet"
-)]
 pub struct Group {
     pub id: String,
     pub columns: Option<u32>,
@@ -210,7 +236,6 @@ pub struct Group {
 
 /// One `<action>` tile of the overlay.
 #[derive(Clone, Debug)]
-#[allow(dead_code, reason = "drawn by the overlay, which is not written yet")]
 pub struct Item {
     /// The key that triggers it. Absent only for `desktop-list`, which has no
     /// tile of its own — it expands into tiles that carry their own keys.
@@ -271,6 +296,7 @@ impl Settings {
 
         let mut reader = Reader::default();
         let root = document.root();
+        reader.warn_duplicate_sections(root);
 
         let settings = Self {
             hotkeys: reader.hotkeys(root),
@@ -361,6 +387,23 @@ impl Reader {
     fn warn(&mut self, element: Element<'_>, message: impl fmt::Display) {
         self.warnings
             .push(format!("line {}: {message}", element.line()));
+    }
+
+    /// A second `<hotkeys>`, `<mouse>`, `<overlay>` or `<minbutton>` is a
+    /// mistake worth its own warning: [`Element::child`] silently reads only
+    /// the first one, so whatever was written in a later one is not a
+    /// second, merged set of settings — it is entirely ignored, with nothing
+    /// else here in a position to notice.
+    fn warn_duplicate_sections(&mut self, root: Element<'_>) {
+        const SECTIONS: &[&str] = &["hotkeys", "mouse", "overlay", "minbutton"];
+        for name in SECTIONS {
+            for extra in root.children_named(name).skip(1) {
+                self.warn(
+                    extra,
+                    format!("a second <{name}> is ignored — only the first one is read"),
+                );
+            }
+        }
     }
 
     /// Reports attributes nobody reads — almost always a typo, and silently
@@ -504,12 +547,37 @@ impl Reader {
         mouse
     }
 
-    fn min_button(&mut self, root: Element<'_>) -> Vec<QuickAction> {
+    fn min_button(&mut self, root: Element<'_>) -> MinButton {
         let Some(section) = root.child("minbutton") else {
-            return Vec::new();
+            return MinButton::default();
         };
+        self.check(section, &["hover-delay", "right-click-action"]);
 
-        let mut items = Vec::new();
+        // Right-click has a default action ("send to tray"); the section
+        // being present at all is what turns the feature on, same as it
+        // already is for the popup's own tiles below.
+        let mut min_button = MinButton {
+            right_click_action: Some(Action::Traynize),
+            ..MinButton::default()
+        };
+        self.number(section, "hover-delay", &mut min_button.hover_delay_ms);
+
+        if let Some(text) = section.attr("right-click-action") {
+            if text.trim().eq_ignore_ascii_case("none") {
+                min_button.right_click_action = None;
+            } else {
+                match Action::from_name(text) {
+                    Some(action) if is_minbutton_action(action) => {
+                        min_button.right_click_action = Some(action);
+                    }
+                    Some(action) => self.warn(
+                        section,
+                        format!("{action} cannot be used as right-click-action"),
+                    ),
+                    None => self.warn(section, format!("unknown action {text:?}")),
+                }
+            }
+        }
 
         for element in section.children() {
             if element.name() != "action" {
@@ -527,19 +595,19 @@ impl Reader {
             // sense here: there is no key to drive desktop-list's per-desktop
             // expansion, and overlay would show the big overlay from inside
             // this small one.
-            if !action.needs_window() || matches!(action, Action::DesktopList | Action::Overlay) {
+            if !is_minbutton_action(action) {
                 self.warn(element, format!("{action} cannot be used in <minbutton>"));
                 continue;
             }
 
-            items.push(QuickAction {
+            min_button.items.push(QuickAction {
                 action,
                 label: element.attr("label").map(str::to_owned),
                 icon: element.attr("icon").map(str::to_owned),
             });
         }
 
-        items
+        min_button
     }
 
     fn overlay(&mut self, root: Element<'_>) -> Overlay {
@@ -572,6 +640,7 @@ impl Reader {
                 "disabled-back-color",
                 "disabled-text-color",
                 "border-color",
+                "panel-border-color",
             ],
         );
 
@@ -595,6 +664,7 @@ impl Reader {
             ("disabled-back-color", &mut palette.disabled_back),
             ("disabled-text-color", &mut palette.disabled_text),
             ("border-color", &mut palette.border),
+            ("panel-border-color", &mut palette.panel_border),
         ] {
             let Some(text) = section.attr(name) else {
                 continue;
@@ -708,6 +778,15 @@ impl Reader {
             ),
         }
     }
+}
+
+/// Whether `action` can be used as a `<minbutton>` tile or right-click
+/// action: something that acts directly on a single window, with nothing
+/// left to configure beyond that. Excludes `desktop-list` (there is no key
+/// here to drive its per-desktop expansion) and `overlay` (opening the big
+/// overlay from inside this small one is not a feature).
+fn is_minbutton_action(action: Action) -> bool {
+    action.needs_window() && !matches!(action, Action::DesktopList | Action::Overlay)
 }
 
 /// Reads `"Win+Alt"`, `"Alt"`, or `"none"` — the modifier half of a hotkey,
@@ -845,6 +924,99 @@ mod tests {
         assert_eq!(settings.warnings.len(), 1);
     }
 
+    #[test]
+    fn warns_about_and_ignores_a_second_min_button_section() {
+        let settings = load(
+            "minbutton-duplicate",
+            r#"<y-snap>
+                 <minbutton right-click-action="minimize"/>
+                 <minbutton right-click-action="always-on-top">
+                   <action action="traynize" label="Traynize"/>
+                 </minbutton>
+               </y-snap>"#,
+        );
+
+        assert_eq!(settings.warnings.len(), 1);
+        assert!(
+            settings.warnings[0].contains("second <minbutton>"),
+            "{:?}",
+            settings.warnings
+        );
+        // The first one wins; the second's tile never gets read at all.
+        assert_eq!(
+            settings.min_button.right_click_action,
+            Some(Action::Minimize)
+        );
+        assert!(settings.min_button.items.is_empty());
+    }
+
+    #[test]
+    fn reads_the_min_button() {
+        let settings = load(
+            "minbutton",
+            r#"<y-snap>
+                 <minbutton hover-delay="500" right-click-action="minimize">
+                   <action action="traynize" label="Traynize"/>
+                 </minbutton>
+               </y-snap>"#,
+        );
+
+        assert!(settings.warnings.is_empty(), "{:?}", settings.warnings);
+        assert_eq!(settings.min_button.hover_delay_ms, 500);
+        assert_eq!(
+            settings.min_button.right_click_action,
+            Some(Action::Minimize)
+        );
+        assert_eq!(settings.min_button.items.len(), 1);
+    }
+
+    #[test]
+    fn min_button_defaults_to_traynize_on_right_click() {
+        let settings = load("minbutton-defaults", r#"<y-snap><minbutton/></y-snap>"#);
+
+        assert!(settings.warnings.is_empty(), "{:?}", settings.warnings);
+        assert_eq!(settings.min_button.hover_delay_ms, 700);
+        assert_eq!(
+            settings.min_button.right_click_action,
+            Some(Action::Traynize)
+        );
+        assert!(settings.min_button.items.is_empty());
+    }
+
+    #[test]
+    fn min_button_right_click_can_be_turned_off() {
+        let settings = load(
+            "minbutton-none",
+            r#"<y-snap><minbutton right-click-action="none"/></y-snap>"#,
+        );
+
+        assert!(settings.warnings.is_empty(), "{:?}", settings.warnings);
+        assert_eq!(settings.min_button.right_click_action, None);
+    }
+
+    #[test]
+    fn no_min_button_section_disables_everything() {
+        let settings = load("minbutton-absent", "<y-snap></y-snap>");
+
+        assert_eq!(settings.min_button.right_click_action, None);
+        assert!(settings.min_button.items.is_empty());
+    }
+
+    #[test]
+    fn rejects_a_desktop_list_right_click_action() {
+        let settings = load(
+            "minbutton-bad-rightclick",
+            r#"<y-snap><minbutton right-click-action="desktop-list"/></y-snap>"#,
+        );
+
+        // Keeps the default rather than adopting a nonsensical override.
+        assert_eq!(
+            settings.min_button.right_click_action,
+            Some(Action::Traynize)
+        );
+        assert_eq!(settings.warnings.len(), 1);
+    }
+
     /// The file shipped in `rsc/` is what a user starts from, and it is also
     /// the only complete example of the schema. It has to load clean.
     #[test]
@@ -860,7 +1032,7 @@ mod tests {
         assert!(settings.mouse.resize.is_some());
         assert_eq!(settings.overlay.groups.len(), 1);
         assert_eq!(settings.overlay.items.len(), 16);
-        assert_eq!(settings.min_button.len(), 2);
+        assert_eq!(settings.min_button.items.len(), 2);
     }
 
     #[test]

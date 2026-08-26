@@ -5,9 +5,7 @@
 //! [`Action`] on a window. The actions themselves live in [`window`], the
 //! choice of window in [`target`].
 //!
-//! Not here yet, in the order they are worth doing: the action overlay,
-//! hiding windows behind a notification icon, and the virtual desktop
-//! actions.
+//! Not here yet: hiding windows behind a notification icon (iconize/traynize).
 
 #![windows_subsystem = "windows"]
 
@@ -16,19 +14,19 @@ mod actions;
 mod config;
 mod min_overlay;
 mod mouse;
+mod overlay;
 mod target;
 mod window;
 
 use windows::Win32::UI::{
-    Input::KeyboardAndMouse::HOT_KEY_MODIFIERS,
     Shell::ShellExecuteW,
-    WindowsAndMessaging::{SW_SHOWNORMAL, WM_HOTKEY},
+    WindowsAndMessaging::{SW_SHOWNORMAL, WM_HOTKEY, WM_TIMER},
 };
 use windows::core::HSTRING;
 
 use y_core::{
     app::TrayApp,
-    hotkey::{Fallback, HotkeyManager, absorb_modifier_tap},
+    hotkey::{Fallback, HotkeyManager},
     ids::{IDH_FIRST, IDM_FIRST, TRAY_ICON_ID, WM_TRAY_CALLBACK},
     memory, monitor,
     prelude::*,
@@ -62,6 +60,9 @@ struct YSnap {
     /// The minimize-button popup. Rebuilt on every reload, since its tile
     /// list comes from the configuration too.
     min_overlay: Option<min_overlay::MinOverlay>,
+    /// The keyboard-driven action overlay. Same reason: its grid is laid
+    /// out from `settings.overlay` once, at construction.
+    action_overlay: Option<overlay::ActionOverlay>,
     settings: Option<Settings>,
     /// Why there is no configuration, when there is none. Shown in the menu,
     /// because a balloon at start-up is gone by the time the user looks.
@@ -75,6 +76,7 @@ impl YSnap {
             hotkeys: None,
             mouse_hook: None,
             min_overlay: None,
+            action_overlay: None,
             settings: None,
             problem: None,
         }
@@ -88,6 +90,7 @@ impl YSnap {
         self.hotkeys = None;
         self.mouse_hook = None;
         self.min_overlay = None;
+        self.action_overlay = None;
         self.settings = None;
         self.problem = None;
 
@@ -119,18 +122,20 @@ impl YSnap {
             }
         }
 
-        self.mouse_hook = match mouse::MouseHook::install(hwnd, settings.mouse) {
-            Ok(hook) => Some(hook),
-            Err(error) => {
-                let message = format!("Could not install the mouse hook: {error}");
-                self.notify(APP.name, &message, Notify::Error);
-                None
-            }
-        };
+        self.mouse_hook =
+            match mouse::MouseHook::install(hwnd, settings.mouse, &settings.min_button) {
+                Ok(hook) => Some(hook),
+                Err(error) => {
+                    let message = format!("Could not install the mouse hook: {error}");
+                    self.notify(APP.name, &message, Notify::Error);
+                    None
+                }
+            };
         self.min_overlay = Some(min_overlay::MinOverlay::new(
             hwnd,
-            settings.min_button.clone(),
+            settings.min_button.items.clone(),
         ));
+        self.action_overlay = Some(overlay::ActionOverlay::new(hwnd, settings.overlay.clone()));
 
         self.report(&settings, &refused);
         self.hotkeys = Some(manager);
@@ -193,20 +198,34 @@ impl YSnap {
             Action::Quit => message_loop::quit(0),
             Action::Reload => self.load(hwnd),
 
+            // Needs the owner window and the overlay's own state, not just
+            // a target — same reason Quit/Reload are handled here rather
+            // than in `actions::dispatch`.
+            Action::Overlay => {
+                let Some(window) = target::resolve(binding.target) else {
+                    return;
+                };
+                if let Some(action_overlay) = self.action_overlay.as_mut() {
+                    let _ = action_overlay.show(window);
+                }
+            }
+
             action => {
                 let window = action
                     .needs_window()
                     .then(|| target::resolve(binding.target))
                     .flatten();
-                self.perform(action, window);
+                self.perform(action, window, binding.desktop);
             }
         }
     }
 
     /// Runs `action` on `target` and tells the user when it is not written
     /// yet — the one thing a hotkey and a minimize-button tile both need.
-    fn perform(&mut self, action: Action, target: Option<HWND>) {
-        match actions::dispatch(action, target) {
+    /// `desktop` is the 1-based `desktop` attribute, `0` for a caller with
+    /// no such attribute to give (only [`Action::DesktopMove`] reads it).
+    fn perform(&mut self, action: Action, target: Option<HWND>, desktop: u32) {
+        match actions::dispatch(action, target, desktop) {
             // Nothing under the pointer worth acting on. Silence is the
             // right answer: the user pressed a key over the desktop, they do
             // not need to be told.
@@ -218,18 +237,73 @@ impl YSnap {
         }
     }
 
-    /// The window under a window's minimize button changed — show or hide
-    /// the popup for it.
-    fn on_min_hover(&mut self, target: HWND) {
+    /// The window under a window's minimize button changed — hide whatever
+    /// the popup was showing (for the button just left, or for none). It
+    /// comes back, for whichever button is hovered now, only once
+    /// [`Self::on_min_hover_dwell`] fires — see [`mouse::hover`]'s doc
+    /// comment for why showing does not happen here.
+    fn on_min_hover(&mut self) {
+        if let Some(min_overlay) = self.min_overlay.as_mut() {
+            min_overlay.hide();
+        }
+    }
+
+    /// The pointer sat still over a minimize button for the configured
+    /// delay — `target` is whichever window that button belongs to, read
+    /// fresh by [`mouse::take_min_hover_target`] at the moment the dwell
+    /// timer fired; invalid if the button was left in between.
+    fn on_min_hover_dwell(&mut self, target: HWND) {
+        if target.is_invalid() {
+            return;
+        }
         let Some(min_overlay) = self.min_overlay.as_mut() else {
             return;
         };
 
-        if target.is_invalid() {
-            min_overlay.hide();
-        } else if let Some(settings) = &self.settings {
+        // One bounded, one-time check against the real window — see
+        // `mouse::confirm_min_button`'s own doc comment for why this is the
+        // one place it is safe to ask, and why an unreadable cursor position
+        // is treated the same as a rejection rather than shown anyway.
+        let confirmed = monitor::cursor_position()
+            .is_ok_and(|position| mouse::confirm_min_button(target, position));
+        if !confirmed {
+            return;
+        }
+
+        if let Some(settings) = &self.settings {
             let _ = min_overlay.show(target, &settings.overlay);
         }
+    }
+
+    /// A plain right-click landed on a minimize button — fire the
+    /// configured default action directly, no popup involved.
+    ///
+    /// The hook only swallowed the click on the fast geometric guess (see
+    /// `mouse::hover::on_right_down`/`on_right_up`) — there was nothing to
+    /// synchronise there beyond that, so the one bounded, "could be wrong"
+    /// check belongs entirely here, off the hook, the same as
+    /// [`Self::on_min_hover_dwell`]'s.
+    fn on_min_rightclick(&mut self, target: HWND) {
+        if let Some(min_overlay) = self.min_overlay.as_mut() {
+            min_overlay.hide();
+        }
+
+        let confirmed = monitor::cursor_position()
+            .is_ok_and(|position| mouse::confirm_min_button(target, position));
+        if !confirmed {
+            return;
+        }
+
+        let Some(action) = self
+            .settings
+            .as_ref()
+            .and_then(|settings| settings.min_button.right_click_action)
+        else {
+            return;
+        };
+        // `<minbutton>` tiles have no `desktop` attribute of their own —
+        // see `config::QuickAction` — so `desktop-move` is a no-op from here.
+        self.perform(action, Some(target), 0);
     }
 
     /// A tile of the minimize-button popup was clicked.
@@ -242,7 +316,49 @@ impl YSnap {
         min_overlay.hide();
 
         if let Some((action, target)) = action {
-            self.perform(action, Some(target));
+            self.perform(action, Some(target), 0);
+        }
+    }
+
+    /// A tile of the action overlay was activated, by click or by key.
+    fn on_overlay_action(&mut self, index: usize) {
+        let Some(action_overlay) = self.action_overlay.as_mut() else {
+            return;
+        };
+
+        let action = action_overlay.action_at(index);
+        action_overlay.close();
+
+        if let Some((action, target, desktop)) = action {
+            self.perform(action, Some(target), desktop);
+        }
+
+        // The overlay stays alive once created (`close` only hides it, for
+        // instant reuse next time), so its layered-window bitmap and tile
+        // state are still fully committed here, just idle — exactly the
+        // burst-is-over case `y_core::memory`'s own doc comment calls out,
+        // not the hot-loop one it warns against: the overlay now sits
+        // closed for as long as the user is doing something else, almost
+        // always far longer than the page fault it costs to bring back.
+        let _ = memory::trim_working_set();
+    }
+
+    /// `Escape`, or a stale activation the overlay already closed itself
+    /// for — [`overlay::ActionOverlay::close`] is safe to call either way.
+    fn on_overlay_close(&mut self) {
+        if let Some(action_overlay) = self.action_overlay.as_mut() {
+            action_overlay.close();
+        }
+        // See `on_overlay_action`'s own comment on this call.
+        let _ = memory::trim_working_set();
+    }
+
+    /// The pointer moved onto, off, or between tiles of the action overlay.
+    /// `usize::MAX` (see [`overlay::WM_OVERLAY_HOVER`]) means off every tile.
+    fn on_overlay_hover(&mut self, index: usize) {
+        if let Some(action_overlay) = self.action_overlay.as_mut() {
+            let index = (index != usize::MAX).then_some(index);
+            let _ = action_overlay.set_hover(index);
         }
     }
 
@@ -363,15 +479,30 @@ impl TrayApp for YSnap {
             }
 
             mouse::WM_MIN_HOVER => {
-                self.on_min_hover(HWND(wparam.0 as *mut _));
+                self.on_min_hover();
                 Some(LRESULT(0))
             }
 
-            // Test/debug — see `mouse::WM_ABSORB_MODIFIER`'s doc comment.
-            // Delete this arm along with that constant once the comparison
-            // it exists for has an answer.
-            mouse::WM_ABSORB_MODIFIER => {
-                absorb_modifier_tap(HOT_KEY_MODIFIERS(wparam.0 as u32));
+            mouse::WM_MIN_RIGHTCLICK => {
+                self.on_min_rightclick(HWND(wparam.0 as *mut _));
+                Some(LRESULT(0))
+            }
+
+            mouse::WM_APPLY_GESTURE => {
+                mouse::apply_pending_gesture();
+                Some(LRESULT(0))
+            }
+
+            WM_TIMER if wparam.0 == mouse::REHOOK_TIMER_ID => {
+                if let Some(hook) = self.mouse_hook.as_mut() {
+                    hook.check_liveness();
+                }
+                Some(LRESULT(0))
+            }
+
+            WM_TIMER if wparam.0 == mouse::MIN_HOVER_TIMER_ID => {
+                let target = mouse::take_min_hover_target();
+                self.on_min_hover_dwell(target);
                 Some(LRESULT(0))
             }
 
@@ -380,16 +511,36 @@ impl TrayApp for YSnap {
                 Some(LRESULT(0))
             }
 
+            overlay::WM_OVERLAY_ACTION => {
+                self.on_overlay_action(wparam.0);
+                Some(LRESULT(0))
+            }
+
+            overlay::WM_OVERLAY_CLOSE => {
+                self.on_overlay_close();
+                Some(LRESULT(0))
+            }
+
+            overlay::WM_OVERLAY_HOVER => {
+                self.on_overlay_hover(wparam.0);
+                Some(LRESULT(0))
+            }
+
             _ => None,
         }
     }
 
     fn on_destroy(&mut self) {
-        // Order matters: the hotkeys and the mouse hook both hold hooks that
-        // must come down while the message loop is still running.
+        // Order matters: the hotkeys, the mouse hook and the action
+        // overlay's own keyboard hook all hold hooks that must come down
+        // while the message loop is still running. There is deliberately no
+        // `virtual_desktop` teardown call here — see that module's own
+        // "Never released" doc section for why releasing its COM interfaces
+        // at shutdown is exactly what must not happen.
         self.hotkeys = None;
         self.mouse_hook = None;
         self.min_overlay = None;
+        self.action_overlay = None;
         self.tray = None;
     }
 }

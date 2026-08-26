@@ -86,11 +86,14 @@
 	</overlay>
 
 	<!--
-		Shown when the pointer hovers a window's minimize button, right below
-		it: a row of one-click actions, no key needed. Leave the section out
-		(or empty) to turn the popup off entirely.
+		hover-delay is how long the pointer has to stop moving over the
+		button, in milliseconds, before the row of tiles below appears.
+
+		right-click-action fires directly, no popup, on a plain right-click
+		over the button; "none" turns that off. Leave the whole section out
+		(or empty, with no attributes either) to turn everything off.
 	-->
-	<minbutton>
+	<minbutton hover-delay="700" right-click-action="traynize">
 		<action action="traynize"     label="Traynize"     icon="📤"/>
 		<action action="always-on-top" label="On top"      icon="🔝"/>
 	</minbutton>

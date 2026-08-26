@@ -15,37 +15,57 @@
 //! followed by a release with nothing in between — the exact gesture that
 //! opens the window's system menu or the Start menu.
 //!
-//! [`y_core::hotkey::absorb_modifier_tap`] breaks that pair, called right
-//! here, directly, the moment a gesture activates or ends — exactly where
-//! and how HulK's own `mouseEvent` calls its equivalent `key_press_code`.
-//! See that function's doc comment for what actually makes it work.
+//! [`super::modifier_guard`] breaks that pair. Activation here only arms
+//! it — see [`Gesture::on_button_down`] — the correction itself fires later,
+//! from that module's own keyboard hook, synchronously at the modifier's
+//! real key-up, which is the part that actually matters; see that module's
+//! doc comment.
+//!
+//! # Why `on_move` does not call `SetWindowPos` itself
+//!
+//! It used to, for both a drag and a resize, directly from inside the
+//! low-level hook. That is fine for a move — [`SetWindowPos`] is called with
+//! `SWP_NOSIZE`, so nothing about the window's size changes and `WM_SIZE`
+//! is not sent. A resize is a different story: [`SetWindowPos`] there *does*
+//! change the size, which dispatches `WM_SIZE` to the target window, and if
+//! that window belongs to another thread — normal, since it is essentially
+//! always a different process — delivering that message blocks the calling
+//! thread until the target's own message loop gets around to handling it.
+//! A window whose resize handler does anything non-trivial (a browser, an
+//! IDE, most Office apps) can easily take longer than the hook's own
+//! `LowLevelHooksTimeout` budget, and Windows drops the hook exactly as if
+//! it had hung: the resize then never receives its button-up and looks
+//! stuck, with no pattern to when it happens beyond "which window, how busy
+//! its thread was right then" — both invisible from here.
+//!
+//! [`on_move`](Gesture::on_move) now only computes the target rect; applying
+//! it is [`super`]'s job, deferred to the ordinary message loop the same way
+//! it already defers drawing the minimize-button popup, so the only thing
+//! that can block is this thread's own message pump, which has no such
+//! timeout.
 
-use windows::Win32::Foundation::{HWND, LPARAM, POINT, RECT, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, POINT, RECT};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, HOT_KEY_MODIFIERS, MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, VIRTUAL_KEY,
     VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GW_OWNER, GWL_EXSTYLE, GWL_STYLE, GetDesktopWindow, GetShellWindow, GetWindow,
-    GetWindowLongW, PostMessageW, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SetForegroundWindow,
-    SetWindowPos, WS_EX_TOPMOST, WS_VISIBLE,
+    GetWindowLongW, SetForegroundWindow, WS_EX_TOPMOST, WS_VISIBLE,
 };
 use windows::core::BOOL;
-use y_core::hotkey::absorb_modifier_tap;
 
 use crate::config::{Button, Gesture as GestureConfig, Mouse};
 use crate::target;
 
 use super::geometry::window_rect;
+use super::modifier_guard;
 
 /// A window resized down to nothing is not a feature.
 const MIN_SIZE: i32 = 32;
 
 /// Drag, resize and window-switch state.
 pub struct Gesture {
-    /// Where [`super::WM_ABSORB_MODIFIER`] is posted — see
-    /// [`Gesture::on_button_down`].
-    owner: HWND,
     config: Mouse,
     drag: Option<Move>,
     resize: Option<Resize>,
@@ -68,33 +88,35 @@ struct Resize {
 }
 
 impl Gesture {
-    pub fn new(owner: HWND, config: Mouse) -> Self {
+    pub fn new(config: Mouse) -> Self {
         Self {
-            owner,
             config,
             drag: None,
             resize: None,
         }
     }
 
-    /// Applies the pointer's new position to whichever gesture is in
-    /// progress. Returns whether one was — `false` tells the hook there is
+    /// Computes the target rect for whichever gesture is in progress, for
+    /// the caller to actually apply — see this module's doc comment for why
+    /// that has to happen somewhere other than here. `None` means there is
     /// nothing here for it, so it can fall through to hover tracking.
-    pub fn on_move(&mut self, pt: POINT) -> bool {
+    pub fn on_move(&mut self, pt: POINT) -> Option<(HWND, RECT)> {
         if let Some(drag) = &self.drag {
             let (dx, dy) = (pt.x - drag.origin.x, pt.y - drag.origin.y);
-            let _ = unsafe {
-                SetWindowPos(
-                    drag.window,
-                    None,
-                    drag.start.left + dx,
-                    drag.start.top + dy,
-                    0,
-                    0,
-                    SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
-                )
-            };
-            true
+            let (left, top) = (drag.start.left + dx, drag.start.top + dy);
+            let (width, height) = (
+                drag.start.right - drag.start.left,
+                drag.start.bottom - drag.start.top,
+            );
+            Some((
+                drag.window,
+                RECT {
+                    left,
+                    top,
+                    right: left + width,
+                    bottom: top + height,
+                },
+            ))
         } else if let Some(resize) = &self.resize {
             let (dx, dy) = (pt.x - resize.origin.x, pt.y - resize.origin.y);
 
@@ -126,27 +148,39 @@ impl Gesture {
                 }
             }
 
-            let _ = unsafe {
-                SetWindowPos(
-                    resize.window,
-                    None,
+            Some((
+                resize.window,
+                RECT {
                     left,
                     top,
-                    right - left,
-                    bottom - top,
-                    SWP_NOZORDER | SWP_NOACTIVATE,
-                )
-            };
-            true
+                    right,
+                    bottom,
+                },
+            ))
         } else {
-            false
+            None
         }
     }
 
     pub fn on_button_down(&mut self, button: Button, pt: POINT) -> bool {
-        if let Some(gesture) = matched_start(self.config.drag, button)
-            && self.drag.is_none()
-            && self.resize.is_none()
+        let drag_match = matched_start(self.config.drag, button);
+        let resize_match = matched_start(self.config.resize, button);
+
+        // A gesture already in progress owns the pointer until it ends.
+        // Falling through here instead — the shape this had before — sends
+        // the second button straight to whatever's under the cursor: with
+        // the stock config (Alt+Left drag, Alt+Right resize) a stray or
+        // intentional Alt+Right while already Alt-dragging left-handed
+        // reached the dragged application as an ordinary right-click and
+        // opened its context menu mid-drag. Swallowing it here is a plain
+        // "not now", not a gesture of its own.
+        if (drag_match.is_some() || resize_match.is_some())
+            && (self.drag.is_some() || self.resize.is_some())
+        {
+            return true;
+        }
+
+        if let Some(gesture) = drag_match
             && let Some(window) = target::at(pt)
             && let Ok(start) = window_rect(window)
         {
@@ -155,14 +189,11 @@ impl Gesture {
                 origin: pt,
                 start,
             });
-            absorb_if_modified(gesture.modifiers);
-            self.notify_absorb(gesture.modifiers);
+            modifier_guard::arm(gesture.modifiers);
             return true;
         }
 
-        if let Some(gesture) = matched_start(self.config.resize, button)
-            && self.drag.is_none()
-            && self.resize.is_none()
+        if let Some(gesture) = resize_match
             && let Some(window) = target::at(pt)
             && let Ok(start) = window_rect(window)
         {
@@ -175,30 +206,11 @@ impl Gesture {
                 invert_x,
                 invert_y,
             });
-            absorb_if_modified(gesture.modifiers);
-            self.notify_absorb(gesture.modifiers);
+            modifier_guard::arm(gesture.modifiers);
             return true;
         }
 
         false
-    }
-
-    /// Posts [`super::WM_ABSORB_MODIFIER`] — see that constant's doc comment
-    /// for why this exists alongside the direct [`absorb_if_modified`] call
-    /// right above each of this method's two call sites, both on
-    /// activation only: ending a gesture does not need a second attempt at
-    /// something [`on_button_down`](Self::on_button_down) already tried.
-    fn notify_absorb(&self, modifiers: HOT_KEY_MODIFIERS) {
-        if modifiers.0 & (MOD_ALT.0 | MOD_WIN.0) != 0 {
-            let _ = unsafe {
-                PostMessageW(
-                    Some(self.owner),
-                    super::WM_ABSORB_MODIFIER,
-                    WPARAM(modifiers.0 as usize),
-                    LPARAM(0),
-                )
-            };
-        }
     }
 
     /// Ends whichever gesture `button` drives, regardless of what modifiers
@@ -207,21 +219,17 @@ impl Gesture {
     /// would leave the gesture stuck the moment the user let go of Alt
     /// before the mouse button, which they are free to do in either order.
     ///
-    /// Absorbing here too, like [`on_button_down`](Self::on_button_down),
-    /// mirrors HulK's own `mouseEvent`, which calls `key_press_code` on
-    /// every matching down *and* up: harmless if the modifier already came
-    /// up first, and the case that matters if it has not yet.
+    /// Nothing here re-arms or otherwise touches [`modifier_guard`]: it was
+    /// armed for this gesture's modifiers back in
+    /// [`on_button_down`](Self::on_button_down) and stays armed on its own,
+    /// independent of the mouse button, until the modifier's real key-up
+    /// actually happens — which this end of the gesture cannot assume has
+    /// occurred yet.
     pub fn on_button_up(&mut self, button: Button) -> bool {
-        if let Some(gesture) = matched_end(self.config.drag, button)
-            && self.drag.take().is_some()
-        {
-            absorb_if_modified(gesture.modifiers);
+        if matched_end(self.config.drag, button).is_some() && self.drag.take().is_some() {
             return true;
         }
-        if let Some(gesture) = matched_end(self.config.resize, button)
-            && self.resize.take().is_some()
-        {
-            absorb_if_modified(gesture.modifiers);
+        if matched_end(self.config.resize, button).is_some() && self.resize.take().is_some() {
             return true;
         }
         false
@@ -251,14 +259,6 @@ fn matched_start(gesture: Option<GestureConfig>, button: Button) -> Option<Gestu
 /// modifiers do not matter here the way they do for [`matched_start`].
 fn matched_end(gesture: Option<GestureConfig>, button: Button) -> Option<GestureConfig> {
     gesture.filter(|gesture| gesture.button == button)
-}
-
-/// Calls [`absorb_modifier_tap`] when `modifiers` used Alt or Win — the two
-/// modifiers Windows treats specially on their own.
-fn absorb_if_modified(modifiers: HOT_KEY_MODIFIERS) {
-    if modifiers.0 & (MOD_ALT.0 | MOD_WIN.0) != 0 {
-        absorb_modifier_tap(modifiers);
-    }
 }
 
 /// The modifier keys held right now, in [`y_core::hotkey`]'s vocabulary.

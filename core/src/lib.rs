@@ -91,6 +91,8 @@ pub mod theme;
 #[cfg(feature = "win")]
 pub mod tray;
 #[cfg(feature = "win")]
+pub mod virtual_desktop;
+#[cfg(feature = "win")]
 pub mod window;
 
 // Pure Rust, no Win32: useful to a build script and to a test on any host.

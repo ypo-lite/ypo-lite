@@ -10,7 +10,7 @@ name = "y_core"
 [features]
 default = ["win"]
 # The application-side library: everything that talks to Win32.
-win = ["dep:windows"]
+win = ["dep:windows", "dep:windows-core"]
 # The build-script helper (`y_core::build`), used from `build.rs`.
 # Kept behind its own feature so a build dependency does not drag the
 # `windows` crate into the host build: see `core/src/build.rs`.
@@ -18,4 +18,10 @@ build = ["dep:embed-resource"]
 
 [dependencies]
 windows = { workspace = true, optional = true }
+# Only needed for `windows::core::interface!`-declared custom COM interfaces
+# (see `virtual_desktop.rs`): that macro's expansion refers to `windows_core`
+# by its own crate name, which `windows` alone does not put in scope — this
+# has to be the *same* version windows-0.62.2 itself depends on, or the
+# `Interface`/`GUID` types it produces are a different, incompatible copy.
+windows-core = { version = "=0.62.2", optional = true }
 embed-resource = { workspace = true, optional = true }

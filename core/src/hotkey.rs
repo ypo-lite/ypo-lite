@@ -27,30 +27,54 @@
 //! Note also that a process without UIAccess cannot hook keystrokes destined
 //! for an elevated application, and the hook is silently inactive on the
 //! secure desktop (UAC prompt, lock screen).
+//!
+//! # The elevated-focus gap, and its recovery net
+//!
+//! The UIAccess restriction above has a sharper edge than "the hook doesn't
+//! see elevated keystrokes": if the user presses a key, focus then switches
+//! to an elevated window *while the key is still held*, and the key is
+//! released only after that switch, this hook never sees the matching
+//! key-up at all — not delayed, just gone. Anything that tracks state across
+//! a key-down and a later key-up (this module's own `Override::pressed`;
+//! `y-snap`'s `modifier_guard`, armed at gesture start and waiting for the
+//! modifier's real key-up) is exposed to being left stuck, waiting
+//! permanently for an event that already happened and that nothing will
+//! ever deliver.
+//!
+//! [`watch_foreground`] is the recovery net PowerToys uses for exactly this
+//! (`SetWinEventHook(EVENT_SYSTEM_FOREGROUND, ...)`): cheap — one event per
+//! foreground switch, not per keystroke — and independent of the keyboard
+//! hook entirely, since it doesn't rely on a key event to fire. A caller
+//! registers a callback that reconciles its own tracked state against
+//! [`GetAsyncKeyState`] (real hardware state, regardless of whether a
+//! message ever arrived) every time the foreground window changes, and
+//! force-clears whatever the keyboard hook missed. This module registers
+//! its own for `Override::pressed`; `y-snap`'s `modifier_guard` registers
+//! its own for the armed modifier bits.
 
 use std::cell::RefCell;
 use std::fmt;
 
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::UI::Accessibility::{HWINEVENTHOOK, SetWinEventHook, UnhookWinEvent};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, HOT_KEY_MODIFIERS, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS,
-    KEYBDINPUT, KEYEVENTF_KEYUP, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, MOD_WIN,
-    RegisterHotKey, SendInput, UnregisterHotKey, VIRTUAL_KEY, VK_ADD, VK_APPS, VK_BACK,
-    VK_BROWSER_BACK, VK_BROWSER_FAVORITES, VK_BROWSER_FORWARD, VK_BROWSER_HOME, VK_BROWSER_REFRESH,
-    VK_BROWSER_SEARCH, VK_BROWSER_STOP, VK_CAPITAL, VK_CLEAR, VK_CONTROL, VK_DECIMAL, VK_DELETE,
-    VK_DIVIDE, VK_DOWN, VK_END, VK_ESCAPE, VK_HOME, VK_INSERT, VK_LEFT, VK_LWIN,
-    VK_MEDIA_NEXT_TRACK, VK_MEDIA_PLAY_PAUSE, VK_MEDIA_PREV_TRACK, VK_MEDIA_STOP, VK_MENU,
+    KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT,
+    MOD_SHIFT, MOD_WIN, RegisterHotKey, SendInput, UnregisterHotKey, VIRTUAL_KEY, VK_ADD, VK_APPS,
+    VK_BACK, VK_BROWSER_BACK, VK_BROWSER_FAVORITES, VK_BROWSER_FORWARD, VK_BROWSER_HOME,
+    VK_BROWSER_REFRESH, VK_BROWSER_SEARCH, VK_BROWSER_STOP, VK_CAPITAL, VK_CLEAR, VK_CONTROL,
+    VK_DECIMAL, VK_DELETE, VK_DIVIDE, VK_DOWN, VK_END, VK_ESCAPE, VK_HOME, VK_INSERT, VK_LEFT,
+    VK_LWIN, VK_MEDIA_NEXT_TRACK, VK_MEDIA_PLAY_PAUSE, VK_MEDIA_PREV_TRACK, VK_MEDIA_STOP, VK_MENU,
     VK_MULTIPLY, VK_NEXT, VK_NUMLOCK, VK_NUMPAD0, VK_OEM_1, VK_OEM_2, VK_OEM_3, VK_OEM_4, VK_OEM_5,
     VK_OEM_6, VK_OEM_7, VK_OEM_8, VK_OEM_COMMA, VK_OEM_MINUS, VK_OEM_PERIOD, VK_OEM_PLUS, VK_PAUSE,
-    VK_PRIOR, VK_RCONTROL, VK_RETURN, VK_RIGHT, VK_RSHIFT, VK_RWIN, VK_SCROLL, VK_SHIFT,
-    VK_SNAPSHOT, VK_SPACE, VK_SUBTRACT, VK_TAB, VK_UP, VK_VOLUME_DOWN, VK_VOLUME_MUTE,
-    VK_VOLUME_UP,
+    VK_PRIOR, VK_RETURN, VK_RIGHT, VK_RSHIFT, VK_RWIN, VK_SCROLL, VK_SHIFT, VK_SNAPSHOT, VK_SPACE,
+    VK_SUBTRACT, VK_TAB, VK_UP, VK_VOLUME_DOWN, VK_VOLUME_MUTE, VK_VOLUME_UP,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, GetMessageExtraInfo, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, PostMessageW,
-    SetWindowsHookExW, UnhookWindowsHookEx, WH_KEYBOARD_LL, WM_HOTKEY, WM_KEYDOWN, WM_KEYUP,
-    WM_SYSKEYDOWN, WM_SYSKEYUP,
+    CallNextHookEx, EVENT_SYSTEM_FOREGROUND, GetMessageExtraInfo, HC_ACTION, HHOOK,
+    KBDLLHOOKSTRUCT, PostMessageW, SetWindowsHookExW, UnhookWindowsHookEx, WH_KEYBOARD_LL,
+    WINEVENT_OUTOFCONTEXT, WM_HOTKEY, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
 use windows::core::Result;
 
@@ -430,6 +454,7 @@ impl HotkeyManager {
         };
 
         self.hook = Some(hook);
+        watch_foreground(reconcile_overrides);
         Ok(())
     }
 
@@ -440,6 +465,7 @@ impl HotkeyManager {
             && let Some(hook) = self.hook.take()
         {
             let _ = unsafe { UnhookWindowsHookEx(hook) };
+            unwatch_foreground(reconcile_overrides);
         }
     }
 }
@@ -485,6 +511,26 @@ fn state<T: Default>(body: impl FnOnce(&mut HookState) -> T) -> T {
         Ok(mut state) => body(&mut state),
         Err(_) => T::default(),
     })
+}
+
+/// Registered with [`watch_foreground`] for as long as
+/// [`HotkeyManager::install_hook`] has the keyboard hook up. Clears any
+/// override's `pressed` flag whose key is not actually held any more per
+/// [`GetAsyncKeyState`] — see this module's own doc comment for the gap this
+/// closes. Left uncorrected, a `pressed` flag stuck `true` would either
+/// swallow the next legitimate press as bogus auto-repeat (for a
+/// `MOD_NOREPEAT` hotkey) or swallow its key-up outright (for one that
+/// isn't), depending on which the hotkey was registered with.
+fn reconcile_overrides() {
+    state(|state| {
+        for entry in &mut state.overrides {
+            if entry.pressed
+                && unsafe { GetAsyncKeyState(entry.hotkey.key.0 as i32) } as u16 & 0x8000 == 0
+            {
+                entry.pressed = false;
+            }
+        }
+    });
 }
 
 impl HookState {
@@ -556,7 +602,7 @@ impl HookState {
         };
 
         if entry.hotkey.has(MOD_WIN) {
-            absorb_modifier_tap(MOD_WIN);
+            absorb_modifier_tap();
         }
 
         Some(())
@@ -590,9 +636,13 @@ fn modifiers_pressed(modifiers: HOT_KEY_MODIFIERS) -> bool {
 /// to it, and it does not change the meaning of anything the user types next.
 ///
 /// The same trick [`crate::hotkey`] uses for an overridden `Win+…` hotkey;
-/// `y-snap`'s mouse gestures call it too, for an Alt- or Win-modified drag or
-/// resize, which has exactly the same problem the moment the modifier key
-/// comes back up.
+/// `y-snap`'s `modifier_guard` calls it too, for an Alt- or Win-modified drag
+/// or resize, which has exactly the same problem the moment the modifier key
+/// comes back up. In both cases the call has to land synchronously in the
+/// keyboard-hook callback that observes the modifier's real key-up,
+/// immediately before that key-up is allowed to continue down the chain —
+/// not at some earlier or unrelated point (mouse-button time, in y-snap's
+/// case). Timing, not the choice of filler key, is what makes this work.
 ///
 /// This is HulK's own `key_press_code(VK_RSHIFT)`, reproduced call for call
 /// rather than reasoned out from scratch: two separate `SendInput` calls, one
@@ -601,20 +651,25 @@ fn modifiers_pressed(modifiers: HOT_KEY_MODIFIERS) -> bool {
 /// is `wVk`, not the scan code, that identifies the key here, so nothing
 /// reads it. `KEYEVENTF_EXTENDEDKEY` looks wrong for a Shift key — Right
 /// Shift is not an `0xE0`-prefixed key on a real keyboard — but HulK sets it
-/// for `VK_RSHIFT` alongside `VK_MENU` and `VK_CONTROL` regardless, and
-/// dropping it is what stopped this from working during development. And two
-/// `SendInput` calls is not the same thing as one call given both events:
-/// batching them (as a single call with a two-element array, the
-/// documentation's own preferred form for a key tap) was tried here first
-/// and did not cancel the tap either.
-pub fn absorb_modifier_tap(modifier: HOT_KEY_MODIFIERS) {
+/// for `VK_RSHIFT` regardless, and dropping it is what stopped this from
+/// working during development. And two `SendInput` calls is not the same
+/// thing as one call given both events: batching them (as a single call with
+/// a two-element array, the documentation's own preferred form for a key
+/// tap) was tried here first and did not cancel the tap either.
+///
+/// One filler, always: earlier revisions of this function varied the filler
+/// by which modifier was being cancelled (a `Ctrl`-`[modifier]`-`Ctrl`
+/// sandwich borrowed from AltSnap). That was two designs layered on top of
+/// each other where either alone is known to work from a reference
+/// implementation; this is the single one, HulK's.
+pub fn absorb_modifier_tap() {
     let extra_info: usize = unsafe { GetMessageExtraInfo().0 as usize };
 
-    let key = |vk: VIRTUAL_KEY, flags: KEYBD_EVENT_FLAGS| INPUT {
+    let key = |flags: KEYBD_EVENT_FLAGS| INPUT {
         r#type: INPUT_KEYBOARD,
         Anonymous: INPUT_0 {
             ki: KEYBDINPUT {
-                wVk: vk,
+                wVk: VK_RSHIFT,
                 wScan: 0,
                 dwFlags: flags,
                 time: 0,
@@ -623,18 +678,21 @@ pub fn absorb_modifier_tap(modifier: HOT_KEY_MODIFIERS) {
         },
     };
 
-    let vk: VIRTUAL_KEY = match modifier {
-        MOD_ALT => VK_MENU,
-        MOD_WIN => VK_LWIN,
-        _ => VK_CONTROL,
+    // Two separate SendInput calls, not one batched call — see doc comment.
+    unsafe {
+        SendInput(
+            &[key(KEYBD_EVENT_FLAGS(KEYEVENTF_EXTENDEDKEY.0))],
+            size_of::<INPUT>() as i32,
+        )
     };
-
-    let up = [
-        key(VK_CONTROL, Default::default()),
-        key(vk, KEYEVENTF_KEYUP),
-        key(VK_CONTROL, KEYEVENTF_KEYUP),
-    ];
-    unsafe { SendInput(&up, size_of::<INPUT>() as i32) };
+    unsafe {
+        SendInput(
+            &[key(KEYBD_EVENT_FLAGS(
+                KEYEVENTF_EXTENDEDKEY.0 | KEYEVENTF_KEYUP.0,
+            ))],
+            size_of::<INPUT>() as i32,
+        )
+    };
 }
 
 unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
@@ -670,6 +728,104 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
 /// hook procedure can recognise its own work. Any value unlikely to collide
 /// will do; it is only ever compared against itself.
 const OWN_INPUT_SIGNATURE: usize = 0x7970_6F5F_6C69_7465; // "ypo_lite"
+
+/// The `WinEventHook` recovery net — see this module's doc comment.
+struct ForegroundWatch {
+    hook: Option<HWINEVENTHOOK>,
+    /// Every caller currently relying on the watch, run in registration
+    /// order on each foreground switch. A `Vec` of plain function pointers
+    /// rather than boxed closures: every reconciler so far reaches its own
+    /// state through its own thread local, so there is nothing to capture.
+    reconcilers: Vec<fn()>,
+}
+
+thread_local! {
+    static FOREGROUND: RefCell<ForegroundWatch> = const {
+        RefCell::new(ForegroundWatch {
+            hook: None,
+            reconcilers: Vec::new(),
+        })
+    };
+}
+
+/// Registers `reconcile` to run every time the foreground window changes,
+/// installing the `WinEventHook` watchdog on this thread if it is not
+/// already up. Idempotent for a given function pointer — calling this twice
+/// with the same `reconcile` does not run it twice per switch.
+///
+/// `reconcile` should compare whatever state its caller tracks across a
+/// key-down and a later key-up against [`GetAsyncKeyState`] and force-clear
+/// what disagrees — see this module's doc comment for why a foreground
+/// switch is the right moment to do that, and [`unwatch_foreground`] for
+/// letting go once that state has nothing left to reconcile.
+pub fn watch_foreground(reconcile: fn()) {
+    FOREGROUND.with(|cell| {
+        let mut watch = cell.borrow_mut();
+        if !watch
+            .reconcilers
+            .iter()
+            .any(|&registered| std::ptr::fn_addr_eq(registered, reconcile))
+        {
+            watch.reconcilers.push(reconcile);
+        }
+
+        if watch.hook.is_none() {
+            let hook = unsafe {
+                SetWinEventHook(
+                    EVENT_SYSTEM_FOREGROUND,
+                    EVENT_SYSTEM_FOREGROUND,
+                    None,
+                    Some(foreground_switch),
+                    0,
+                    0,
+                    WINEVENT_OUTOFCONTEXT,
+                )
+            };
+            if !hook.0.is_null() {
+                watch.hook = Some(hook);
+            }
+        }
+    });
+}
+
+/// Unregisters `reconcile`, uninstalling the watchdog once nothing is left
+/// watching. A caller that never lets its armed/pressed state go fully idle
+/// should still call this on the same lifecycle as it calls
+/// [`watch_foreground`] — the hook is cheap, but not free, and there is no
+/// reason to keep watching foreground switches on behalf of a hotkey the
+/// user has since unregistered.
+pub fn unwatch_foreground(reconcile: fn()) {
+    FOREGROUND.with(|cell| {
+        let mut watch = cell.borrow_mut();
+        watch
+            .reconcilers
+            .retain(|&registered| !std::ptr::fn_addr_eq(registered, reconcile));
+        if watch.reconcilers.is_empty()
+            && let Some(hook) = watch.hook.take()
+        {
+            let _ = unsafe { UnhookWinEvent(hook) };
+        }
+    });
+}
+
+unsafe extern "system" fn foreground_switch(
+    _hook: HWINEVENTHOOK,
+    _event: u32,
+    _hwnd: HWND,
+    _id_object: i32,
+    _id_child: i32,
+    _thread: u32,
+    _time: u32,
+) {
+    // Snapshotted rather than run under the borrow: a reconciler that goes
+    // fully idle calls `unwatch_foreground`, which needs its own mutable
+    // borrow of the same thread local, and this procedure cannot know in
+    // advance which of its callers will do that.
+    let reconcilers = FOREGROUND.with(|cell| cell.borrow().reconcilers.clone());
+    for reconcile in reconcilers {
+        reconcile();
+    }
+}
 
 #[cfg(test)]
 mod tests {

@@ -43,11 +43,12 @@ use windows::Win32::Graphics::Gdi::{
     FW_BOLD, FW_NORMAL, HBITMAP, HDC, HFONT, HGDIOBJ, SelectObject, SetBkMode, SetTextColor,
     TRANSPARENT,
 };
+use windows::Win32::UI::Input::KeyboardAndMouse::SetFocus;
 use windows::Win32::UI::WindowsAndMessaging::{
     DestroyWindow, GWL_EXSTYLE, GetWindowLongPtrW, HWND_TOPMOST, SW_HIDE, SW_SHOWNOACTIVATE,
-    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetWindowLongPtrW, SetWindowPos, ShowWindow, ULW_ALPHA,
-    UpdateLayeredWindow, WINDOW_EX_STYLE, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
-    WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos,
+    ShowWindow, ULW_ALPHA, UpdateLayeredWindow, WINDOW_EX_STYLE, WS_EX_LAYERED, WS_EX_NOACTIVATE,
+    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
 };
 use windows::core::{Error, HSTRING, PCWSTR, Result};
 
@@ -139,6 +140,24 @@ pub struct OverlaySpec<'a> {
     /// Let mouse input fall through to whatever is underneath. The right
     /// default for anything purely informative — a guide, a badge, a HUD.
     pub click_through: bool,
+    /// Let the window take keyboard focus (drop `WS_EX_NOACTIVATE`) instead
+    /// of staying behind whatever the user was working in. The right choice
+    /// for a popup driven as much by the keyboard as the mouse — e.g. an
+    /// action grid with a key bound to each tile — where routing `WM_KEYDOWN`
+    /// straight to the window is simpler and cheaper than a scoped
+    /// `WH_KEYBOARD_LL` hook, and losing focus (`WM_KILLFOCUS`) is exactly
+    /// the signal that means "the user clicked outside, close this". See
+    /// [`Overlay::activate`].
+    pub focusable: bool,
+    /// See [`crate::window::WindowSpec::owner`] — set this whenever more
+    /// than one [`Overlay`] from the same app needs to stay reliably
+    /// stacked and visible together (e.g. a target-window highlight shown
+    /// alongside its own action popup): two independent, owner-less
+    /// `WS_EX_TOPMOST` popups have no Z-order relationship for Windows to
+    /// maintain between them, and in practice only the one whose
+    /// `SetWindowPos` "wins" ends up visible — sharing an owner is what
+    /// fixes that.
+    pub owner: Option<HWND>,
 }
 
 impl<'a> OverlaySpec<'a> {
@@ -147,12 +166,25 @@ impl<'a> OverlaySpec<'a> {
             class,
             size,
             click_through: true,
+            focusable: false,
+            owner: None,
         }
     }
 
     /// The overlay reacts to the mouse; its handler receives the messages.
     pub const fn interactive(mut self) -> Self {
         self.click_through = false;
+        self
+    }
+
+    /// The overlay can take keyboard focus — see [`OverlaySpec::focusable`].
+    pub const fn focusable(mut self) -> Self {
+        self.focusable = true;
+        self
+    }
+
+    pub const fn with_owner(mut self, owner: HWND) -> Self {
+        self.owner = Some(owner);
         self
     }
 }
@@ -173,16 +205,23 @@ impl Overlay {
     /// Same, with a handler for the mouse and keyboard messages an
     /// interactive overlay wants (see [`OverlaySpec::interactive`]).
     pub fn with_handler(spec: &OverlaySpec<'_>, handler: Box<dyn WindowHandler>) -> Result<Self> {
-        let mut ex_style = WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
+        let mut ex_style = WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW;
+        if !spec.focusable {
+            ex_style |= WS_EX_NOACTIVATE;
+        }
         if spec.click_through {
             ex_style |= WS_EX_TRANSPARENT;
         }
 
         // WS_EX_TOOLWINDOW keeps it out of Alt+Tab and the taskbar;
-        // WS_EX_NOACTIVATE keeps the window the user was working in focused.
-        let window = WindowSpec::new(spec.class, "")
+        // WS_EX_NOACTIVATE keeps the window the user was working in focused
+        // — dropped for a `focusable` overlay, which wants the opposite.
+        let mut window = WindowSpec::new(spec.class, "")
             .with_style(WS_POPUP, ex_style)
             .with_bounds((0, 0), spec.size);
+        if let Some(owner) = spec.owner {
+            window = window.with_owner(owner);
+        }
 
         let hwnd = window::create(&window, handler)?;
         let canvas = match Canvas::new(spec.size) {
@@ -222,7 +261,22 @@ impl Overlay {
     /// window without activating it.
     pub fn show_at(&self, position: POINT) -> Result<()> {
         self.update(Some(position))?;
-        unsafe { ShowWindow(self.hwnd, SW_SHOWNOACTIVATE).ok()? };
+
+        // ShowWindow's BOOL return is not a success/failure code — unlike
+        // almost every other BOOL-returning Win32 call here, it reports
+        // whether the window was *previously* visible (0 = was hidden, the
+        // ordinary case for a popup nobody has shown yet). Treating that
+        // like an error via `.ok()?` was a real bug: it aborted `show_at`
+        // right here — before the topmost re-assertion below ever ran —
+        // on what was actually a normal, successful first show. Windows had
+        // already made the window visible by this point regardless; only
+        // this function's own bookkeeping thought it had failed. Silently
+        // showing a second, unrelated overlay (e.g. `y-snap`'s target-window
+        // focus border next to its action popup) after the first looked
+        // exactly like this: only the first one's `show_at` ever got called
+        // (the false "error" made the caller bail before showing the
+        // second), so the second simply never appeared.
+        let _ = unsafe { ShowWindow(self.hwnd, SW_SHOWNOACTIVATE) };
 
         // Topmost is not sticky: a full-screen application taking over resets
         // the Z order, so re-assert it every time the overlay comes up.
@@ -247,6 +301,17 @@ impl Overlay {
 
     pub fn hide(&self) {
         let _ = unsafe { ShowWindow(self.hwnd, SW_HIDE) };
+    }
+
+    /// Gives this overlay the keyboard focus — only meaningful for one
+    /// created with [`OverlaySpec::focusable`]; call it right after
+    /// [`Overlay::show_at`], which shows the window without activating it.
+    /// `SetForegroundWindow` first, matching HulK's `ShowActionOverlay`: it
+    /// is what actually moves the *foreground* window, which `SetFocus`
+    /// alone does not reliably do across processes.
+    pub fn activate(&self) {
+        let _ = unsafe { SetForegroundWindow(self.hwnd) };
+        let _ = unsafe { SetFocus(Some(self.hwnd)) };
     }
 
     /// Turns mouse transparency on or off after creation, for an overlay that
@@ -458,16 +523,107 @@ impl Canvas {
             return;
         }
 
+        for_each_corner_pixel(width, height, radius, |x, y, coverage| {
+            self.blend_pixel(x, y, coverage, 0);
+        });
+    }
+
+    /// Rounds one rectangle's corners in place, the same antialiased corner
+    /// test [`Canvas::round_corners`] uses on the whole surface — but
+    /// blending what falls outside the radius toward `background` instead of
+    /// toward transparent. A tile sits on the popup's own opaque-ish
+    /// background, not directly on the desktop, so its corners should read
+    /// as "the panel showing through" rather than a punched-out hole in the
+    /// layered window; pass the same colour [`Canvas::clear`] painted the
+    /// panel with.
+    ///
+    /// Call this last, after any GDI text/icon drawing inside `rect` — same
+    /// requirement as `round_corners`, and for the same reason: GDI can
+    /// still touch pixels right up to `rect`'s edges, including the corner
+    /// region a small radius carves out.
+    pub fn round_rect_corners(&mut self, rect: RECT, radius: i32, background: Color) {
+        let (width, height) = self.size;
+        let radius = radius
+            .min((rect.right - rect.left) / 2)
+            .min((rect.bottom - rect.top) / 2);
+        if radius <= 0 {
+            return;
+        }
+        let target = background.premultiplied();
+
+        for_each_rect_corner_pixel(rect, width, height, radius, |x, y, coverage| {
+            self.blend_pixel(x, y, coverage, target);
+        });
+    }
+
+    /// [`Canvas::round_corners`], plus a `border_width`-thick opaque outline
+    /// traced along the rounded boundary in `border_color`.
+    ///
+    /// Not the same as drawing a plain [`Canvas::stroke_rect`] and rounding
+    /// it afterwards — a straight rectangular stroke has no relationship to
+    /// the corner cut `round_corners` makes, so near each corner the
+    /// straight line just gets partially erased by an arc it was never drawn
+    /// to trace, leaving a straight-edged gap instead of a border that
+    /// curves with the panel. This tests the border against the *same*
+    /// rounded boundary it is being cut from, the fix HulK's
+    /// `PointInRoundedRect`/`FillRoundedRectWithBorder` uses for the
+    /// identical bug. The straight (non-corner) edges of the border are
+    /// unaffected by rounding at any radius, so draw those the ordinary way
+    /// first — `stroke_rect(bounds, color)` before calling this — and let
+    /// this method redo just the four corner boxes it touches, on top of
+    /// that.
+    ///
+    /// Call it last, same requirement as `round_corners`.
+    pub fn round_corners_with_border(
+        &mut self,
+        radius: i32,
+        border_width: i32,
+        border_color: Color,
+    ) {
+        let (width, height) = self.size;
+        let radius = radius.min(width / 2).min(height / 2);
+        if radius <= 0 {
+            return;
+        }
+        let inner_radius = (radius - border_width.max(0)).max(0);
+        let border = border_color.premultiplied();
+
         for corner_y in 0..radius {
             for corner_x in 0..radius {
-                // Distance from the corner's centre of curvature, sampled at
-                // the pixel centre; coverage is the fractional part over one
-                // pixel of width, which is antialiasing enough at this size.
-                let dx = (radius - corner_x) as f32 - 0.5;
-                let dy = (radius - corner_y) as f32 - 0.5;
-                let distance = (dx * dx + dy * dy).sqrt();
-                let coverage = (radius as f32 - distance + 0.5).clamp(0.0, 1.0);
-                if coverage >= 1.0 {
+                // One distance, from the *outer* arc's own centre of
+                // curvature — the inner arc is concentric with it (a border
+                // band is a ring of uniform width, not two independently
+                // inset corners), so it is measured against that same
+                // distance too, just a smaller radius. Calling
+                // `corner_coverage(corner_x, corner_y, inner_radius)` here
+                // instead — computing a *second*, differently-centred
+                // distance from `inner_radius` — was the bug this replaced:
+                // it silently shifted the inner arc's centre inward along
+                // with its radius, so it was never actually concentric with
+                // the outer one.
+                let distance = corner_distance(corner_x, corner_y, radius);
+                let outer = coverage_at(distance, radius);
+
+                // The border/interior cutover is a hard edge, not
+                // antialiased — matching HulK's own boolean
+                // `PointInRoundedRect`, and simpler: both sides are fully
+                // opaque, so a one-pixel stair-step there is not visible the
+                // way an unantialiased *outer* silhouette against the
+                // desktop would be.
+                let in_border_band = coverage_at(distance, inner_radius) < 1.0;
+
+                if !in_border_band && outer >= 1.0 {
+                    // Deep interior, outside the border band entirely —
+                    // already correct from earlier drawing. Everything past
+                    // this point either needs the border colour written in
+                    // (`in_border_band`) or needs fading toward transparent
+                    // at the true outer edge (`outer < 1.0`) — a pixel can be
+                    // `in_border_band` and still have `outer == 1.0` (most of
+                    // a several-pixel-wide band does, away from that outer
+                    // edge itself), which is exactly what the earlier
+                    // `outer >= 1.0` early-out here got wrong: it skipped
+                    // nearly the whole curved border, leaving the corner box
+                    // untouched and reading as a sharp square corner.
                     continue;
                 }
 
@@ -477,7 +633,18 @@ impl Canvas {
                     (corner_x, height - 1 - corner_y),
                     (width - 1 - corner_x, height - 1 - corner_y),
                 ] {
-                    self.scale_pixel(x, y, coverage);
+                    if in_border_band {
+                        // Overwrite outright — this pixel is meant to be
+                        // solid border colour regardless of whatever the
+                        // earlier straight `stroke_rect` or the panel's own
+                        // background left here.
+                        self.set_pixel(x, y, border);
+                    }
+                    if outer < 1.0 {
+                        // The true outer silhouette: fade toward transparent
+                        // using whatever was just written above as `from`.
+                        self.blend_pixel(x, y, outer, 0);
+                    }
                 }
             }
         }
@@ -552,18 +719,125 @@ impl Canvas {
         }
     }
 
-    /// Multiplies a pixel — all four premultiplied channels — by `factor`.
-    fn scale_pixel(&mut self, x: i32, y: i32, factor: f32) {
+    /// Blends a pixel toward `target` (an already-premultiplied word) by
+    /// `coverage` — `1.0` leaves the pixel as it is, `0.0` replaces it with
+    /// `target` outright. [`Canvas::round_corners`] blends toward
+    /// transparent (`target = 0`); [`Canvas::round_rect_corners`] toward a
+    /// caller-supplied background colour.
+    fn blend_pixel(&mut self, x: i32, y: i32, coverage: f32, target: u32) {
         let width = self.size.0;
         let index = (y * width + x) as usize;
         let pixel = self.pixels_mut()[index];
 
         let channel = |shift: u32| {
-            let value = ((pixel >> shift) & 0xFF) as f32 * factor;
-            (value as u32).min(255) << shift
+            let from = ((pixel >> shift) & 0xFF) as f32;
+            let to = ((target >> shift) & 0xFF) as f32;
+            ((to + (from - to) * coverage).round() as u32).min(255) << shift
         };
 
         self.pixels_mut()[index] = channel(24) | channel(16) | channel(8) | channel(0);
+    }
+
+    /// Overwrites a pixel outright with an already-premultiplied word — the
+    /// unconditional counterpart to [`Canvas::blend_pixel`], for a border
+    /// pixel that must be exactly `border_color` regardless of whatever was
+    /// drawn underneath it.
+    fn set_pixel(&mut self, x: i32, y: i32, value: u32) {
+        let width = self.size.0;
+        let index = (y * width + x) as usize;
+        self.pixels_mut()[index] = value;
+    }
+}
+
+/// Distance from a pixel at `(corner_x, corner_y)` — its offset from the
+/// true corner of a `radius`-rounded rectangle — to that corner's own
+/// centre of curvature (inset `radius` in from each straight edge),
+/// sampled at the pixel's centre. The shared building block: two arcs
+/// concentric on the *same* centre (an outer boundary and, inside it, an
+/// inner one a border band is measured against) both call this with that
+/// one fixed `radius`, then compare the one `distance` it returns to
+/// whichever of their own radii they each care about — see
+/// [`Canvas::round_corners_with_border`] for why computing it twice, once
+/// per radius, is the bug this shape avoids: it silently shifts the centre
+/// along with the radius instead of keeping both arcs concentric.
+fn corner_distance(corner_x: i32, corner_y: i32, radius: i32) -> f32 {
+    let dx = (radius - corner_x) as f32 - 0.5;
+    let dy = (radius - corner_y) as f32 - 0.5;
+    (dx * dx + dy * dy).sqrt()
+}
+
+/// `1.0` at/inside `radius` of a corner's centre of curvature, `0.0` a
+/// pixel of width past it, blending in between — the antialiasing every
+/// corner-rounding method here shares.
+fn coverage_at(distance: f32, radius: i32) -> f32 {
+    (radius as f32 - distance + 0.5).clamp(0.0, 1.0)
+}
+
+/// [`coverage_at`] against the corner's own centre of curvature — the
+/// common case, used by every caller that only ever tests one radius per
+/// corner (unlike [`Canvas::round_corners_with_border`], which tests two
+/// concentric ones and so calls [`corner_distance`]/[`coverage_at`]
+/// separately instead).
+fn corner_coverage(corner_x: i32, corner_y: i32, radius: i32) -> f32 {
+    coverage_at(corner_distance(corner_x, corner_y, radius), radius)
+}
+
+/// Walks the pixels in each of a `width`×`height` surface's four
+/// `radius`×`radius` corner boxes, calling `paint(x, y, coverage)` for every
+/// one not fully inside the rounded shape (`coverage == 1.0`, needing no
+/// change, is skipped) — the shared iteration [`Canvas::round_corners`] and
+/// [`Canvas::round_rect_corners`] both drive with a different `paint`.
+fn for_each_corner_pixel(
+    width: i32,
+    height: i32,
+    radius: i32,
+    mut paint: impl FnMut(i32, i32, f32),
+) {
+    for corner_y in 0..radius {
+        for corner_x in 0..radius {
+            let coverage = corner_coverage(corner_x, corner_y, radius);
+            if coverage >= 1.0 {
+                continue;
+            }
+            for (x, y) in [
+                (corner_x, corner_y),
+                (width - 1 - corner_x, corner_y),
+                (corner_x, height - 1 - corner_y),
+                (width - 1 - corner_x, height - 1 - corner_y),
+            ] {
+                paint(x, y, coverage);
+            }
+        }
+    }
+}
+
+/// [`for_each_corner_pixel`], scoped to one `rect` inside a `width`×
+/// `height` surface instead of the whole thing, clipped to the surface's
+/// own bounds — a tile can sit flush against the popup's own edge.
+fn for_each_rect_corner_pixel(
+    rect: RECT,
+    width: i32,
+    height: i32,
+    radius: i32,
+    mut paint: impl FnMut(i32, i32, f32),
+) {
+    for corner_y in 0..radius {
+        for corner_x in 0..radius {
+            let coverage = corner_coverage(corner_x, corner_y, radius);
+            if coverage >= 1.0 {
+                continue;
+            }
+            for (x, y) in [
+                (rect.left + corner_x, rect.top + corner_y),
+                (rect.right - 1 - corner_x, rect.top + corner_y),
+                (rect.left + corner_x, rect.bottom - 1 - corner_y),
+                (rect.right - 1 - corner_x, rect.bottom - 1 - corner_y),
+            ] {
+                if x >= 0 && x < width && y >= 0 && y < height {
+                    paint(x, y, coverage);
+                }
+            }
+        }
     }
 }
 
@@ -642,7 +916,7 @@ impl WindowHandler for NoHandler {
 
 #[cfg(test)]
 mod tests {
-    use super::Color;
+    use super::{Canvas, Color};
 
     #[test]
     fn premultiplies() {
@@ -650,5 +924,34 @@ mod tests {
         assert_eq!(Color::TRANSPARENT.premultiplied(), 0);
         // Half-transparent white: every channel halved with it.
         assert_eq!(Color::WHITE.with_alpha(128).premultiplied(), 0x8080_8080);
+    }
+
+    #[test]
+    fn a_rounded_border_traces_the_whole_curve_not_just_its_outer_edge() {
+        let interior = Color::rgb(0, 0, 255);
+        let border = Color::rgb(255, 0, 0);
+        let mut canvas = Canvas::new((40, 40)).unwrap();
+        canvas.clear(interior);
+        canvas.round_corners_with_border(8, 2, border);
+
+        let mut pixel = |x: i32, y: i32| canvas.pixels_mut()[(y * 40 + x) as usize];
+
+        // Deep interior, nowhere near a corner box: left exactly as
+        // `clear` painted it.
+        assert_eq!(pixel(20, 20), interior.premultiplied());
+
+        // The true corner pixel: outside the rounded shape entirely, so
+        // erased to transparent — same as plain `round_corners`.
+        assert_eq!(pixel(0, 0), 0);
+
+        // (5, 1): inside the border band (radius 8, border_width 2, so
+        // between 6px and 8px from the corner's own centre of curvature)
+        // but past `coverage_at`'s antialiasing fringe, i.e. `outer`
+        // saturates to 1.0 there — exactly the pixel a border-band test
+        // that (a) exits early whenever `outer >= 1.0`, or (b) measures the
+        // inner boundary from a *different*, radius-shifted centre instead
+        // of the same one the outer boundary uses, both get wrong. Solid
+        // border colour, not the interior blue underneath it.
+        assert_eq!(pixel(5, 1), border.premultiplied());
     }
 }

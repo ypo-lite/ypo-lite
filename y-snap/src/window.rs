@@ -203,7 +203,12 @@ pub fn is_maximized(window: HWND) -> bool {
     style(window, GWL_STYLE) & WS_MAXIMIZE.0 != 0
 }
 
-#[allow(dead_code, reason = "read by the overlay, which is not written yet")]
+/// Not read by anything yet — `minimize` has no corresponding "restore"
+/// state the overlay shows differently, unlike every other toggle here.
+#[allow(
+    dead_code,
+    reason = "no tile reads this one; kept for parity with the rest"
+)]
 pub fn is_minimized(window: HWND) -> bool {
     style(window, GWL_STYLE) & WS_MINIMIZE.0 != 0
 }
@@ -212,22 +217,18 @@ pub fn is_always_on_top(window: HWND) -> bool {
     style(window, GWL_EXSTYLE) & WS_EX_TOPMOST.0 != 0
 }
 
-#[allow(dead_code, reason = "read by the overlay, which is not written yet")]
 pub fn is_borderless(window: HWND) -> bool {
     has_prop(window, PROP_STYLE)
 }
 
-#[allow(dead_code, reason = "read by the overlay, which is not written yet")]
 pub fn is_faded(window: HWND) -> bool {
     has_prop(window, PROP_EX_STYLE)
 }
 
-#[allow(dead_code, reason = "read by the overlay, which is not written yet")]
 pub fn is_shaded(window: HWND) -> bool {
     has_prop(window, PROP_HEIGHT)
 }
 
-#[allow(dead_code, reason = "read by the overlay, which is not written yet")]
 pub fn is_hidden_from_taskbar(window: HWND) -> bool {
     style(window, GWL_EXSTYLE) & WS_EX_TOOLWINDOW.0 != 0
 }
