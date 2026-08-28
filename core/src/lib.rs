@@ -41,6 +41,9 @@
 //! | [`tray`] | notification area icon, balloon tips |
 //! | [`menu`] | popup menus, checkable and disabled items |
 //! | [`hotkey`] | system-wide hotkeys, with a low-level-hook override |
+//! | [`icon`] | loading an icon from a file, synchronously, with a small cache |
+//! | [`known_folders`] | Win32 "known folder" paths, resolved lazily and cached |
+//! | [`log`] | a tiny file logger, for a `windows_subsystem = "windows"` app with no console to print to |
 //! | [`overlay`] | layered, click-through windows drawn from a pixel buffer |
 //! | [`monitor`] | monitor geometry, work areas, per-monitor DPI |
 //! | [`config`] | portable `.ini` settings next to the executable |
@@ -69,7 +72,11 @@ pub mod config;
 #[cfg(feature = "win")]
 pub mod hotkey;
 #[cfg(feature = "win")]
+pub mod icon;
+#[cfg(feature = "win")]
 pub mod ids;
+#[cfg(feature = "win")]
+pub mod known_folders;
 #[cfg(feature = "win")]
 pub mod memory;
 #[cfg(feature = "win")]
@@ -96,6 +103,7 @@ pub mod virtual_desktop;
 pub mod window;
 
 // Pure Rust, no Win32: useful to a build script and to a test on any host.
+pub mod log;
 pub mod xml;
 
 #[cfg(feature = "win")]

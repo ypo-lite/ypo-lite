@@ -3,6 +3,9 @@ name = "y-pop"
 version.workspace = true
 edition.workspace = true
 
+[lib]
+name = "y_pop"
+
 [dependencies]
 y-core.workspace = true
 windows.workspace = true

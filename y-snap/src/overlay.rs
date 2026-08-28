@@ -540,7 +540,8 @@ fn point_in(rect: RECT, pt: POINT) -> bool {
 /// borrowed mutably (for the canvas it is drawing into), so it takes the one
 /// field it needs by value instead of borrowing all of `self` again.
 fn is_current_desktop(current_desktop: Option<u32>, item: &Item) -> bool {
-    item.action == Action::DesktopMove && current_desktop.is_some_and(|index| index + 1 == item.desktop)
+    item.action == Action::DesktopMove
+        && current_desktop.is_some_and(|index| index + 1 == item.desktop)
 }
 
 /// Centres `size` on `window`'s own bounds — the action overlay opens over
@@ -885,7 +886,10 @@ mod tests {
 
     #[test]
     fn zero_desktops_expands_to_no_tiles() {
-        let config = OverlayConfig { items: vec![desktop_list_item()], ..OverlayConfig::default() };
+        let config = OverlayConfig {
+            items: vec![desktop_list_item()],
+            ..OverlayConfig::default()
+        };
         let (tiles, items, _size) = layout(&config, 0);
         assert!(tiles.is_empty());
         assert!(items.is_empty());

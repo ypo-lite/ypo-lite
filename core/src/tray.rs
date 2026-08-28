@@ -9,13 +9,19 @@
 use windows::Win32::Foundation::{HWND, LPARAM, POINT, WPARAM};
 use windows::Win32::UI::Shell::{
     NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIIF_ERROR, NIIF_INFO, NIIF_NONE,
-    NIIF_WARNING, NIM_ADD, NIM_DELETE, NIM_MODIFY, NIM_SETVERSION, NOTIFY_ICON_INFOTIP_FLAGS,
-    NOTIFYICON_VERSION_4, NOTIFYICONDATAW, Shell_NotifyIconW,
+    NIIF_WARNING, NIM_ADD, NIM_DELETE, NIM_MODIFY, NIM_SETVERSION, NIN_SELECT,
+    NOTIFY_ICON_INFOTIP_FLAGS, NOTIFYICON_VERSION_4, NOTIFYICONDATAW, Shell_NotifyIconW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    HICON, WM_CONTEXTMENU, WM_LBUTTONDBLCLK, WM_RBUTTONUP,
+    HICON, WM_CONTEXTMENU, WM_LBUTTONDBLCLK, WM_LBUTTONUP, WM_RBUTTONUP,
 };
 use windows::core::Result;
+
+/// `NIN_KEYSELECT` (`WM_USER + 1`) — the keyboard counterpart to
+/// `NIN_SELECT` (Enter/Space with the icon focused via Tab), not bound by
+/// the `windows` crate. Documented in `shellapi.h` alongside `NIN_SELECT`,
+/// which the crate does bind, immediately below it in value.
+const NIN_KEYSELECT: u32 = NIN_SELECT + 1;
 
 use crate::resources::copy_to_buffer;
 
@@ -143,7 +149,18 @@ pub enum TrayEvent {
     ContextMenu,
     /// Double click, conventionally the icon's default action.
     DoubleClick,
-    /// Anything else (hover, single clicks, balloon events).
+    /// A plain (left) click, or the keyboard equivalent — the icon's
+    /// primary, single-click action. Under the version 4 protocol every
+    /// [`TrayIcon`] opts into, this is `NIN_SELECT`/`NIN_KEYSELECT`, not
+    /// `WM_LBUTTONUP`, which version 4 does not send; `WM_LBUTTONUP` is
+    /// matched too as a defensive fallback for a shell that ignored the
+    /// version negotiation, not because it is expected to arrive.
+    Select,
+    /// Anything else — hover (`WM_MOUSEMOVE` fires repeatedly while the
+    /// cursor sits over the icon), balloon events, and the rest. Not a
+    /// click: code that opens a menu or launches something on a tray
+    /// callback must not treat this variant as one, or it fires on mere
+    /// mouse movement.
     Other(u32),
 }
 
@@ -161,6 +178,7 @@ impl TrayEvent {
             // WM_RBUTTONUP is kept for older shells.
             WM_CONTEXTMENU | WM_RBUTTONUP => TrayEvent::ContextMenu,
             WM_LBUTTONDBLCLK => TrayEvent::DoubleClick,
+            NIN_SELECT | NIN_KEYSELECT | WM_LBUTTONUP => TrayEvent::Select,
             other => TrayEvent::Other(other),
         };
 

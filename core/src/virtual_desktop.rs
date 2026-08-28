@@ -87,7 +87,9 @@ use std::cell::RefCell;
 use std::mem::ManuallyDrop;
 
 use windows::Win32::Foundation::HWND;
-use windows::Win32::System::Com::{CLSCTX_LOCAL_SERVER, CoCreateInstance, CoInitialize, IServiceProvider};
+use windows::Win32::System::Com::{
+    CLSCTX_LOCAL_SERVER, CoCreateInstance, CoInitialize, IServiceProvider,
+};
 use windows::Win32::UI::Shell::Common::IObjectArray;
 use windows::core::{GUID, Interface, Result};
 
@@ -102,16 +104,36 @@ pub enum Direction {
 // `data1, data2, data3, data4[0], data4[1], ...` — so each one can be
 // diffed by eye against `virtualdesktop.cpp`/`win10.h` rather than against
 // an opaque packed `u128`.
-const CLSID_IMMERSIVE_SHELL: GUID =
-    GUID::from_values(0xC2F03A33, 0x21F5, 0x47FA, [0xB4, 0xBB, 0x15, 0x63, 0x62, 0xA2, 0xF2, 0x39]);
-const CLSID_VIRTUAL_DESKTOP_API_UNKNOWN: GUID =
-    GUID::from_values(0xC5E0CDCA, 0x7B6E, 0x41B2, [0x9F, 0xC4, 0xD9, 0x39, 0x75, 0xCC, 0x46, 0x7B]);
-const CLSID_VIRTUAL_DESKTOP_PINNED_APPS: GUID =
-    GUID::from_values(0xB5A399E7, 0x1C87, 0x46B8, [0x88, 0xE9, 0xFC, 0x57, 0x47, 0xB1, 0x71, 0xBD]);
-const IID_APPLICATION_VIEW_COLLECTION: GUID =
-    GUID::from_values(0x1841C6D7, 0x4F9D, 0x42C0, [0xAF, 0x41, 0x87, 0x47, 0x53, 0x8F, 0x10, 0xE5]);
-const IID_VIRTUAL_DESKTOP_PINNED_APPS: GUID =
-    GUID::from_values(0x4CE81583, 0x1E4C, 0x4632, [0xA6, 0x21, 0x07, 0xA5, 0x35, 0x43, 0x14, 0x8F]);
+const CLSID_IMMERSIVE_SHELL: GUID = GUID::from_values(
+    0xC2F03A33,
+    0x21F5,
+    0x47FA,
+    [0xB4, 0xBB, 0x15, 0x63, 0x62, 0xA2, 0xF2, 0x39],
+);
+const CLSID_VIRTUAL_DESKTOP_API_UNKNOWN: GUID = GUID::from_values(
+    0xC5E0CDCA,
+    0x7B6E,
+    0x41B2,
+    [0x9F, 0xC4, 0xD9, 0x39, 0x75, 0xCC, 0x46, 0x7B],
+);
+const CLSID_VIRTUAL_DESKTOP_PINNED_APPS: GUID = GUID::from_values(
+    0xB5A399E7,
+    0x1C87,
+    0x46B8,
+    [0x88, 0xE9, 0xFC, 0x57, 0x47, 0xB1, 0x71, 0xBD],
+);
+const IID_APPLICATION_VIEW_COLLECTION: GUID = GUID::from_values(
+    0x1841C6D7,
+    0x4F9D,
+    0x42C0,
+    [0xAF, 0x41, 0x87, 0x47, 0x53, 0x8F, 0x10, 0xE5],
+);
+const IID_VIRTUAL_DESKTOP_PINNED_APPS: GUID = GUID::from_values(
+    0x4CE81583,
+    0x1E4C,
+    0x4632,
+    [0xA6, 0x21, 0x07, 0xA5, 0x35, 0x43, 0x14, 0x8F],
+);
 
 /// Known `IVirtualDesktopManagerInternal` interface IDs, newest first, each
 /// paired with the vtable shape it carries. `GetCount()` is the only method
@@ -380,12 +402,12 @@ fn acquire() -> Result<Manager> {
         // either, for the same reason — probing runs once per process, so
         // leaking a rejected one costs nothing that matters.
         let candidate_handle = ManuallyDrop::new(match candidate.shape {
-            Shape::Legacy => {
-                ManagerHandle::Legacy(unsafe { legacy::IVirtualDesktopManagerInternal::from_raw(raw) })
-            }
-            Shape::Modern => {
-                ManagerHandle::Modern(unsafe { modern::IVirtualDesktopManagerInternal::from_raw(raw) })
-            }
+            Shape::Legacy => ManagerHandle::Legacy(unsafe {
+                legacy::IVirtualDesktopManagerInternal::from_raw(raw)
+            }),
+            Shape::Modern => ManagerHandle::Modern(unsafe {
+                modern::IVirtualDesktopManagerInternal::from_raw(raw)
+            }),
         });
 
         if probe(&candidate_handle) {
@@ -396,14 +418,20 @@ fn acquire() -> Result<Manager> {
     }
 
     let Some(handle) = handle else {
-        return Err(windows::core::Error::from(windows::Win32::Foundation::E_NOINTERFACE));
+        return Err(windows::core::Error::from(
+            windows::Win32::Foundation::E_NOINTERFACE,
+        ));
     };
 
     // Non-fatal if either of these fails — only the functions that need them
     // (move-to-desktop, pin/unpin) are affected; see `with_manager`'s own
     // callers for how they degrade.
     let view_collection = unsafe {
-        query_service(&shell, &IID_APPLICATION_VIEW_COLLECTION, &IID_APPLICATION_VIEW_COLLECTION)
+        query_service(
+            &shell,
+            &IID_APPLICATION_VIEW_COLLECTION,
+            &IID_APPLICATION_VIEW_COLLECTION,
+        )
     }
     .ok()
     .map(|raw| unsafe { legacy::IApplicationViewCollection::from_raw(raw) });
@@ -418,7 +446,11 @@ fn acquire() -> Result<Manager> {
     .ok()
     .map(|raw| unsafe { legacy::IVirtualDesktopPinnedApps::from_raw(raw) });
 
-    Ok(Manager { handle, view_collection, pinned_apps })
+    Ok(Manager {
+        handle,
+        view_collection,
+        pinned_apps,
+    })
 }
 
 /// Calls `IServiceProvider::QueryService` with an explicit, runtime `riid` —
@@ -627,7 +659,9 @@ fn adjacent<M: ShapeOps>(manager: &M, dir: Direction) -> Result<M::Desktop> {
     let desktops = manager.desktops()?;
     let count = unsafe { desktops.GetCount()? };
     if count == 0 {
-        return Err(windows::core::Error::from(windows::Win32::Foundation::E_FAIL));
+        return Err(windows::core::Error::from(
+            windows::Win32::Foundation::E_FAIL,
+        ));
     }
     let index = match dir {
         Direction::Left => count - 1,
@@ -647,12 +681,17 @@ fn with_parked_focus(f: impl FnOnce()) {
     use windows::Win32::Foundation::HWND;
     use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
     use windows::Win32::UI::WindowsAndMessaging::{
-        FindWindowW, GetForegroundWindow, GetWindowThreadProcessId, SW_MINIMIZE, SetForegroundWindow,
-        ShowWindow,
+        FindWindowW, GetForegroundWindow, GetWindowThreadProcessId, SW_MINIMIZE,
+        SetForegroundWindow, ShowWindow,
     };
 
-    let progman = unsafe { FindWindowW(windows::core::w!("Progman"), windows::core::w!("Program Manager")) }
-        .unwrap_or(HWND::default());
+    let progman = unsafe {
+        FindWindowW(
+            windows::core::w!("Progman"),
+            windows::core::w!("Program Manager"),
+        )
+    }
+    .unwrap_or(HWND::default());
     if progman.is_invalid() {
         f();
         return;
@@ -712,7 +751,9 @@ fn move_window_to_desktop_generic<M: ShapeOps>(
     let mut raw = core::ptr::null_mut();
     unsafe { view_collection.GetViewForHwnd(hwnd, &mut raw).ok()? };
     if raw.is_null() {
-        return Err(windows::core::Error::from(windows::Win32::Foundation::E_FAIL));
+        return Err(windows::core::Error::from(
+            windows::Win32::Foundation::E_FAIL,
+        ));
     }
     let view = unsafe { legacy::IApplicationView::from_raw(raw) };
 
@@ -762,7 +803,9 @@ impl Manager {
 
     fn move_window_to_desktop(&self, hwnd: HWND, index: u32) -> Result<()> {
         let Some(collection) = self.view_collection.as_ref() else {
-            return Err(windows::core::Error::from(windows::Win32::Foundation::E_NOINTERFACE));
+            return Err(windows::core::Error::from(
+                windows::Win32::Foundation::E_NOINTERFACE,
+            ));
         };
         match &self.handle {
             ManagerHandle::Legacy(m) => move_window_to_desktop_generic(m, collection, hwnd, index),
@@ -772,19 +815,25 @@ impl Manager {
 
     fn application_view(&self, hwnd: HWND) -> Result<legacy::IApplicationView> {
         let Some(collection) = self.view_collection.as_ref() else {
-            return Err(windows::core::Error::from(windows::Win32::Foundation::E_NOINTERFACE));
+            return Err(windows::core::Error::from(
+                windows::Win32::Foundation::E_NOINTERFACE,
+            ));
         };
         let mut raw = core::ptr::null_mut();
         unsafe { collection.GetViewForHwnd(hwnd, &mut raw).ok()? };
         if raw.is_null() {
-            return Err(windows::core::Error::from(windows::Win32::Foundation::E_FAIL));
+            return Err(windows::core::Error::from(
+                windows::Win32::Foundation::E_FAIL,
+            ));
         }
         Ok(unsafe { legacy::IApplicationView::from_raw(raw) })
     }
 
     fn is_window_pinned(&self, hwnd: HWND) -> Result<bool> {
         let Some(pinned_apps) = self.pinned_apps.as_ref() else {
-            return Err(windows::core::Error::from(windows::Win32::Foundation::E_NOINTERFACE));
+            return Err(windows::core::Error::from(
+                windows::Win32::Foundation::E_NOINTERFACE,
+            ));
         };
         let view = self.application_view(hwnd)?;
         let mut is_pinned = 0i32;
@@ -798,7 +847,9 @@ impl Manager {
 
     fn pin_window(&self, hwnd: HWND) -> Result<()> {
         let Some(pinned_apps) = self.pinned_apps.as_ref() else {
-            return Err(windows::core::Error::from(windows::Win32::Foundation::E_NOINTERFACE));
+            return Err(windows::core::Error::from(
+                windows::Win32::Foundation::E_NOINTERFACE,
+            ));
         };
         let view = self.application_view(hwnd)?;
         unsafe { pinned_apps.PinView(Interface::as_raw(&view)).ok() }
@@ -806,7 +857,9 @@ impl Manager {
 
     fn unpin_window(&self, hwnd: HWND) -> Result<()> {
         let Some(pinned_apps) = self.pinned_apps.as_ref() else {
-            return Err(windows::core::Error::from(windows::Win32::Foundation::E_NOINTERFACE));
+            return Err(windows::core::Error::from(
+                windows::Win32::Foundation::E_NOINTERFACE,
+            ));
         };
         let view = self.application_view(hwnd)?;
         unsafe { pinned_apps.UnpinView(Interface::as_raw(&view)).ok() }
@@ -871,4 +924,3 @@ pub fn toggle_window_pinned(hwnd: HWND) -> Result<()> {
         }
     })
 }
-

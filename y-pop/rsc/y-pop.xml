@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+	y-pop — application launcher, driven by hotkeys and popup menus.
+
+	Copy this file next to y-pop.exe to keep it portable, or to
+	%APPDATA%\Ypo-Lite\y-pop.xml. Either place is read on start-up and
+	whenever "Reload configuration" is chosen from the tray menu.
+
+	See docs/y-pop-plan.md for the design this schema follows; this file is
+	the default, not a full attribute reference yet.
+-->
+<y-pop shell-execute="false" show-shortcuts="true" popup="native">
+
+	<!--
+		Variables usable as %name% anywhere below, expanded once at load
+		(alongside the builtins: %win%, %system%, %programfiles%, %mydocs%,
+		%desktop%, %appdata%, %user%, %pop%, %config%, …).
+
+		%clipboard%/%clipboards% are deliberately never expanded here — they
+		are resolved lazily, right before a node launches.
+	-->
+	<variables>
+		<var name="docs" value="%mydocs%"/>
+	</variables>
+
+	<!--
+		Every direct child of <y-pop> becomes its own tray icon (a <group>)
+		or launches immediately on tray click (an <app>).
+	-->
+	<group name="y-pop">
+		<hotkey key="Win+Y"/>
+
+		<separator name="Tools"/>
+		<app name="Command line" exe="%system%\cmd.exe" path="C:\"/>
+		<!--
+			override="true": only takes effect if Win+N is already claimed
+			elsewhere and the normal registration fails — never tried
+			proactively.
+		-->
+		<app name="Notepad" exe="%win%\notepad.exe">
+			<hotkey key="Win+N" override="true"/>
+		</app>
+
+		<group name="Explorers">
+			<app name="File Explorer" exe="%win%\explorer.exe"/>
+			<!--
+				"path,index" overrides the icon shown for an entry — a
+				positive index picks the icon at that position within the
+				file; a negative one (Windows' own convention, e.g. how a
+				.lnk's own icon location works) picks it by resource id
+				instead, stable across a Windows version reordering the
+				file's icons. -41 is illustrative here, not verified against
+				every Windows version — if it doesn't resolve to the
+				Recycle Bin icon on yours, the entry still works, just
+				without a custom icon.
+			-->
+			<app name="Recycle Bin" exe="%win%\explorer.exe" icon="%win%\explorer.exe,-41"/>
+		</group>
+
+		<app name="Recent documents" exe="%docs%" browse="true" filter="*.*"/>
+
+		<separator/>
+		<about/>
+		<quit/>
+	</group>
+
+</y-pop>
