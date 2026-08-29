@@ -13,6 +13,7 @@
 use std::sync::Arc;
 
 use y_core::hotkey::Hotkey;
+use y_core::overlay::Color;
 
 /// Index into a [`ConfigTree`]'s node arena. `u32` rather than `usize`: half
 /// the width of a pointer-sized index on x64, and no config file will ever
@@ -78,6 +79,8 @@ pub struct Defaults {
     pub shell_execute: bool,
     pub show_shortcuts: bool,
     pub popup: PopupMode,
+    pub theme: Theme,
+    pub theme_overrides: ThemeOverrides,
 }
 
 impl Default for Defaults {
@@ -86,7 +89,68 @@ impl Default for Defaults {
             shell_execute: false,
             show_shortcuts: true,
             popup: PopupMode::Native,
+            theme: Theme::Native,
+            theme_overrides: ThemeOverrides::default(),
         }
+    }
+}
+
+/// `theme="..."` on `<y-pop>` — see `docs/y-pop-plan.md`'s "Theme" step.
+/// Pure config, no Win32: resolving [`Theme::Auto`] against the OS's actual
+/// light/dark setting (`y_core::theme::is_dark`) happens where the popup is
+/// built (`y-pop/src/menu.rs`), not here — this module's own doc comment
+/// keeps `crate::config` free of Win32 calls, and a theme choice is exactly
+/// the kind of thing a config-parser unit test has no business needing the
+/// registry for.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Theme {
+    /// Plain OS chrome, no owner-draw — the zero-surprise default: a config
+    /// that never mentions `theme` keeps looking exactly like it always
+    /// has.
+    #[default]
+    Native,
+    Light,
+    Dark,
+    /// Follows `AppsUseLightTheme`, resolved live each time a popup opens
+    /// (not cached at load) — same reasoning `y-snap`'s own `"auto"` uses.
+    Auto,
+}
+
+/// Per-slot colour overrides on top of whichever base [`Theme`] resolves
+/// to — PortAL's own answer to "I like dark but want my own accent colour"
+/// (a user-editable `PortalMenuDesign`, not just the three built-in skins),
+/// and the same `*-color` attribute shape `y-snap`'s `config.rs` already
+/// uses for its overlay palette. `None` in a slot means "keep the theme's
+/// own value there", not "no colour" — a config that sets only
+/// `hover-back-color` still gets every other slot from `theme`. Parsed in
+/// [`crate::config`] (pure data, no Win32 despite reusing
+/// [`y_core::overlay::Color`] — that type itself makes no Win32 call, only
+/// its `colorref` conversion does, and that only ever runs from
+/// `y_core::menu` at paint time); merged onto a resolved [`y_core::menu::
+/// MenuColors`] in `y-pop/src/menu.rs`, the same split [`Theme`] itself
+/// draws between "what the config says" and "what it's resolved to".
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+pub struct ThemeOverrides {
+    pub back: Option<Color>,
+    pub text: Option<Color>,
+    pub hover_back: Option<Color>,
+    pub hover_text: Option<Color>,
+    pub disabled_text: Option<Color>,
+    pub border: Option<Color>,
+}
+
+impl ThemeOverrides {
+    /// Whether any slot was actually set — a config that gives a colour
+    /// attribute but leaves `theme` unset (or `"native"`) still wants a
+    /// themed, owner-drawn popup to paint that colour onto; see
+    /// `y-pop/src/menu.rs::resolve_colors`, the one place this is checked.
+    pub fn any_set(&self) -> bool {
+        self.back.is_some()
+            || self.text.is_some()
+            || self.hover_back.is_some()
+            || self.hover_text.is_some()
+            || self.disabled_text.is_some()
+            || self.border.is_some()
     }
 }
 

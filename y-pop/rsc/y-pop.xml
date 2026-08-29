@@ -9,7 +9,22 @@
 	See docs/y-pop-plan.md for the design this schema follows; this file is
 	the default, not a full attribute reference yet.
 -->
-<y-pop shell-execute="false" show-shortcuts="true" popup="native">
+<!--
+	theme="auto" owner-draws the native popup to match Windows' light/dark
+	setting, resolved live each time the menu opens. "native"/"light"/"dark"
+	are the other choices — "native" (the default if the attribute is
+	omitted) keeps plain, unthemed OS chrome.
+
+	Any of these six attributes overrides one colour slot of whichever theme
+	is active, e.g. back-color="1a1a1a" hover-back-color="ff8800" — a value
+	is "RRGGBB" or "RRGGBBAA", the "#" prefix is optional. Setting one
+	without also setting theme="..." still themes the popup (as if
+	theme="auto" had been written too); every slot not mentioned keeps the
+	base theme's own colour:
+	  back-color, text-color, hover-back-color, hover-text-color,
+	  disabled-text-color, border-color
+-->
+<y-pop shell-execute="false" show-shortcuts="true" popup="native" theme="auto">
 
 	<!--
 		Variables usable as %name% anywhere below, expanded once at load

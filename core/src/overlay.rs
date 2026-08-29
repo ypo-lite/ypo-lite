@@ -115,7 +115,9 @@ impl Color {
         (self.a as u32) << 24 | scale(self.r) << 16 | scale(self.g) << 8 | scale(self.b)
     }
 
-    fn colorref(self) -> COLORREF {
+    /// Exposed to `crate::menu` for owner-drawn menu theming — the only
+    /// other place in `y-core` that talks to raw GDI colour values directly.
+    pub(crate) fn colorref(self) -> COLORREF {
         COLORREF((self.b as u32) << 16 | (self.g as u32) << 8 | self.r as u32)
     }
 }

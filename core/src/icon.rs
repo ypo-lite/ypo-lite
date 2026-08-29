@@ -130,6 +130,25 @@ impl Icon {
             let _ = unsafe { DeleteObject(bitmap.into()) };
             return None;
         }
+
+        // `DrawIconEx` leaves the DIB's alpha straight (unmultiplied) — fine
+        // for `hbmpItem` on an unthemed menu, where Windows' own bitmap
+        // blitter reads it correctly either way, but wrong input for
+        // `AlphaBlend`'s `AC_SRC_ALPHA` mode, which an owner-drawn themed
+        // menu uses to paint this icon itself (`crate::menu::handle_draw_
+        // item`) and assumes premultiplied channels — straight alpha there
+        // shows up as a bright fringe around every icon. Premultiplying once
+        // here, in place, keeps both consumers correct without either one
+        // needing to know which convention the other expects.
+        let pixels =
+            unsafe { std::slice::from_raw_parts_mut(bits.cast::<u8>(), (size as usize) * (size as usize) * 4) };
+        for pixel in pixels.chunks_exact_mut(4) {
+            let a = pixel[3] as u32;
+            pixel[0] = ((pixel[0] as u32 * a) / 255) as u8; // B
+            pixel[1] = ((pixel[1] as u32 * a) / 255) as u8; // G
+            pixel[2] = ((pixel[2] as u32 * a) / 255) as u8; // R
+        }
+
         Some(Bitmap(bitmap))
     }
 }
@@ -237,7 +256,18 @@ impl IconCache {
     pub fn for_directory(&mut self) -> Option<Icon> {
         self.cache
             .entry(CacheKey::Directory)
-            .or_insert_with(|| shell_icon("", true))
+            // A *non-empty* placeholder, not `""` — confirmed live, not
+            // assumed: an empty `pszPath` with `SHGFI_USEFILEATTRIBUTES` |
+            // `FILE_ATTRIBUTE_DIRECTORY` returns a real, valid `HICON` (so
+            // the `Option` here doesn't catch it), just the wrong one — the
+            // shell namespace's own drive/"This PC" icon, not a folder,
+            // apparently because an empty name resolves to the desktop/root
+            // namespace rather than "a nominally-named directory." Any
+            // non-empty name works identically here (`SHGFI_USEFILEATTRIBUTES`
+            // means the shell never touches the filesystem to check it
+            // exists — see the module doc), so the literal text is
+            // arbitrary; it exists only to not be empty.
+            .or_insert_with(|| shell_icon("folder", true))
             .as_ref()
             .and_then(Icon::duplicate)
     }
@@ -426,6 +456,46 @@ mod tests {
         assert!(cache.for_directory().is_some());
         assert!(cache.for_directory().is_some());
         assert_eq!(cache.cache.len(), 1);
+    }
+
+    #[test]
+    fn an_empty_path_resolves_to_a_different_shell_icon_than_a_named_placeholder() {
+        let _guard = serialized();
+        // Regression guard for the bug `for_directory`'s `shell_icon("",
+        // true)` used to have: an empty `pszPath` with
+        // `SHGFI_USEFILEATTRIBUTES` | `FILE_ATTRIBUTE_DIRECTORY` returns a
+        // *valid* `HICON` — so nothing here fails outright — but the wrong
+        // one, the shell namespace's own drive/"This PC" icon rather than a
+        // folder, apparently because an empty name resolves to the
+        // desktop/root namespace instead of "a nominally-named directory."
+        // `iIcon` (the system image list index `SHGetFileInfoW` also fills
+        // in) is what proves the two calls answer differently, confirmed
+        // here rather than assumed — `for_directory` must never go back to
+        // passing `""`.
+        let icon_index = |path: &str| {
+            let wide = HSTRING::from(path);
+            let mut info = SHFILEINFOW::default();
+            let result = unsafe {
+                SHGetFileInfoW(
+                    &wide,
+                    FILE_ATTRIBUTE_DIRECTORY,
+                    Some(&mut info),
+                    size_of::<SHFILEINFOW>() as u32,
+                    SHGFI_ICON | SHGFI_SMALLICON | SHGFI_USEFILEATTRIBUTES,
+                )
+            };
+            assert_ne!(result, 0, "SHGetFileInfoW should succeed for {path:?}");
+            let _ = unsafe { DestroyIcon(info.hIcon) };
+            info.iIcon
+        };
+
+        assert_ne!(
+            icon_index(""),
+            icon_index("folder"),
+            "an empty path must not be used for the directory icon lookup — \
+             it resolves to a different (wrong) shell icon than a named \
+             placeholder does"
+        );
     }
 
     #[test]

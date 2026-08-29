@@ -1,12 +1,14 @@
-//! Y-Pop — placeholder wiring, phase 2 of `docs/y-pop-plan.md`'s roadmap.
+//! Y-Pop — `docs/y-pop-plan.md`'s roadmap steps 1–5.
 //!
 //! Tray icon(s), hotkey registration and launching (including `start`/`exit`
-//! events) now work end to end. The popup itself is still `menu`'s plain,
-//! unthemed native `HMENU` — see that module's doc comment for why that is
-//! deliberate, not an oversight: the themed native and overlay renderers are
+//! events) work end to end. The popup is `menu`'s native `HMENU`, themed
+//! (owner-draw colours, icons, titled separators) per `<y-pop theme="...">`
+//! — see that module's doc comment. `WM_MEASUREITEM`/`WM_DRAWITEM` below are
+//! what a themed popup needs forwarded from this window's own message loop;
+//! an unthemed (`theme="native"`) popup never triggers either message, so
+//! this has no effect there. The overlay renderer (roadmap step 6) is still
 //! a later phase, built on a shared `MenuLayout` step this one doesn't have
-//! yet. Per-node icons are likewise a later phase — every tray icon uses the
-//! generic application icon for now.
+//! yet.
 
 #![windows_subsystem = "windows"]
 
@@ -16,7 +18,8 @@ mod launch;
 mod menu;
 
 use windows::Win32::UI::WindowsAndMessaging::{
-    HMENU, MB_ICONINFORMATION, MB_OK, MessageBoxW, WM_HOTKEY, WM_INITMENUPOPUP,
+    HMENU, MB_ICONINFORMATION, MB_OK, MessageBoxW, WM_DRAWITEM, WM_HOTKEY, WM_INITMENUPOPUP,
+    WM_MEASUREITEM,
 };
 use windows::core::{HSTRING, PCWSTR};
 
@@ -242,6 +245,20 @@ impl TrayApp for YPop {
                 self.run(hwnd, root, position);
             }
             return Some(LRESULT(0));
+        }
+
+        // A themed popup's items are `MFT_OWNERDRAW` (see `menu`'s module
+        // doc's "Theme" section) — Windows sends these two whenever one
+        // needs sizing or painting. `handle_measure_item`/`handle_draw_item`
+        // return `false` for anything not one of ours (a menu built without
+        // a theme never triggers either message at all), in which case
+        // falling through to `DefWindowProc` — the `None` every other
+        // unhandled message here already gets — is correct.
+        if msg == WM_MEASUREITEM && y_core::menu::handle_measure_item(lparam) {
+            return Some(LRESULT(1));
+        }
+        if msg == WM_DRAWITEM && y_core::menu::handle_draw_item(lparam) {
+            return Some(LRESULT(1));
         }
 
         if msg == WM_HOTKEY {

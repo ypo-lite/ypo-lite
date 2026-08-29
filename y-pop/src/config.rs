@@ -18,11 +18,12 @@
 use std::fmt;
 use std::path::PathBuf;
 
+use y_core::overlay::Color;
 use y_core::xml::{self, Document, Element};
 
 use crate::model::{
     App, Browse, Builder, ConfigTree, Defaults, EventMask, HotkeyBinding, IconSource, NodeData,
-    NodeFlags, NodeId, NodeKind, PopupMode, PresenterStyle,
+    NodeFlags, NodeId, NodeKind, PopupMode, PresenterStyle, Theme, ThemeOverrides,
 };
 use crate::variables::{self, Lookup, Pool, Variable};
 
@@ -87,7 +88,19 @@ pub fn load_str(text: &str, builtins: &mut dyn Lookup) -> Result<ConfigTree, xml
     }
     reader.check(
         root,
-        &["shell-execute", "show-shortcuts", "popup", "popup-style"],
+        &[
+            "shell-execute",
+            "show-shortcuts",
+            "popup",
+            "popup-style",
+            "theme",
+            "back-color",
+            "text-color",
+            "hover-back-color",
+            "hover-text-color",
+            "disabled-text-color",
+            "border-color",
+        ],
     );
 
     reader.read_variables(root);
@@ -98,6 +111,8 @@ pub fn load_str(text: &str, builtins: &mut dyn Lookup) -> Result<ConfigTree, xml
         popup: reader
             .popup_mode(root, "popup", "popup-style")
             .unwrap_or(PopupMode::Native),
+        theme: reader.theme(root).unwrap_or_default(),
+        theme_overrides: reader.theme_overrides(root),
     };
 
     let roots = reader.read_children(root);
@@ -267,6 +282,55 @@ impl Reader<'_> {
                 None
             }
         }
+    }
+
+    /// `theme="native" | "light" | "dark" | "auto"` on `<y-pop>`. `None` if
+    /// the attribute is absent, same "not set" vs. "set" distinction
+    /// [`Reader::popup_mode`] makes, for the same reason: [`Defaults::
+    /// default`]'s own choice (`Theme::Native`) is what a config omitting
+    /// `theme` gets, not a second, possibly-diverging copy of that default
+    /// written here too.
+    fn theme(&mut self, element: Element<'_>) -> Option<Theme> {
+        let value = element.attr("theme")?;
+        match value {
+            "native" => Some(Theme::Native),
+            "light" => Some(Theme::Light),
+            "dark" => Some(Theme::Dark),
+            "auto" => Some(Theme::Auto),
+            other => {
+                self.warn(element, format!("unknown theme {other:?}"));
+                None
+            }
+        }
+    }
+
+    /// `*-color` attributes on `<y-pop>` — a user-editable theme on top of
+    /// (or instead of) the built-in `theme=` choice, same `*-color` naming
+    /// and same "applied on top, an explicit colour still wins" reasoning
+    /// `y-snap`'s own overlay palette override loop already uses.
+    fn theme_overrides(&mut self, element: Element<'_>) -> ThemeOverrides {
+        let mut overrides = ThemeOverrides::default();
+        for (name, slot) in [
+            ("back-color", &mut overrides.back),
+            ("text-color", &mut overrides.text),
+            ("hover-back-color", &mut overrides.hover_back),
+            ("hover-text-color", &mut overrides.hover_text),
+            ("disabled-text-color", &mut overrides.disabled_text),
+            ("border-color", &mut overrides.border),
+        ] {
+            let Some(text) = element.attr(name) else {
+                continue;
+            };
+            match Color::parse(text) {
+                Some(color) => *slot = Some(color),
+                // Borrowing `overrides` mutably here, so the warning cannot
+                // go through `self.warn` until the loop is over.
+                None => self
+                    .warnings
+                    .push(format!("line {}: {text:?} is not a colour", element.line())),
+            }
+        }
+        overrides
     }
 
     /// Parses `"path"` or `"path,index"` — PortAL's `ico="...,6"` shorthand
@@ -741,6 +805,78 @@ mod tests {
             tree.warnings
                 .iter()
                 .any(|warning| warning.contains("not implemented yet"))
+        );
+    }
+
+    #[test]
+    fn theme_defaults_to_native() {
+        let tree = load_str("<y-pop><quit/></y-pop>", &mut builtins()).expect("valid");
+        assert_eq!(tree.defaults.theme, Theme::Native);
+    }
+
+    #[test]
+    fn theme_is_read_when_given() {
+        for (value, expected) in [
+            ("native", Theme::Native),
+            ("light", Theme::Light),
+            ("dark", Theme::Dark),
+            ("auto", Theme::Auto),
+        ] {
+            let xml = format!(r#"<y-pop theme="{value}"><quit/></y-pop>"#);
+            let tree = load_str(&xml, &mut builtins()).expect("valid");
+            assert_eq!(tree.defaults.theme, expected, "theme={value:?}");
+            assert!(tree.warnings.is_empty(), "{:?}", tree.warnings);
+        }
+    }
+
+    #[test]
+    fn an_unknown_theme_warns_and_falls_back_to_native() {
+        let tree = load_str(r#"<y-pop theme="neon"><quit/></y-pop>"#, &mut builtins())
+            .expect("valid");
+
+        assert_eq!(tree.defaults.theme, Theme::Native);
+        assert!(
+            tree.warnings.iter().any(|warning| warning.contains("theme")),
+            "{:?}",
+            tree.warnings
+        );
+    }
+
+    #[test]
+    fn theme_color_overrides_are_read() {
+        let tree = load_str(
+            r#"<y-pop back-color="101010" hover-back-color="ff8800"><quit/></y-pop>"#,
+            &mut builtins(),
+        )
+        .expect("valid");
+
+        assert!(tree.warnings.is_empty(), "{:?}", tree.warnings);
+        assert_eq!(
+            tree.defaults.theme_overrides.back,
+            Some(y_core::overlay::Color::rgb(0x10, 0x10, 0x10))
+        );
+        assert_eq!(
+            tree.defaults.theme_overrides.hover_back,
+            Some(y_core::overlay::Color::rgb(0xff, 0x88, 0x00))
+        );
+        assert_eq!(tree.defaults.theme_overrides.text, None);
+    }
+
+    #[test]
+    fn an_invalid_theme_color_warns_and_is_left_unset() {
+        let tree = load_str(
+            r#"<y-pop text-color="not-a-colour"><quit/></y-pop>"#,
+            &mut builtins(),
+        )
+        .expect("valid");
+
+        assert_eq!(tree.defaults.theme_overrides.text, None);
+        assert!(
+            tree.warnings
+                .iter()
+                .any(|warning| warning.contains("not-a-colour")),
+            "{:?}",
+            tree.warnings
         );
     }
 

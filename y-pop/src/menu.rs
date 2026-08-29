@@ -1,10 +1,23 @@
-//! The placeholder popup: a plain, unthemed native `HMENU` built straight
-//! from the `ConfigTree` — icons now (`MIIM_BITMAP`), but no colour/
-//! background theming and no `MenuLayout` indirection yet. See
+//! The native `HMENU` popup, built straight from the `ConfigTree` — icons
+//! (`MIIM_BITMAP`/owner-drawn, depending on theme) and, per `<y-pop
+//! theme="...">`, owner-draw colour/background theming via
+//! `y_core::menu::PopupMenu::themed`. No `MenuLayout` indirection yet. See
 //! `docs/y-pop-plan.md`'s phased roadmap: this exists to prove the tree,
-//! tray icons, hotkeys and launcher work end to end before the real themed
-//! native and overlay renderers are built on top of a shared `MenuLayout`
-//! step.
+//! tray icons, hotkeys and launcher work end to end before the overlay
+//! renderer is built on top of a shared `MenuLayout` step.
+//!
+//! # Theme
+//!
+//! [`resolve_colors`] turns the config's [`Theme`] into
+//! `Option<MenuColors>` — `None` for `Theme::Native` (plain OS chrome,
+//! `PopupMenu::new()`), `Some` for `Light`/`Dark`/`Auto` (owner-drawn,
+//! `PopupMenu::themed`). Resolved once per popup open, in [`build`], and
+//! carried on [`Session`] from there so every submenu — built up front in
+//! [`append_children`] or lazily in [`on_init_menu_popup`] — themes
+//! consistently with the root. [`LIGHT`]/[`DARK`] are `y-pop`'s own palette
+//! choice, not `y-core`'s: `y_core::menu::MenuColors` only defines the
+//! shape, the same split `y-snap`'s `Palette::LIGHT`/`DARK` already draws
+//! between its own app and `y-core`.
 //!
 //! # Icons
 //!
@@ -61,24 +74,78 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use windows::Win32::Graphics::Gdi::HBITMAP;
-use windows::Win32::UI::WindowsAndMessaging::{
-    AppendMenuW, CreatePopupMenu, HMENU, MF_DISABLED, MF_GRAYED, MF_POPUP, MF_STRING,
-};
-use windows::core::{HSTRING, PCWSTR, Result};
+use windows::Win32::UI::WindowsAndMessaging::HMENU;
+use windows::core::Result;
 
 use y_core::icon::{Bitmap, Icon, IconCache};
 use y_core::ids::IDM_FIRST;
-use y_core::menu::{self, PopupMenu};
+use y_core::menu::{self, MenuColors, PopupMenu};
+use y_core::overlay::Color;
 
-use y_pop::model::{App, Browse, ConfigTree, EventMask, NodeData, NodeId, NodeKind};
+use y_pop::model::{
+    App, Browse, ConfigTree, EventMask, NodeData, NodeId, NodeKind, Theme, ThemeOverrides,
+};
+
+/// `y-pop`'s own palette choice for a themed menu — see the module doc's
+/// "Theme" section for why these live here and not in `y_core::menu`.
+/// Values close to Windows 11's own flyouts, the same reference point
+/// `y-snap`'s own `Palette::LIGHT` uses.
+const LIGHT: MenuColors = MenuColors {
+    back: Color::rgb(249, 249, 249),
+    text: Color::rgb(0, 0, 0),
+    hover_back: Color::rgb(0, 120, 215),
+    hover_text: Color::rgb(255, 255, 255),
+    disabled_text: Color::rgb(160, 160, 160),
+    border: Color::rgb(0, 120, 215),
+};
+
+const DARK: MenuColors = MenuColors {
+    back: Color::rgb(32, 32, 32),
+    text: Color::rgb(255, 255, 255),
+    disabled_text: Color::rgb(120, 120, 120),
+    ..LIGHT
+};
+
+/// [`Theme`] + [`ThemeOverrides`] → `Option<MenuColors>` — `None` means
+/// plain native chrome. The one place `Theme::Auto` is resolved against the
+/// live OS setting (`y_core::theme::is_dark`, a registry read); called
+/// fresh from [`build`] each time a popup opens rather than cached at
+/// config-load time, so flipping Windows' light/dark setting takes effect
+/// on the very next popup, not after a restart.
+///
+/// `theme="native"` (the default) with no `*-color` attribute at all stays
+/// plain chrome — the zero-surprise case [`Theme::Native`]'s own doc
+/// comment promises. But a config that sets a colour without also setting
+/// `theme` clearly wants *something* themed to paint that colour onto —
+/// PortAL's own custom-skin users never had to pick a base skin first
+/// either — so any override present resolves as if `theme="auto"` had been
+/// written too, then every set slot overrides that base.
+fn resolve_colors(theme: Theme, overrides: ThemeOverrides) -> Option<MenuColors> {
+    let effective = if theme == Theme::Native && overrides.any_set() {
+        Theme::Auto
+    } else {
+        theme
+    };
+    let base = match effective {
+        Theme::Native => return None,
+        Theme::Light => LIGHT,
+        Theme::Dark => DARK,
+        Theme::Auto if y_core::theme::is_dark() => DARK,
+        Theme::Auto => LIGHT,
+    };
+    Some(MenuColors {
+        back: overrides.back.unwrap_or(base.back),
+        text: overrides.text.unwrap_or(base.text),
+        hover_back: overrides.hover_back.unwrap_or(base.hover_back),
+        hover_text: overrides.hover_text.unwrap_or(base.hover_text),
+        disabled_text: overrides.disabled_text.unwrap_or(base.disabled_text),
+        border: overrides.border.unwrap_or(base.border),
+    })
+}
 
 /// First id handed to a discovered (browsed) file — see the module doc.
 const DISCOVERED_ID_BASE: u32 = 1_000_000;
 
-/// Every icon this popup shows is drawn at this size — small enough to sit
-/// on one menu row without changing it, the conventional Windows menu icon
-/// size.
-const ICON_SIZE: i32 = 16;
 
 /// Extra runtime state for one open popup — the parts a `ConfigTree` alone
 /// can't answer, because they only exist once a `browse` folder is actually
@@ -97,6 +164,11 @@ pub struct Session {
     /// module doc's "Icons" section for why these live exactly as long as
     /// `Session` does and no longer.
     bitmaps: Vec<Bitmap>,
+    /// Resolved once in [`build`] — see the module doc's "Theme" section.
+    /// Every submenu, whether built up front by [`append_children`] or
+    /// lazily by [`on_init_menu_popup`], reads this rather than re-resolving
+    /// [`Theme`] itself, so a whole popup always themes consistently.
+    colors: Option<MenuColors>,
 }
 
 struct PendingFolder {
@@ -110,12 +182,17 @@ struct PendingFolder {
 
 impl Session {
     pub(crate) fn new() -> Self {
+        Self::with_colors(None)
+    }
+
+    fn with_colors(colors: Option<MenuColors>) -> Self {
         Self {
             pending: HashMap::new(),
             discovered: HashMap::new(),
             next_discovered_id: DISCOVERED_ID_BASE,
             icons: IconCache::new(),
             bitmaps: Vec::new(),
+            colors,
         }
     }
 
@@ -133,7 +210,7 @@ impl Session {
     /// a broken one.
     fn attach_icon(&mut self, icon: Option<Icon>, set: impl FnOnce(HBITMAP) -> Result<()>) {
         let Some(icon) = icon else { return };
-        let Some(bitmap) = icon.to_bitmap(ICON_SIZE) else {
+        let Some(bitmap) = icon.to_bitmap(menu::ICON_SIZE) else {
             return;
         };
         let _ = set(bitmap.handle());
@@ -141,15 +218,19 @@ impl Session {
     }
 }
 
-/// `node.icon` if the config gave one, else — for an `App` only — the icon
-/// its own `exe` carries. Nothing else (a bare `Group`, `About`, `Quit`, a
-/// titled `Separator`) gets a default; PortAL does not derive one for those
-/// either.
+/// `node.icon` if the config gave one, else a default depending on kind:
+/// the generic folder icon for a `Group` (PortAL's own default — confirmed
+/// against a screenshot of PortAL's stock menu, not assumed — every
+/// submenu shows a folder unless its config gives it something else), the
+/// icon its own `exe` carries for an `App`. Nothing else (`About`, `Quit`,
+/// a titled `Separator`) gets a default; PortAL does not derive one for
+/// those either.
 fn resolve_icon(icons: &mut IconCache, node: &NodeData) -> Option<Icon> {
     if let Some(source) = &node.icon {
         return icons.for_file(&source.path, source.index);
     }
     match &node.kind {
+        NodeKind::Group => icons.for_directory(),
         // A browse app's own "exe" names a folder, not a file — the
         // generic folder icon, not whatever `for_file` would guess from a
         // directory name that happens to contain a '.'.
@@ -186,8 +267,9 @@ pub fn resolve_selection(id: u32, session: &mut Session) -> Option<Selection> {
 
 /// Builds a popup for `group`'s children.
 pub fn build(tree: &ConfigTree, group: NodeId) -> (PopupMenu, Session) {
-    let mut menu = PopupMenu::new().expect("CreatePopupMenu");
-    let mut session = Session::new();
+    let colors = resolve_colors(tree.defaults.theme, tree.defaults.theme_overrides);
+    let mut menu = PopupMenu::new_maybe_themed(colors).expect("CreatePopupMenu");
+    let mut session = Session::with_colors(colors);
     append_children(tree, group, &mut menu, &mut session);
     (menu, session)
 }
@@ -198,7 +280,7 @@ fn append_children(tree: &ConfigTree, parent: NodeId, menu: &mut PopupMenu, sess
 
         match &node.kind {
             NodeKind::Group => {
-                let mut submenu = PopupMenu::new().expect("CreatePopupMenu");
+                let mut submenu = PopupMenu::new_maybe_themed(session.colors).expect("CreatePopupMenu");
                 append_children(tree, child, &mut submenu, session);
 
                 let icon = resolve_icon(&mut session.icons, node);
@@ -207,7 +289,7 @@ fn append_children(tree: &ConfigTree, parent: NodeId, menu: &mut PopupMenu, sess
                 session.attach_icon(icon, |bitmap| menu.set_item_icon_by_position(position, bitmap));
             }
             NodeKind::App(app) if app.browse.is_some() => {
-                let submenu = PopupMenu::new().expect("CreatePopupMenu");
+                let submenu = PopupMenu::new_maybe_themed(session.colors).expect("CreatePopupMenu");
                 session.pending.insert(
                     submenu.handle().0 as usize,
                     PendingFolder {
@@ -223,14 +305,12 @@ fn append_children(tree: &ConfigTree, parent: NodeId, menu: &mut PopupMenu, sess
                 let position = menu.item_count().saturating_sub(1);
                 session.attach_icon(icon, |bitmap| menu.set_item_icon_by_position(position, bitmap));
             }
-            // An untitled <separator/> is a plain rule; a titled one is
-            // shown as a disabled row until the real renderer can draw it
-            // properly (see the module doc).
-            NodeKind::Separator if node.name.is_empty() => {
-                let _ = menu.add_separator();
-            }
+            // Draws as a thin rule when untitled, its own title text when
+            // titled — themed or not, `add_titled_separator` picks the
+            // right rendering for each (see the module doc's "Theme"
+            // section and `y_core::menu::PopupMenu::add_titled_separator`).
             NodeKind::Separator => {
-                let _ = menu.add_disabled_item(&node.name);
+                let _ = menu.add_titled_separator(&node.name);
             }
             NodeKind::App(_) | NodeKind::About | NodeKind::Quit => {
                 let id = IDM_FIRST + child.as_u32();
@@ -257,14 +337,14 @@ pub fn on_init_menu_popup(session: &mut Session, hmenu: HMENU) {
 
     let entries = crate::browse::list(&pending.dir, &pending.browse);
     if entries.is_empty() {
-        let _ = append_disabled(hmenu, "(empty)");
+        let _ = menu::append_disabled_item(hmenu, "(empty)", session.colors);
         return;
     }
 
     for entry in entries {
         if entry.is_dir {
             let icon = session.icons.for_directory();
-            let Ok(submenu) = append_submenu(hmenu, &entry.name) else {
+            let Ok(submenu) = menu::append_submenu(hmenu, &entry.name, session.colors) else {
                 continue;
             };
             let position = menu::item_count(hmenu).saturating_sub(1);
@@ -284,7 +364,7 @@ pub fn on_init_menu_popup(session: &mut Session, hmenu: HMENU) {
         } else {
             let icon = session.icons.for_file(&entry.path, None);
             let id = session.next_discovered_id();
-            let _ = append_item(hmenu, id, &entry.name);
+            let _ = menu::append_item(hmenu, id, &entry.name, session.colors);
             session.attach_icon(icon, |bitmap| menu::set_item_icon(hmenu, id, bitmap));
 
             session.discovered.insert(
@@ -304,40 +384,19 @@ pub fn on_init_menu_popup(session: &mut Session, hmenu: HMENU) {
     }
 }
 
-// Three raw-handle helpers, needed only for `on_init_menu_popup`: the
-// submenu being populated there was already handed to its parent through
-// `PopupMenu::add_submenu`, which *moves* the wrapper in — by the time
-// `WM_INITMENUPOPUP` names that submenu's handle, no `&mut PopupMenu` for
-// it exists anywhere to add through, only the raw `HMENU` the message
-// carries. Safe to build on regardless: Windows destroys a submenu with
-// whatever parent menu owns it, recursively, so anything appended here is
-// still cleaned up correctly when the root `PopupMenu` (the one thing that
-// actually owns a `Drop` impl) is dropped — nothing appended through these
-// needs tracking of its own.
-
-fn append_item(menu: HMENU, id: u32, text: &str) -> Result<()> {
-    let text = HSTRING::from(text);
-    unsafe { AppendMenuW(menu, MF_STRING, id as usize, PCWSTR(text.as_ptr())) }
-}
-
-fn append_disabled(menu: HMENU, text: &str) -> Result<()> {
-    let text = HSTRING::from(text);
-    unsafe {
-        AppendMenuW(
-            menu,
-            MF_STRING | MF_DISABLED | MF_GRAYED,
-            0,
-            PCWSTR(text.as_ptr()),
-        )
-    }
-}
-
-fn append_submenu(menu: HMENU, text: &str) -> Result<HMENU> {
-    let submenu = unsafe { CreatePopupMenu()? };
-    let text = HSTRING::from(text);
-    unsafe { AppendMenuW(menu, MF_POPUP, submenu.0 as usize, PCWSTR(text.as_ptr()))? };
-    Ok(submenu)
-}
+// `on_init_menu_popup` above uses `y_core::menu::append_item`/
+// `append_disabled_item`/`append_submenu` directly rather than
+// `PopupMenu`'s own methods: the submenu being populated there was already
+// handed to its parent through `PopupMenu::add_submenu`, which *moves* the
+// wrapper in — by the time `WM_INITMENUPOPUP` names that submenu's handle,
+// no `&mut PopupMenu` for it exists anywhere to add through, only the raw
+// `HMENU` the message carries. Safe to build on regardless: Windows
+// destroys a submenu with whatever parent menu owns it, recursively, so
+// anything appended here is still cleaned up correctly (owner-drawn items'
+// `ItemData` included — see `y_core::menu`'s module doc) when the root
+// `PopupMenu` (the one thing that actually owns a `Drop` impl) is dropped.
+// `session.colors` is threaded through so a browsed folder's own rows theme
+// the same as the rest of the popup — see this module's "Theme" section.
 
 /// These exercise the real thing: `CreatePopupMenu`/`AppendMenuW` and the
 /// `HMENU` round trip through a `usize`, not a mock of them — nothing here
@@ -621,6 +680,24 @@ mod tests {
     }
 
     #[test]
+    fn a_group_gets_the_folder_icon_by_default() {
+        let _guard = serialized();
+        let tree = config::load_str(
+            r#"<y-pop><group name="Root"><group name="Sub"><quit/></group></group></y-pop>"#,
+            &mut Vec::<Variable>::new(),
+        )
+        .expect("valid");
+        let root = tree.roots[0];
+
+        let (popup, _session) = build(&tree, root);
+        // A submenu item has no command id of its own to address it by
+        // (`AppendMenuW`'s `MF_POPUP` slot is the submenu's own handle
+        // instead — see `PopupMenu::set_item_icon_by_position`'s doc
+        // comment) — position 0, the only item this popup has.
+        assert!(item_has_icon_by_position(popup.handle(), 0));
+    }
+
+    #[test]
     fn quit_gets_no_icon_by_default() {
         let _guard = serialized();
         let tree = config::load_str(
@@ -664,5 +741,33 @@ mod tests {
         // Folders sort before files (see `browse`), and this folder is the
         // only entry — position 0.
         assert!(item_has_icon_by_position(top, 0));
+    }
+
+    #[test]
+    fn theme_native_with_no_overrides_stays_unthemed() {
+        assert!(resolve_colors(Theme::Native, ThemeOverrides::default()).is_none());
+    }
+
+    #[test]
+    fn an_override_with_theme_left_native_still_themes_the_popup() {
+        let overrides = ThemeOverrides {
+            hover_back: Some(Color::rgb(0xff, 0x88, 0x00)),
+            ..ThemeOverrides::default()
+        };
+        let colors = resolve_colors(Theme::Native, overrides).expect(
+            "a colour override with no explicit theme must still resolve to a themed popup",
+        );
+        assert_eq!(colors.hover_back, Color::rgb(0xff, 0x88, 0x00));
+    }
+
+    #[test]
+    fn an_override_wins_over_the_base_theme_everywhere_else_matches_it() {
+        let overrides = ThemeOverrides {
+            back: Some(Color::rgb(1, 2, 3)),
+            ..ThemeOverrides::default()
+        };
+        let colors = resolve_colors(Theme::Light, overrides).expect("theme=\"light\" themes");
+        assert_eq!(colors.back, Color::rgb(1, 2, 3));
+        assert_eq!(colors.text, LIGHT.text, "every other slot keeps the base theme's value");
     }
 }
