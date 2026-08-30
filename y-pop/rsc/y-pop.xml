@@ -10,19 +10,29 @@
 	the default, not a full attribute reference yet.
 -->
 <!--
-	theme="auto" owner-draws the native popup to match Windows' light/dark
-	setting, resolved live each time the menu opens. "native"/"light"/"dark"
-	are the other choices — "native" (the default if the attribute is
-	omitted) keeps plain, unthemed OS chrome.
+	theme picks a base skin: "native" (the default if omitted) keeps plain,
+	unthemed OS chrome; "default"/"flat"/"dark" are PortAL's own three
+	built-in skins, reproduced with PortAL's own colours/border/gradient
+	values; "auto" resolves live, each time the menu opens, to "default" or
+	"dark" to match Windows' current light/dark setting.
 
-	Any of these six attributes overrides one colour slot of whichever theme
-	is active, e.g. back-color="1a1a1a" hover-back-color="ff8800" — a value
-	is "RRGGBB" or "RRGGBBAA", the "#" prefix is optional. Setting one
-	without also setting theme="..." still themes the popup (as if
-	theme="auto" had been written too); every slot not mentioned keeps the
-	base theme's own colour:
+	A <skin> child of <y-pop> overrides individual parts of whichever theme
+	is active, e.g. <skin back-color="1a1a1a" hover-back-color="ff8800"/> —
+	a colour value is "RRGGBB" or "RRGGBBAA", the "#" prefix is optional.
+	Setting one without also setting theme="..." still themes the popup (as
+	if theme="auto" had been written too); every slot not mentioned keeps
+	the base theme's own value:
 	  back-color, text-color, hover-back-color, hover-text-color,
-	  disabled-text-color, border-color
+	  disabled-text-color
+	  padding — gap BETWEEN rows, in pixels (0 in every built-in skin —
+	    PortAL has no such gap; this is a y-pop-only addition)
+	  margin — gap WITHIN a row, between its border and its own icon/text,
+	    in pixels (also 0 in every built-in skin, also y-pop-only)
+	<skin> can also carry two child elements, both optional and
+	independently all-or-nothing (an incomplete one warns and is dropped):
+	  <border size="1" round="8" color="3a3a3a"/>
+	  <background-gradient start="2b2b2b" end="1a1a1a" direction="v"/>
+	    (direction is "h" or "v", default "h")
 -->
 <y-pop shell-execute="false" show-shortcuts="true" popup="native" theme="auto">
 

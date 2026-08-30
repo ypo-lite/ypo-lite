@@ -6,14 +6,17 @@
 //! native colours, `hbmpItem` for icons — the shape every tray/context menu
 //! in the workspace still wants. [`PopupMenu::themed`] instead builds every
 //! item `MFT_OWNERDRAW`, which hands *all* painting to this process via
-//! `WM_MEASUREITEM`/`WM_DRAWITEM` — [`handle_measure_item`]/
-//! [`handle_draw_item`], which the owner window's message loop must forward
-//! both messages to (see their own doc comments for the exact call shape).
-//! `y-pop`'s themed native backend (`docs/y-pop-plan.md`'s roadmap step 5)
-//! is the motivating, and so far only, caller.
+//! `WM_MEASUREITEM`/`WM_DRAWITEM` — [`paint::handle_measure_item`]/
+//! [`paint::handle_draw_item`], which the owner window's message loop must
+//! forward both messages to (see their own doc comments for the exact call
+//! shape, and [`paint`]'s own module doc for how the two nested rects it
+//! draws relate to [`MenuDesign`]'s fields). `y-pop`'s themed native backend
+//! (`docs/y-pop-plan.md`'s roadmap step 5) is the motivating, and so far
+//! only, caller.
 //!
 //! Once `MFT_OWNERDRAW` is set on an item, two things Windows otherwise does
-//! for free stop happening, which is why this module looks the way it does:
+//! for free stop happening, which is why this module (and its [`paint`]
+//! submodule) look the way they do:
 //!
 //! - **`dwTypeData` (the item's text) is no longer text at all** — per
 //!   `AppendMenuW`'s own documented behaviour, `lpNewItem`/`dwItemData`
@@ -44,27 +47,35 @@
 //! including a `browse` folder's items, appended straight to a raw `HMENU`
 //! from `WM_INITMENUPOPUP` (see [`append_item`]/[`append_submenu`]) with no
 //! `PopupMenu` wrapper in the loop to have tracked them otherwise.
+//!
+//! # Module layout
+//!
+//! This file owns the `PopupMenu` RAII wrapper, its `MenuDesign`/[`ItemData`]
+//! shapes, and everything that constructs or tears down an `HMENU`/
+//! `ItemData` pair. Actually *painting* one — the `WM_MEASUREITEM`/
+//! `WM_DRAWITEM` handlers and the GDI calls under them — lives in
+//! [`paint`], a separate file: building a menu and rendering one are
+//! different enough concerns (construction/lifetime vs. per-pixel drawing)
+//! that keeping them apart is worth the small cost of [`ItemData`]/
+//! [`ItemKind`] needing to be visible to both — plain private items still
+//! reach `paint` for free, since it's a child module of this one.
 
-use windows::Win32::Foundation::{HWND, LPARAM, POINT, RECT, SIZE, WPARAM};
-use windows::Win32::Graphics::Gdi::{
-    AC_SRC_ALPHA, AC_SRC_OVER, AlphaBlend, BF_BOTTOM, BITMAP, BLENDFUNCTION, BitBlt,
-    CreateCompatibleBitmap, CreateCompatibleDC, CreateSolidBrush, DFC_MENU, DFCS_MENUARROW,
-    DT_LEFT, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject, DrawEdge,
-    DrawFrameControl, DrawTextW, EDGE_ETCHED, ExcludeClipRect, FillRect, FrameRect, GetDC,
-    GetObjectW, GetTextExtentPoint32W, HBITMAP, HDC, HGDIOBJ, ReleaseDC, SRCAND, SRCINVERT,
-    SelectObject, SetBkMode, SetTextColor, TRANSPARENT,
-};
-use windows::Win32::UI::Controls::{DRAWITEMSTRUCT, MEASUREITEMSTRUCT, ODS_SELECTED, ODT_MENU};
+use windows::Win32::Foundation::{HWND, LPARAM, POINT, WPARAM};
+use windows::Win32::Graphics::Gdi::{CreateSolidBrush, DeleteObject, HBITMAP};
 use windows::Win32::UI::WindowsAndMessaging::{
-    AppendMenuW, CreatePopupMenu, DestroyMenu, GetMenuItemCount, GetMenuItemInfoW, HMENU,
-    MENU_ITEM_FLAGS, MENUITEMINFOW, MF_CHECKED, MF_DISABLED, MF_GRAYED, MF_OWNERDRAW, MF_POPUP,
-    MF_SEPARATOR, MF_STRING, MFT_OWNERDRAW, MIIM_BITMAP, MIIM_DATA, MIIM_FTYPE, MIIM_SUBMENU,
-    PostMessageW, SetForegroundWindow, SetMenuItemInfoW, TPM_BOTTOMALIGN, TPM_LEFTALIGN,
-    TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, WM_NULL,
+    AppendMenuW, CreatePopupMenu, DestroyMenu, GetMenuInfo, GetMenuItemCount, GetMenuItemInfoW,
+    HMENU, MENU_ITEM_FLAGS, MENUINFO, MENUITEMINFOW, MF_CHECKED, MF_DISABLED, MF_GRAYED,
+    MF_OWNERDRAW, MF_POPUP, MF_SEPARATOR, MF_STRING, MFT_OWNERDRAW, MIIM_BITMAP, MIIM_DATA,
+    MIIM_FTYPE, MIIM_SUBMENU, MIM_BACKGROUND, PostMessageW, SetForegroundWindow, SetMenuInfo,
+    SetMenuItemInfoW, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD, TPM_RIGHTBUTTON,
+    TrackPopupMenu, WM_NULL,
 };
 use windows::core::{HSTRING, PCWSTR, Result};
 
 use crate::overlay::Color;
+
+pub mod paint;
+pub use paint::{ICON_SIZE, handle_draw_item, handle_measure_item};
 
 pub struct PopupMenu {
     handle: HMENU,
@@ -74,45 +85,134 @@ pub struct PopupMenu {
     owned: Vec<HMENU>,
     /// `Some` for a menu built with [`PopupMenu::themed`] — every item this
     /// menu (and any submenu it attaches) appends from here on is
-    /// owner-drawn with this palette. `None` is the plain, native-rendered
+    /// owner-drawn with this design. `None` is the plain, native-rendered
     /// path every other caller in the workspace still uses.
-    colors: Option<MenuColors>,
+    design: Option<MenuDesign>,
 }
 
-/// The palette an owner-drawn [`PopupMenu`] paints itself with — PortAL's
-/// `PortalMenuDesign` (`menu.cpp`) trimmed to what `y-pop` actually themes:
-/// a base and a hovered/selected state, a dimmed disabled text, and a thin
-/// border drawn around the currently hovered row (not around the whole
-/// popup — PortAL's own "border" is per-row too, confirmed by reading
-/// `OnDrawItem`, not a window frame). Reuses [`crate::overlay::Color`]
-/// rather than a new colour type — the same reasoning `y-snap`'s own
-/// `Palette` already follows for its overlay.
+/// The design an owner-drawn [`PopupMenu`] paints itself with — replaces the
+/// original flat `MenuDesign` (a base and hover colour pair, a dimmed
+/// disabled text, a fixed 1px hover outline) with PortAL's own
+/// `PortalMenuDesign` (`menu.h`) grouping: a border with its own size/round/
+/// colour, a fill that's either solid or a gradient, and a per-row
+/// [`margin`](Self::margin) PortAL never had at all. See
+/// `y-pop/docs/y-pop-plan.md`'s "Theme system v2" section for the full
+/// design rationale and the exact [`paint::handle_draw_item`] algorithm this
+/// implements. Reuses [`crate::overlay::Color`] rather than a new colour
+/// type — the same reasoning `y-snap`'s own `Palette` already follows for
+/// its overlay.
 #[derive(Clone, Copy)]
-pub struct MenuColors {
-    pub back: Color,
-    pub text: Color,
-    pub hover_back: Color,
-    pub hover_text: Color,
+pub struct MenuDesign {
+    /// An idle row's own colours.
+    pub base: ColorPair,
+    /// A hovered/selected row's colours — also what [`Fill::Solid`] paints
+    /// and what a [`Fill::Gradient`]'s `start`/`end` sit on top of, both
+    /// only ever applied to the selected row (see the module's "Theme
+    /// system v2" doc: PortAL's own `OnDrawItem` gates border/round/
+    /// gradient on `ODS_SELECTED` the same way, confirmed by reading it).
+    pub selected: ColorPair,
     pub disabled_text: Color,
-    pub border: Color,
+    pub border: Border,
+    pub fill: Fill,
+    /// Gap **between** rows — CSS would call this `margin` (space outside
+    /// an element, between it and its neighbours); named `padding` here on
+    /// the user's explicit correction, so the two names in this struct
+    /// match the vocabulary this codebase actually uses, not CSS's. Inset,
+    /// in pixels, applied to every row's own cell on all four sides before
+    /// anything else is drawn — not a PortAL feature (its own `border_size`
+    /// doubles as the only inset it has); combined with [`Border::round`]
+    /// this is what makes a hovered row read as a floating rounded pill
+    /// (Windows-11-flyout style) rather than a rounded rect butted flush
+    /// against its neighbours. Applies uniformly to idle and selected rows
+    /// alike, so the row grid stays evenly spaced; only the selected row's
+    /// cell additionally gets `border`/`fill` treatment.
+    pub padding: u32,
+    /// Gap **within** a row, between its border (or its cell edge, if
+    /// `border.size == 0`) and its own icon/text/arrow content — CSS would
+    /// call this `padding`; named `margin` here for the same reason
+    /// [`padding`](Self::padding) isn't called `margin`. Reserved for every
+    /// row alike (selected or not — see [`paint::draw_normal_item`]'s own
+    /// doc comment for why content must not shift position when a row's
+    /// hover state toggles), on top of [`paint`]'s fixed `TEXT_PAD`
+    /// baseline inset, not in place of it — `0` (this field's meaning when
+    /// unset) keeps that baseline exactly as it was before this field
+    /// existed.
+    pub margin: u32,
+}
+
+/// An idle or selected row's text/background colour pair — was `MenuDesign`'
+/// flat `back`/`text` and `hover_back`/`hover_text` fields, grouped.
+#[derive(Clone, Copy)]
+pub struct ColorPair {
+    pub text: Color,
+    pub back: Color,
+}
+
+/// A selected row's border — `size`/`round` both `0` (this type's
+/// [`Default`]) reproduces the old fixed 1px `FrameRect` outline's
+/// *absence* of rounding, not its presence: see [`MenuDesign`]'s "Theme
+/// system v2" doc reference for why the shipped `y-pop` themes now set
+/// `size = 0` (a filled pill, no stroke) rather than keeping that outline.
+#[derive(Clone, Copy)]
+pub struct Border {
+    /// `0` = no border ring at all — the selected row's own [`Fill`] then
+    /// paints its full (optionally rounded) paint rect directly.
+    pub size: u32,
+    /// `0` = square corners. Passed straight through to `RoundRect`'s own
+    /// `width`/`height` ellipse parameters (PortAL's own
+    /// `menu.cpp::OnDrawItem` call passes `border_round` for both, not a
+    /// separately computed radius — carried over as-is).
+    pub round: u32,
+    pub color: Color,
+}
+
+/// What a selected row's inner rect (inside the border, if any) is filled
+/// with.
+#[derive(Clone, Copy)]
+pub enum Fill {
+    /// [`MenuDesign::selected`]'s own `back`, flat — every theme's default.
+    Solid,
+    Gradient(Gradient),
+}
+
+#[derive(Clone, Copy)]
+pub struct Gradient {
+    pub direction: GradientDirection,
+    pub start: Color,
+    pub end: Color,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GradientDirection {
+    Horizontal,
+    Vertical,
 }
 
 /// What one owner-drawn item paints itself as — boxed and handed to Windows
 /// as `dwItemData` (see the module doc's "Owner-draw theming" section for
 /// why that, and not `dwTypeData`, is where an owner-drawn item's text has
-/// to live).
+/// to live). Private to `menu` (this file and [`paint`] both reach it for
+/// free, since `paint` is a child module).
 struct ItemData {
     text: Vec<u16>,
     kind: ItemKind,
-    colors: MenuColors,
+    design: MenuDesign,
     /// Set later, once an icon is resolved — see [`set_item_icon`]'s doc
     /// comment for why this, and not `hbmpItem`, is where a themed item's
     /// icon ends up.
     bitmap: Option<HBITMAP>,
     /// Whether this item opens a submenu — see [`ItemKind::Normal`]'s doc
-    /// comment for why `draw_normal_item` needs to know this even though
-    /// `kind` itself doesn't distinguish the two.
+    /// comment for why [`paint::draw_normal_item`] needs to know this even
+    /// though `kind` itself doesn't distinguish the two.
     submenu: bool,
+    /// The right-aligned hint text drawn in [`MenuDesign::disabled_text`]
+    /// after the label — PortAL's `sctext` (`menu.cpp`), a formatted hotkey
+    /// combination such as `"Win+Y"`, never anything else. `None` for every
+    /// item with nothing to show (no hotkey, or `show-shortcuts="false"`),
+    /// which is also what an empty string would mean, so callers filter one
+    /// out before it gets here rather than this module treating the two
+    /// differently.
+    shortcut: Option<Vec<u16>>,
 }
 
 enum ItemKind {
@@ -128,8 +228,8 @@ enum ItemKind {
     /// a double arrow, whatever it looks like against a light background —
     /// it just leaves Windows' own fixed-colour arrow as the only one,
     /// which goes invisible against a dark theme's background until the
-    /// row is hovered into a lighter highlight. `draw_normal_item` does the
-    /// same clip-exclusion PortAL does, for the same reason.
+    /// row is hovered into a lighter highlight. [`paint::draw_normal_item`]
+    /// does the same clip-exclusion PortAL does, for the same reason.
     Normal,
     /// An untitled `<separator/>` draws as a thin etched rule, same
     /// `EDGE_ETCHED` groove a plain (non-owner-draw) `MF_SEPARATOR` gets for
@@ -143,58 +243,30 @@ enum ItemKind {
     Separator,
 }
 
-/// The icon size every themed row's icon draws at, and the width reserved
-/// for it on *every* `Normal` row regardless of whether that particular
-/// item has an icon — matching a native (non-owner-draw) menu, which
-/// reserves the same fixed icon/check gutter for every item so a mix of
-/// icon and no-icon rows still lines its text up in one column instead of
-/// each row starting wherever its own icon (or lack of one) happened to
-/// end. `y-pop`'s own `Icon::to_bitmap` call sites use this directly rather
-/// than keeping a second copy of the same number, so the two can never
-/// drift apart.
-pub const ICON_SIZE: i32 = 16;
-/// Padding either side of an item's text.
-const TEXT_PAD: i32 = 8;
-/// Gap between the icon column and the text that follows it. `16`, not a
-/// tighter value, to match PortAL's own spacing: `menu.cpp::OnDrawItem`
-/// starts text at `rect.left + iconSize.cx + 24` while its icon itself
-/// starts at `rect.left + 8` — so PortAL's icon-to-text gap is `24 -
-/// TEXT_PAD(8) = 16`, confirmed against a real screenshot comparison
-/// (`y-pop/docs/portal-analysis.md`'s pixel-numbers section), not a value
-/// chosen by eye.
-const ICON_GAP: i32 = 16;
-/// Reserved on a submenu item's right edge for its own themed arrow glyph —
-/// see [`ItemKind::Normal`]'s doc comment for why one is drawn at all.
-const ARROW_WIDTH: i32 = 16;
-/// An untitled separator's row height — PortAL's own fixed `10` for
-/// `MENU_SEP` (`menu.cpp::OnMeasureItem`), carried over as-is: thinner than
-/// a real item on purpose, the same visual cue a native `MF_SEPARATOR` row
-/// already gives for free.
-const SEPARATOR_HEIGHT: i32 = 10;
-/// Never shorter than this even for a single-line item with no icon — a
-/// themed row that's *too* tight to comfortably click is a worse trade than
-/// a few extra pixels of height.
-const MIN_ITEM_HEIGHT: i32 = 22;
-
 impl PopupMenu {
     pub fn new() -> Result<Self> {
         let handle = unsafe { CreatePopupMenu()? };
         Ok(Self {
             handle,
             owned: Vec::new(),
-            colors: None,
+            design: None,
         })
     }
 
     /// Like [`PopupMenu::new`], but every item this menu (and every submenu
     /// it goes on to attach) appends is owner-drawn with `colors` — see the
-    /// module doc's "Owner-draw theming" section.
-    pub fn themed(colors: MenuColors) -> Result<Self> {
+    /// module doc's "Owner-draw theming" section. Also paints the whole
+    /// popup's own background with `design.base.back` (see
+    /// [`set_menu_background`]'s doc comment) — required, not cosmetic,
+    /// once [`MenuDesign::margin`] leaves a gap around every row that this
+    /// row-level painting alone never covers.
+    pub fn themed(design: MenuDesign) -> Result<Self> {
         let handle = unsafe { CreatePopupMenu()? };
+        set_menu_background(handle, design.base.back);
         Ok(Self {
             handle,
             owned: Vec::new(),
-            colors: Some(colors),
+            design: Some(design),
         })
     }
 
@@ -202,19 +274,44 @@ impl PopupMenu {
     /// palette is in play — the shape every submenu-constructing call site
     /// in `y-pop/src/menu.rs` actually wants: build every level of the tree
     /// the same way, themed or not, without an `if` at each one.
-    pub fn new_maybe_themed(colors: Option<MenuColors>) -> Result<Self> {
-        match colors {
-            Some(colors) => Self::themed(colors),
+    pub fn new_maybe_themed(design: Option<MenuDesign>) -> Result<Self> {
+        match design {
+            Some(design) => Self::themed(design),
             None => Self::new(),
         }
     }
 
     pub fn add_item(&self, id: u32, text: &str) -> Result<()> {
-        match self.colors {
-            Some(colors) => {
-                append_owner_draw(self.handle, id as usize, false, false, text, ItemKind::Normal, colors)
-            }
-            None => self.append(MF_STRING, id as usize, text),
+        self.add_item_with_shortcut(id, text, None)
+    }
+
+    /// Like [`PopupMenu::add_item`], with a right-aligned shortcut hint
+    /// (`"Win+Y"`, already formatted — see [`y_core::hotkey::Hotkey`]'s own
+    /// `Display` impl, which already matches PortAL's `getHotkeyText`
+    /// formatting) drawn after the label. `None` (or an empty string) draws
+    /// exactly as [`PopupMenu::add_item`] does — a separate method rather
+    /// than a plain extra parameter on it, so the many callers with no
+    /// shortcut to show (`y-term`, `y-snap`, `skeleton`, this module's own
+    /// tests) needed no change. On the native (unthemed) path this is a
+    /// `"{text}\t{shortcut}"` composed once, up front — Win32 already
+    /// right-aligns anything after a menu item's `\t` as an accelerator
+    /// hint for free; only the owner-draw path needs [`paint`] to draw one
+    /// itself.
+    pub fn add_item_with_shortcut(&self, id: u32, text: &str, shortcut: Option<&str>) -> Result<()> {
+        match self.design {
+            Some(design) => append_owner_draw(
+                self.handle,
+                NewItem {
+                    id: id as usize,
+                    disabled: false,
+                    submenu: false,
+                    text,
+                    shortcut,
+                    kind: ItemKind::Normal,
+                },
+                design,
+            ),
+            None => self.append(MF_STRING, id as usize, &with_native_shortcut(text, shortcut)),
         }
     }
 
@@ -250,8 +347,8 @@ impl PopupMenu {
 
     /// An item with a check mark, for settings toggled from the tray menu.
     /// Always native — no themed caller exists yet, and a themed check mark
-    /// needs its own glyph handling in [`handle_draw_item`] that isn't worth
-    /// building ahead of a use for it.
+    /// needs its own glyph handling in [`paint::handle_draw_item`] that
+    /// isn't worth building ahead of a use for it.
     pub fn add_check_item(&self, id: u32, text: &str, checked: bool) -> Result<()> {
         let flags = if checked {
             MF_STRING | MF_CHECKED
@@ -264,8 +361,12 @@ impl PopupMenu {
     /// A greyed-out item: shown, not selectable. Handy as a status line
     /// ("No device found") at the top of a tray menu.
     pub fn add_disabled_item(&self, text: &str) -> Result<()> {
-        match self.colors {
-            Some(colors) => append_owner_draw(self.handle, 0, true, false, text, ItemKind::Normal, colors),
+        match self.design {
+            Some(design) => append_owner_draw(
+                self.handle,
+                NewItem { id: 0, disabled: true, submenu: false, text, shortcut: None, kind: ItemKind::Normal },
+                design,
+            ),
             None => self.append(MF_STRING | MF_DISABLED | MF_GRAYED, 0, text),
         }
     }
@@ -283,10 +384,19 @@ impl PopupMenu {
     /// placeholder `y-pop` used before this module could draw a themed
     /// separator at all.
     pub fn add_titled_separator(&self, title: &str) -> Result<()> {
-        match self.colors {
-            Some(colors) => {
-                append_owner_draw(self.handle, 0, false, false, title, ItemKind::Separator, colors)
-            }
+        match self.design {
+            Some(design) => append_owner_draw(
+                self.handle,
+                NewItem {
+                    id: 0,
+                    disabled: false,
+                    submenu: false,
+                    text: title,
+                    shortcut: None,
+                    kind: ItemKind::Separator,
+                },
+                design,
+            ),
             None if title.is_empty() => self.append(MF_SEPARATOR, 0, ""),
             None => self.append(MF_STRING | MF_DISABLED | MF_GRAYED, 0, title),
         }
@@ -295,13 +405,34 @@ impl PopupMenu {
     /// Attaches `submenu` under `text`. The submenu's handle is taken over by
     /// this menu and destroyed with it.
     pub fn add_submenu(&mut self, text: &str, submenu: PopupMenu) -> Result<()> {
+        self.add_submenu_with_shortcut(text, submenu, None)
+    }
+
+    /// Like [`PopupMenu::add_submenu`], with a shortcut hint — for a
+    /// `<group>` (or `browse` folder) opened by its own `<hotkey>`, same as
+    /// a leaf item's: see [`PopupMenu::add_item_with_shortcut`].
+    pub fn add_submenu_with_shortcut(
+        &mut self,
+        text: &str,
+        submenu: PopupMenu,
+        shortcut: Option<&str>,
+    ) -> Result<()> {
         let handle = submenu.into_raw();
         self.owned.push(handle);
-        match self.colors {
-            Some(colors) => {
-                append_owner_draw(self.handle, handle.0 as usize, false, true, text, ItemKind::Normal, colors)
-            }
-            None => self.append(MF_POPUP, handle.0 as usize, text),
+        match self.design {
+            Some(design) => append_owner_draw(
+                self.handle,
+                NewItem {
+                    id: handle.0 as usize,
+                    disabled: false,
+                    submenu: true,
+                    text,
+                    shortcut,
+                    kind: ItemKind::Normal,
+                },
+                design,
+            ),
+            None => self.append(MF_POPUP, handle.0 as usize, &with_native_shortcut(text, shortcut)),
         }
     }
 
@@ -372,32 +503,57 @@ impl Drop for PopupMenu {
     }
 }
 
+/// `text`, or `"{text}\t{shortcut}"` if `shortcut` is non-empty — a native
+/// (unthemed) menu right-aligns anything after a `\t` in its item text as an
+/// accelerator hint on its own, so this is the entire native-path
+/// implementation of the shortcut column; see [`PopupMenu::
+/// add_item_with_shortcut`].
+fn with_native_shortcut(text: &str, shortcut: Option<&str>) -> String {
+    match shortcut {
+        Some(shortcut) if !shortcut.is_empty() => format!("{text}\t{shortcut}"),
+        _ => text.to_owned(),
+    }
+}
+
+/// Everything [`append_owner_draw`] needs about the item itself, grouped so
+/// the function stays under `clippy::too_many_arguments` now that a
+/// shortcut hint is one more thing every caller can supply — `menu` and
+/// `design` stay their own parameters since every call site already has
+/// them lying around separately (a `PopupMenu`'s own handle/design fields,
+/// or the raw-`HMENU` free functions' own arguments) rather than a value
+/// worth constructing this struct just to carry.
+struct NewItem<'a> {
+    /// A command id for a leaf item, or the submenu's own `HMENU` (as
+    /// `usize`) for one created with `submenu` set — `submenu` only changes
+    /// the `AppendMenuW` flags (`MF_POPUP`, and that handle-as-id
+    /// convention); it plays no part in how the item paints itself (see
+    /// [`ItemKind::Normal`]'s doc comment for why).
+    id: usize,
+    disabled: bool,
+    submenu: bool,
+    text: &'a str,
+    shortcut: Option<&'a str>,
+    kind: ItemKind,
+}
+
 /// Appends one owner-drawn item to a raw `HMENU` — the free-function form
 /// [`PopupMenu`]'s own themed methods build on, and the one a caller with no
 /// `&mut PopupMenu` in hand can use directly (`y-pop`'s
 /// `on_init_menu_popup`, populating a submenu from its raw handle — see
-/// `core::menu`'s module doc). `id` is a command id for a leaf item, or the
-/// submenu's own `HMENU` (as `usize`) for one created with `submenu` set —
-/// `submenu` only changes the `AppendMenuW` flags (`MF_POPUP`, and that
-/// handle-as-id convention); it plays no part in how the item paints itself
-/// (see [`ItemKind::Normal`]'s doc comment for why).
-fn append_owner_draw(
-    menu: HMENU,
-    id: usize,
-    disabled: bool,
-    submenu: bool,
-    text: &str,
-    kind: ItemKind,
-    colors: MenuColors,
-) -> Result<()> {
+/// `core::menu`'s module doc).
+fn append_owner_draw(menu: HMENU, item: NewItem, design: MenuDesign) -> Result<()> {
+    let NewItem { id, disabled, submenu, text, shortcut, kind } = item;
     let separator = matches!(kind, ItemKind::Separator);
 
     let data = Box::new(ItemData {
         text: text.encode_utf16().collect(),
         kind,
-        colors,
+        design,
         bitmap: None,
         submenu,
+        shortcut: shortcut
+            .filter(|s| !s.is_empty())
+            .map(|s| s.encode_utf16().collect()),
     });
     // Windows owns this pointer from here on, via `dwItemData` — reclaimed
     // by `free_owner_draw_data`, never dropped directly.
@@ -426,9 +582,13 @@ fn append_owner_draw(
 /// Appends a themed *or* plain leaf item to a raw `HMENU`, depending on
 /// `colors` — for `y-pop`'s `on_init_menu_popup`, populating a `browse`
 /// submenu discovered at menu-open time (see `core::menu`'s module doc).
-pub fn append_item(menu: HMENU, id: u32, text: &str, colors: Option<MenuColors>) -> Result<()> {
-    match colors {
-        Some(colors) => append_owner_draw(menu, id as usize, false, false, text, ItemKind::Normal, colors),
+pub fn append_item(menu: HMENU, id: u32, text: &str, design: Option<MenuDesign>) -> Result<()> {
+    match design {
+        Some(design) => append_owner_draw(
+            menu,
+            NewItem { id: id as usize, disabled: false, submenu: false, text, shortcut: None, kind: ItemKind::Normal },
+            design,
+        ),
         None => {
             let text = HSTRING::from(text);
             unsafe { AppendMenuW(menu, MF_STRING, id as usize, PCWSTR(text.as_ptr())) }
@@ -438,9 +598,13 @@ pub fn append_item(menu: HMENU, id: u32, text: &str, colors: Option<MenuColors>)
 
 /// The disabled-placeholder counterpart to [`append_item`] — an empty
 /// browsed folder's `"(empty)"` row.
-pub fn append_disabled_item(menu: HMENU, text: &str, colors: Option<MenuColors>) -> Result<()> {
-    match colors {
-        Some(colors) => append_owner_draw(menu, 0, true, false, text, ItemKind::Normal, colors),
+pub fn append_disabled_item(menu: HMENU, text: &str, design: Option<MenuDesign>) -> Result<()> {
+    match design {
+        Some(design) => append_owner_draw(
+            menu,
+            NewItem { id: 0, disabled: true, submenu: false, text, shortcut: None, kind: ItemKind::Normal },
+            design,
+        ),
         None => {
             let text = HSTRING::from(text);
             unsafe {
@@ -457,18 +621,28 @@ pub fn append_disabled_item(menu: HMENU, text: &str, colors: Option<MenuColors>)
 
 /// A themed or plain submenu, attached to a raw `HMENU` — the
 /// [`append_item`] counterpart for a discovered subfolder.
-pub fn append_submenu(menu: HMENU, text: &str, colors: Option<MenuColors>) -> Result<HMENU> {
+pub fn append_submenu(menu: HMENU, text: &str, design: Option<MenuDesign>) -> Result<HMENU> {
     let submenu = unsafe { CreatePopupMenu()? };
-    match colors {
-        Some(colors) => append_owner_draw(
-            menu,
-            submenu.0 as usize,
-            false,
-            true,
-            text,
-            ItemKind::Normal,
-            colors,
-        )?,
+    match design {
+        Some(design) => {
+            // A submenu populated lazily (a `browse` folder's own contents,
+            // via `WM_INITMENUPOPUP`) never goes through `PopupMenu::themed`
+            // — this is the only place it's created, so the background
+            // paint has to happen here too, not just there.
+            set_menu_background(submenu, design.base.back);
+            append_owner_draw(
+                menu,
+                NewItem {
+                    id: submenu.0 as usize,
+                    disabled: false,
+                    submenu: true,
+                    text,
+                    shortcut: None,
+                    kind: ItemKind::Normal,
+                },
+                design,
+            )?
+        }
         None => {
             let text = HSTRING::from(text);
             unsafe { AppendMenuW(menu, MF_POPUP, submenu.0 as usize, PCWSTR(text.as_ptr()))? };
@@ -477,14 +651,48 @@ pub fn append_submenu(menu: HMENU, text: &str, colors: Option<MenuColors>) -> Re
     Ok(submenu)
 }
 
+/// Paints `menu`'s *whole* client background with `color`, via `SetMenuInfo`
+/// (`MIIM_BACKGROUND`) — PortAL's own `OnInitMenuPopup` does the same
+/// (confirmed by reading it), and it turns out not to have been optional:
+/// [`MenuDesign::margin`] leaves a gap around every row that no single
+/// row's own `WM_DRAWITEM` fill ever paints, so without this the gap shows
+/// through to the OS's raw default menu background instead of the theme.
+/// Every themed `HMENU` this module creates calls this itself
+/// ([`PopupMenu::themed`], and [`append_submenu`]'s themed branch — the
+/// only two places a themed `HMENU` is ever `CreatePopupMenu`'d) — no
+/// caller needs to remember to. The brush this allocates is *not* freed by
+/// Windows when the menu is (documented `SetMenuInfo` behaviour, and
+/// confirmed by PortAL never freeing its own either) — reclaimed instead by
+/// [`free_owner_draw_data`], the same recursive live-tree walk that already
+/// reclaims every item's [`ItemData`] right before `DestroyMenu`.
+fn set_menu_background(menu: HMENU, color: Color) {
+    let brush = unsafe { CreateSolidBrush(color.colorref()) };
+    let mut info: MENUINFO = unsafe { std::mem::zeroed() };
+    info.cbSize = size_of::<MENUINFO>() as u32;
+    info.fMask = MIM_BACKGROUND;
+    info.hbrBack = brush;
+    let _ = unsafe { SetMenuInfo(menu, &info) };
+}
+
 /// Reclaims every owner-drawn item's boxed [`ItemData`], recursing through
 /// submenus — `DestroyMenu` frees the `HMENU`s themselves but knows nothing
 /// about the heap data `dwItemData` points at, entirely this process's own
 /// responsibility (see the module doc). Walking the live tree right before
 /// destroying it is what stays correct regardless of how deep or how it got
 /// built (`PopupMenu::add_submenu`, or a raw `HMENU` from
-/// [`append_submenu`] populated later by `WM_INITMENUPOPUP`).
+/// [`append_submenu`] populated later by `WM_INITMENUPOPUP`). Also reclaims
+/// `menu`'s own background brush, if [`set_menu_background`] gave it one —
+/// same reasoning, same "not freed by Windows" doc'd behaviour, and the same
+/// live-tree-at-drop-time walk is what reaches a lazily-populated `browse`
+/// submenu's brush along with everything else it needs to reclaim.
 unsafe fn free_owner_draw_data(menu: HMENU) {
+    let mut background: MENUINFO = unsafe { std::mem::zeroed() };
+    background.cbSize = size_of::<MENUINFO>() as u32;
+    background.fMask = MIM_BACKGROUND;
+    if unsafe { GetMenuInfo(menu, &mut background) }.is_ok() && !background.hbrBack.is_invalid() {
+        let _ = unsafe { DeleteObject(background.hbrBack.into()) };
+    }
+
     let count = item_count(menu);
     for position in 0..count {
         let mut info: MENUITEMINFOW = unsafe { std::mem::zeroed() };
@@ -523,10 +731,11 @@ fn set_menu_item_bitmap(menu: HMENU, item: u32, by_position: bool, bitmap: HBITM
     // `MIIM_BITMAP`'s `hbmpItem` is never painted automatically once
     // `MFT_OWNERDRAW` is set (see the module doc), so a themed item keeps
     // its icon on its own `ItemData` instead, read back by
-    // `handle_draw_item`. One extra `GetMenuItemInfoW` round trip to find
-    // out which — negligible next to the icon extraction this always
-    // follows, and it keeps every existing caller (native or themed) using
-    // the exact same `set_item_icon`/`set_item_icon_by_position` call.
+    // [`paint::handle_draw_item`]. One extra `GetMenuItemInfoW` round trip
+    // to find out which — negligible next to the icon extraction this
+    // always follows, and it keeps every existing caller (native or
+    // themed) using the exact same `set_item_icon`/`set_item_icon_by_position`
+    // call.
     let mut probe: MENUITEMINFOW = unsafe { std::mem::zeroed() };
     probe.cbSize = size_of::<MENUITEMINFOW>() as u32;
     probe.fMask = MIIM_FTYPE | MIIM_DATA;
@@ -554,354 +763,46 @@ pub fn item_count(menu: HMENU) -> u32 {
     unsafe { GetMenuItemCount(Some(menu)) }.max(0) as u32
 }
 
-// ---------------------------------------------------------------------
-// Owner-draw painting — WM_MEASUREITEM / WM_DRAWITEM.
-// ---------------------------------------------------------------------
-
-/// Handles `WM_MEASUREITEM`. Call from the owner window's message handler
-/// with the message's `lParam` (cast, as Windows sends it, to
-/// `*mut MEASUREITEMSTRUCT` via `LPARAM`); returns `true` if this was an
-/// owner-drawn *menu* item this module recognised (Windows also sends
-/// `WM_MEASUREITEM` for owner-draw list boxes/combo boxes/buttons — the
-/// `CtlType` check is what rules those out), `false` otherwise, in which
-/// case the caller should fall through to `DefWindowProc`.
-pub fn handle_measure_item(lparam: LPARAM) -> bool {
-    if lparam.0 == 0 {
-        return false;
-    }
-    let item = unsafe { &mut *(lparam.0 as *mut MEASUREITEMSTRUCT) };
-    if item.CtlType != ODT_MENU || item.itemData == 0 {
-        return false;
-    }
-    let data = unsafe { &*(item.itemData as *const ItemData) };
-
-    let hdc = unsafe { GetDC(None) };
-    let mut size = SIZE::default();
-    // An empty string measures as zero width, which would starve an
-    // untitled separator of the padding it still needs on either side.
-    let text: Vec<u16> = if data.text.is_empty() {
-        vec![b' ' as u16]
-    } else {
-        data.text.clone()
-    };
-    let _ = unsafe { GetTextExtentPoint32W(hdc, &text, &mut size) };
-    unsafe { ReleaseDC(None, hdc) };
-
-    // Reserved for every `Normal` row alike, icon or not — see `ICON_SIZE`'s
-    // own doc comment for why a fixed reservation, not the real bitmap's
-    // width, is what keeps every row's text aligned in one column.
-    let icon_width = match data.kind {
-        ItemKind::Normal => ICON_SIZE + ICON_GAP,
-        ItemKind::Separator => 0,
-    };
-    let arrow_width = if data.submenu { ARROW_WIDTH + TEXT_PAD } else { 0 };
-
-    item.itemWidth = (size.cx + TEXT_PAD * 2 + icon_width + arrow_width) as u32;
-    item.itemHeight = match &data.kind {
-        ItemKind::Separator if data.text.is_empty() => SEPARATOR_HEIGHT as u32,
-        _ => (size.cy + 8).max(MIN_ITEM_HEIGHT) as u32,
-    };
-    true
-}
-
-/// Handles `WM_DRAWITEM`. Call from the owner window's message handler with
-/// the message's `lParam` cast to `*const DRAWITEMSTRUCT`, same shape and
-/// same `CtlType` filtering as [`handle_measure_item`].
-pub fn handle_draw_item(lparam: LPARAM) -> bool {
-    if lparam.0 == 0 {
-        return false;
-    }
-    let item = unsafe { &*(lparam.0 as *const DRAWITEMSTRUCT) };
-    if item.CtlType != ODT_MENU || item.itemData == 0 {
-        return false;
-    }
-    let data = unsafe { &*(item.itemData as *const ItemData) };
-
-    let hdc = item.hDC;
-    let rect = item.rcItem;
-    let selected = item.itemState.0 & ODS_SELECTED.0 != 0;
-    let disabled = item.itemState.0
-        & (windows::Win32::UI::Controls::ODS_DISABLED.0 | windows::Win32::UI::Controls::ODS_GRAYED.0)
-        != 0;
-
-    let (back, text_color) = match (disabled, selected) {
-        (true, _) => (data.colors.back, data.colors.disabled_text),
-        (false, true) => (data.colors.hover_back, data.colors.hover_text),
-        (false, false) => (data.colors.back, data.colors.text),
-    };
-
-    unsafe {
-        let brush = CreateSolidBrush(back.colorref());
-        FillRect(hdc, &rect, brush);
-        let _ = DeleteObject(brush.into());
-    }
-
-    match data.kind {
-        ItemKind::Separator => draw_separator(hdc, rect, data, text_color),
-        ItemKind::Normal => draw_normal_item(hdc, rect, data, text_color),
-    }
-
-    if selected && !disabled {
-        unsafe {
-            let brush = CreateSolidBrush(data.colors.border.colorref());
-            FrameRect(hdc, &rect, brush);
-            let _ = DeleteObject(brush.into());
-        }
-    }
-
-    true
-}
-
-/// A leaf or submenu row. No arrow drawn here even for a submenu — see
-/// [`ItemKind::Normal`]'s doc comment for why that would only double the
-/// one Windows already draws in its own gutter.
-fn draw_normal_item(hdc: HDC, rect: RECT, data: &ItemData, text_color: Color) {
-    let mut text_rect = rect;
-    text_rect.left += TEXT_PAD;
-    text_rect.right -= TEXT_PAD;
-
-    // Drawn flush-left in the icon column when this item has one — but the
-    // column itself, and so `text_rect`'s advance past it, is reserved
-    // whether or not it does (see `ICON_SIZE`'s doc comment): an item with
-    // no icon must still start its text at the same x as one that has one.
-    if let Some((w, h)) = data.bitmap.and_then(bitmap_size)
-        && let Some(bitmap) = data.bitmap
-    {
-        let y = rect.top + ((rect.bottom - rect.top) - h) / 2;
-        blit_icon(hdc, text_rect.left, y, w, h, bitmap);
-    }
-    text_rect.left += ICON_SIZE + ICON_GAP;
-
-    if data.submenu {
-        let column_left = (rect.right - TEXT_PAD - ARROW_WIDTH).max(text_rect.left);
-        text_rect.right = column_left;
-
-        // A fixed-size square glyph, vertically centred in the row — same
-        // placement convention as `blit_icon`'s icon, not stretched across
-        // the row's full (text-baseline-driven, not square) height the way
-        // the column reserved for it is.
-        let arrow_top = rect.top + ((rect.bottom - rect.top) - ARROW_WIDTH) / 2;
-        let arrow_rect = RECT {
-            left: column_left,
-            top: arrow_top,
-            right: column_left + ARROW_WIDTH,
-            bottom: arrow_top + ARROW_WIDTH,
-        };
-        draw_arrow(hdc, arrow_rect, text_color);
-
-        // Windows still draws its own arrow for this `MF_POPUP` item after
-        // `WM_DRAWITEM` returns, in a fixed system colour that goes
-        // invisible against a dark theme — see `ItemKind::Normal`'s doc
-        // comment. Excluding the whole reserved column (not just the
-        // smaller square glyph drawn above) from the clip region is
-        // PortAL's own fix for exactly this (`menu.cpp::OnDrawItem`,
-        // "in order to not redraw the system arrow" is their own comment
-        // on the equivalent call), not invented here.
-        unsafe {
-            let _ = ExcludeClipRect(hdc, column_left, rect.top, rect.right - TEXT_PAD, rect.bottom);
-        }
-    }
-
-    draw_text(hdc, data.text.clone(), text_rect, text_color, DT_LEFT);
-}
-
-/// PortAL's own separator look (`menu.cpp::OnDrawItem`'s `MENU_SEP`/
-/// `MENU_TITLE` branches, confirmed by reading them): an `EDGE_ETCHED`
-/// groove — the same two-tone line a plain, non-owner-draw `MF_SEPARATOR`
-/// gets from Windows for free — spanning the row when untitled, or split
-/// either side of the centred title when not.
-fn draw_separator(hdc: HDC, rect: RECT, data: &ItemData, text_color: Color) {
-    if data.text.is_empty() {
-        let mut bar = RECT {
-            left: rect.left + TEXT_PAD,
-            right: rect.right - TEXT_PAD,
-            top: (rect.top + rect.bottom) / 2,
-            bottom: (rect.top + rect.bottom) / 2,
-        };
-        unsafe {
-            let _ = DrawEdge(hdc, &mut bar, EDGE_ETCHED, BF_BOTTOM);
-        }
-        return;
-    }
-
-    let mut text = data.text.clone();
-    let mut size = SIZE::default();
-    let _ = unsafe { GetTextExtentPoint32W(hdc, &text, &mut size) };
-
-    let mid_x = (rect.left + rect.right) / 2;
-    let mut text_rect = rect;
-    text_rect.left = mid_x - size.cx / 2;
-    text_rect.right = text_rect.left + size.cx;
-
-    unsafe {
-        SetBkMode(hdc, TRANSPARENT);
-        SetTextColor(hdc, text_color.colorref());
-        DrawTextW(hdc, &mut text, &mut text_rect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-    }
-
-    let mid_y = (rect.top + rect.bottom) / 2;
-    let mut left_bar = RECT {
-        left: rect.left + TEXT_PAD,
-        right: (text_rect.left - ICON_GAP).max(rect.left + TEXT_PAD),
-        top: mid_y,
-        bottom: mid_y,
-    };
-    let mut right_bar = RECT {
-        left: (text_rect.right + ICON_GAP).min(rect.right - TEXT_PAD),
-        right: rect.right - TEXT_PAD,
-        top: mid_y,
-        bottom: mid_y,
-    };
-    unsafe {
-        let _ = DrawEdge(hdc, &mut left_bar, EDGE_ETCHED, BF_BOTTOM);
-        let _ = DrawEdge(hdc, &mut right_bar, EDGE_ETCHED, BF_BOTTOM);
-    }
-}
-
-fn draw_text(
-    hdc: HDC,
-    mut text: Vec<u16>,
-    mut rect: RECT,
-    color: Color,
-    align: windows::Win32::Graphics::Gdi::DRAW_TEXT_FORMAT,
-) {
-    unsafe {
-        SetBkMode(hdc, TRANSPARENT);
-        SetTextColor(hdc, color.colorref());
-        DrawTextW(
-            hdc,
-            &mut text,
-            &mut rect,
-            align | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
-        );
-    }
-}
-
-/// The `(width, height)` a bitmap was created at, via `GetObjectW` — every
-/// icon this module draws came from [`crate::icon::Icon::to_bitmap`], which
-/// always makes a square bitmap, but reading its real size back rather than
-/// assuming one keeps this module decoupled from that size choice.
-fn bitmap_size(bitmap: HBITMAP) -> Option<(i32, i32)> {
-    let mut info: BITMAP = unsafe { std::mem::zeroed() };
-    let written = unsafe {
-        GetObjectW(
-            HGDIOBJ::from(bitmap),
-            size_of::<BITMAP>() as i32,
-            Some((&raw mut info).cast()),
-        )
-    };
-    (written != 0).then_some((info.bmWidth, info.bmHeight))
-}
-
-/// Blits a premultiplied-alpha icon bitmap (see [`crate::icon::Icon::
-/// to_bitmap`]) onto `hdc` at `(x, y)` with per-pixel alpha, via a
-/// throwaway memory DC — `AlphaBlend` needs the source selected into a DC
-/// of its own, there is no "blend straight from a bitmap handle" call.
-fn blit_icon(hdc: HDC, x: i32, y: i32, w: i32, h: i32, bitmap: HBITMAP) {
-    unsafe {
-        let mem_dc = CreateCompatibleDC(Some(hdc));
-        if mem_dc.is_invalid() {
-            return;
-        }
-        let previous = SelectObject(mem_dc, bitmap.into());
-        let blend = BLENDFUNCTION {
-            BlendOp: AC_SRC_OVER as u8,
-            BlendFlags: 0,
-            SourceConstantAlpha: 255,
-            AlphaFormat: AC_SRC_ALPHA as u8,
-        };
-        let _ = AlphaBlend(hdc, x, y, w, h, mem_dc, 0, 0, w, h, blend);
-        SelectObject(mem_dc, previous);
-        let _ = DeleteDC(mem_dc);
-    }
-}
-
-/// Draws a right-pointing submenu arrow into `rect` (expected square, see
-/// [`draw_normal_item`]'s call site), recoloured to `color` — the OS's own
-/// arrow shape (`DFC_MENU`/`DFCS_MENUARROW`, the same primitive Windows
-/// itself uses for a native, non-owner-draw `MF_POPUP` item's arrow) rather
-/// than a font glyph, matching PortAL's own choice
-/// (`menu.cpp::OnDrawItem`'s `DrawFrameControl(DFC_MENU, DFCS_MENUARROW)`
-/// call, confirmed by reading it — not a font-rendered `▶`, which an
-/// earlier version of this function used and which came out visibly
-/// smaller/thinner than PortAL's arrow in a side-by-side screenshot
-/// comparison, since a glyph's rendered size follows the menu font's
-/// metrics rather than a fixed box).
-///
-/// `DrawFrameControl` itself only ever paints in a fixed system colour —
-/// there is no colour parameter — so getting a themed arrow out of it needs
-/// the same three-`BitBlt` colour-substitution trick PortAL's own
-/// `OnDrawItem` uses: draw the glyph once (black arrow on white) into
-/// `arrow_dc`, fill a same-size `fill_dc` solid `color`, then
-/// XOR/AND/XOR the destination against `fill_dc`/`arrow_dc`/`fill_dc` in
-/// that order. Where the glyph is white (background), the two XORs cancel
-/// out and the destination pixel is left exactly as it was (so the row's
-/// own fill still shows through around the arrow); where the glyph is
-/// black (the arrow strokes), the AND zeroes the pixel and the final XOR
-/// leaves it at exactly `color`.
-fn draw_arrow(hdc: HDC, rect: RECT, color: Color) {
-    let w = rect.right - rect.left;
-    let h = rect.bottom - rect.top;
-    if w <= 0 || h <= 0 {
-        return;
-    }
-
-    unsafe {
-        let arrow_dc = CreateCompatibleDC(Some(hdc));
-        let fill_dc = CreateCompatibleDC(Some(hdc));
-        if arrow_dc.is_invalid() || fill_dc.is_invalid() {
-            let _ = DeleteDC(arrow_dc);
-            let _ = DeleteDC(fill_dc);
-            return;
-        }
-
-        let arrow_bitmap = CreateCompatibleBitmap(hdc, w, h);
-        let fill_bitmap = CreateCompatibleBitmap(hdc, w, h);
-        let old_arrow = SelectObject(arrow_dc, arrow_bitmap.into());
-        let old_fill = SelectObject(fill_dc, fill_bitmap.into());
-
-        let mut glyph_rect = RECT { left: 0, top: 0, right: w, bottom: h };
-        let _ = DrawFrameControl(arrow_dc, &mut glyph_rect, DFC_MENU, DFCS_MENUARROW);
-
-        let brush = CreateSolidBrush(color.colorref());
-        FillRect(fill_dc, &glyph_rect, brush);
-        let _ = DeleteObject(brush.into());
-
-        let _ = BitBlt(hdc, rect.left, rect.top, w, h, Some(fill_dc), 0, 0, SRCINVERT);
-        let _ = BitBlt(hdc, rect.left, rect.top, w, h, Some(arrow_dc), 0, 0, SRCAND);
-        let _ = BitBlt(hdc, rect.left, rect.top, w, h, Some(fill_dc), 0, 0, SRCINVERT);
-
-        SelectObject(arrow_dc, old_arrow);
-        SelectObject(fill_dc, old_fill);
-        let _ = DeleteObject(arrow_bitmap.into());
-        let _ = DeleteObject(fill_bitmap.into());
-        let _ = DeleteDC(arrow_dc);
-        let _ = DeleteDC(fill_dc);
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use windows::Win32::Graphics::Gdi::{CreateBitmap, GetDC, ReleaseDC};
-    use windows::Win32::UI::WindowsAndMessaging::{GetMenuItemInfoW, MIIM_BITMAP, MIIM_DATA, MIIM_FTYPE};
+    use windows::Win32::Graphics::Gdi::CreateBitmap;
+    use windows::Win32::UI::WindowsAndMessaging::{MIIM_BITMAP, MIIM_DATA, MIIM_FTYPE};
 
     use super::*;
 
-    fn test_colors() -> MenuColors {
-        MenuColors {
-            back: Color::rgb(32, 32, 32),
-            text: Color::rgb(255, 255, 255),
-            hover_back: Color::rgb(0, 120, 215),
-            hover_text: Color::rgb(255, 255, 255),
+    /// Today's exact look (see [`MenuDesign::padding`]/[`MenuDesign::
+    /// margin`]'s doc comments): zero-size/zero-round border, no padding,
+    /// no margin, solid fill — every existing test below exercises this
+    /// shape unless it says otherwise. Also used by `paint`'s own tests —
+    /// duplicated there rather than shared, so the two test modules stay
+    /// independent of each other.
+    fn test_design() -> MenuDesign {
+        MenuDesign {
+            base: ColorPair {
+                text: Color::rgb(255, 255, 255),
+                back: Color::rgb(32, 32, 32),
+            },
+            selected: ColorPair {
+                text: Color::rgb(255, 255, 255),
+                back: Color::rgb(0, 120, 215),
+            },
             disabled_text: Color::rgb(120, 120, 120),
-            border: Color::rgb(0, 120, 215),
+            border: Border {
+                size: 0,
+                round: 0,
+                color: Color::rgb(0, 120, 215),
+            },
+            fill: Fill::Solid,
+            padding: 0,
+            margin: 0,
         }
     }
 
     /// `dwItemData` for the item at `position`, via `MIIM_DATA` — the same
-    /// lookup `set_menu_item_bitmap` itself does, used here to build a
-    /// synthetic `MEASUREITEMSTRUCT`/`DRAWITEMSTRUCT` without a real
-    /// `TrackPopupMenu` message loop to source one from.
+    /// lookup `set_menu_item_bitmap` itself does, used here to feed
+    /// [`handle_measure_item`] without a real `TrackPopupMenu` message loop
+    /// to source one from. Also used by `paint`'s own tests, for the same
+    /// reason `test_design` is duplicated there.
     fn item_data(menu: HMENU, position: u32) -> usize {
         let mut info: MENUITEMINFOW = unsafe { std::mem::zeroed() };
         info.cbSize = size_of::<MENUITEMINFOW>() as u32;
@@ -911,8 +812,8 @@ mod tests {
     }
 
     fn measured_width(menu: HMENU, position: u32) -> u32 {
-        let mut measure = MEASUREITEMSTRUCT {
-            CtlType: ODT_MENU,
+        let mut measure = windows::Win32::UI::Controls::MEASUREITEMSTRUCT {
+            CtlType: windows::Win32::UI::Controls::ODT_MENU,
             CtlID: 0,
             itemID: 0,
             itemWidth: 0,
@@ -926,7 +827,7 @@ mod tests {
 
     #[test]
     fn a_themed_menus_items_are_owner_drawn_a_native_menus_are_not() {
-        let themed = PopupMenu::themed(test_colors()).expect("CreatePopupMenu");
+        let themed = PopupMenu::themed(test_design()).expect("CreatePopupMenu");
         themed.add_item(1, "Item").expect("add_item");
         let mut info: MENUITEMINFOW = unsafe { std::mem::zeroed() };
         info.cbSize = size_of::<MENUITEMINFOW>() as u32;
@@ -945,9 +846,88 @@ mod tests {
         assert_eq!(info.dwItemData, 0);
     }
 
+    /// Regression test: `PopupMenu::themed` must paint the *whole* popup's
+    /// background, not leave that to individual rows — a themed `HMENU`
+    /// that skipped this shows the OS's raw default menu background through
+    /// every [`MenuDesign::margin`] gap instead of the theme, once rows
+    /// stopped flat-filling their entire `rcItem` (see [`set_menu_background`]'s
+    /// doc comment for how this was found: assumed already wired up by
+    /// analogy with PortAL's `OnInitMenuPopup`, without checking `y-pop`
+    /// itself actually did it — it didn't).
+    #[test]
+    fn a_themed_menu_paints_its_own_background_a_native_menu_does_not() {
+        let themed = PopupMenu::themed(test_design()).expect("CreatePopupMenu");
+        let mut info: MENUINFO = unsafe { std::mem::zeroed() };
+        info.cbSize = size_of::<MENUINFO>() as u32;
+        info.fMask = MIM_BACKGROUND;
+        unsafe { GetMenuInfo(themed.handle(), &mut info) }.expect("GetMenuInfo");
+        assert!(!info.hbrBack.is_invalid(), "a themed popup must set its own background brush");
+
+        let native = PopupMenu::new().expect("CreatePopupMenu");
+        let mut info: MENUINFO = unsafe { std::mem::zeroed() };
+        info.cbSize = size_of::<MENUINFO>() as u32;
+        info.fMask = MIM_BACKGROUND;
+        unsafe { GetMenuInfo(native.handle(), &mut info) }.expect("GetMenuInfo");
+        assert!(info.hbrBack.is_invalid(), "a native popup keeps the OS default, untouched");
+    }
+
+    /// A submenu created through the lazy-`browse` path ([`append_submenu`],
+    /// not `PopupMenu::themed`) needs the same background paint — the other
+    /// of the two places a themed `HMENU` is ever created.
+    #[test]
+    fn a_lazily_appended_themed_submenu_also_paints_its_own_background() {
+        let root = PopupMenu::themed(test_design()).expect("CreatePopupMenu");
+        let submenu = append_submenu(root.handle(), "Sub", Some(test_design())).expect("append_submenu");
+
+        let mut info: MENUINFO = unsafe { std::mem::zeroed() };
+        info.cbSize = size_of::<MENUINFO>() as u32;
+        info.fMask = MIM_BACKGROUND;
+        unsafe { GetMenuInfo(submenu, &mut info) }.expect("GetMenuInfo");
+        assert!(!info.hbrBack.is_invalid());
+    }
+
+    /// A themed item's shortcut hint reserves extra width (`shortcut text
+    /// width + 15`, PortAL's own gap — see `paint`'s `SHORTCUT_GAP`) at
+    /// measure time, and a native item's `\t`-joined text is what
+    /// `add_item_with_shortcut`
+    /// composes for it — the two halves this feature's own bug report
+    /// turned out to need (see `y-pop`'s docs: "no shortcut-text rendering
+    /// in `y-core::menu` today, themed or not").
+    #[test]
+    fn a_shortcut_hint_widens_a_themed_item_and_tab_joins_a_native_ones_text() {
+        let themed = PopupMenu::themed(test_design()).expect("CreatePopupMenu");
+        themed.add_item(1, "Notepad").expect("add_item");
+        let plain_width = measured_width(themed.handle(), 0);
+
+        themed
+            .add_item_with_shortcut(2, "Notepad", Some("Win+N"))
+            .expect("add_item_with_shortcut");
+        let with_shortcut_width = measured_width(themed.handle(), 1);
+        assert!(
+            with_shortcut_width > plain_width,
+            "a shortcut hint must reserve extra row width, got {with_shortcut_width} <= {plain_width}"
+        );
+
+        let native = PopupMenu::new().expect("CreatePopupMenu");
+        native
+            .add_item_with_shortcut(1, "Notepad", Some("Win+N"))
+            .expect("add_item_with_shortcut");
+        let mut buf = [0u16; 64];
+        let len = unsafe {
+            windows::Win32::UI::WindowsAndMessaging::GetMenuStringW(
+                native.handle(),
+                1,
+                Some(&mut buf),
+                windows::Win32::UI::WindowsAndMessaging::MF_BYCOMMAND,
+            )
+        };
+        let text = String::from_utf16_lossy(&buf[..len as usize]);
+        assert_eq!(text, "Notepad\tWin+N", "Win32 right-aligns anything after a menu item's own \\t");
+    }
+
     #[test]
     fn an_icon_on_a_themed_item_does_not_touch_hbmpitem_or_change_its_measured_width() {
-        let menu = PopupMenu::themed(test_colors()).expect("CreatePopupMenu");
+        let menu = PopupMenu::themed(test_design()).expect("CreatePopupMenu");
         menu.add_item(1, "Item").expect("add_item");
         let before = measured_width(menu.handle(), 0);
 
@@ -973,100 +953,6 @@ mod tests {
         let _ = unsafe { DeleteObject(bitmap.into()) };
     }
 
-    #[test]
-    fn a_titled_separator_measures_wider_than_an_untitled_one_on_a_themed_menu() {
-        let untitled = PopupMenu::themed(test_colors()).expect("CreatePopupMenu");
-        untitled.add_separator().expect("add_separator");
-        let untitled_width = measured_width(untitled.handle(), 0);
-
-        let titled = PopupMenu::themed(test_colors()).expect("CreatePopupMenu");
-        titled
-            .add_titled_separator("A rather long section title")
-            .expect("add_titled_separator");
-        let titled_width = measured_width(titled.handle(), 0);
-
-        assert!(titled_width > untitled_width);
-    }
-
-    #[test]
-    fn a_submenu_item_reserves_extra_width_for_its_own_arrow() {
-        let mut menu = PopupMenu::themed(test_colors()).expect("CreatePopupMenu");
-        menu.add_item(1, "Leaf").expect("add_item");
-        let leaf_width = measured_width(menu.handle(), 0);
-
-        let submenu = PopupMenu::themed(test_colors()).expect("CreatePopupMenu");
-        menu.add_submenu("Leaf", submenu).expect("add_submenu");
-        let submenu_width = measured_width(menu.handle(), 1);
-
-        // Same text either way — the only possible difference is the
-        // reserved arrow column (see `ItemKind::Normal`'s doc comment for
-        // why one is reserved at all: Windows' own arrow is drawn in a
-        // fixed system colour and must be clipped out, not relied on).
-        assert!(submenu_width > leaf_width);
-    }
-
-    #[test]
-    fn handle_measure_and_draw_item_ignore_messages_that_are_not_theirs() {
-        // Zero itemData: a themed item always has a non-zero one (see the
-        // owner-drawn test above), so this is indistinguishable from "not
-        // one of ours" and must be declined, not dereferenced.
-        let mut measure = MEASUREITEMSTRUCT {
-            CtlType: ODT_MENU,
-            CtlID: 0,
-            itemID: 0,
-            itemWidth: 0,
-            itemHeight: 0,
-            itemData: 0,
-        };
-        assert!(!handle_measure_item(LPARAM(&raw mut measure as isize)));
-        assert!(!handle_measure_item(LPARAM(0)));
-
-        let draw = DRAWITEMSTRUCT {
-            CtlType: ODT_MENU,
-            CtlID: 0,
-            itemID: 0,
-            itemAction: unsafe { std::mem::zeroed() },
-            itemState: unsafe { std::mem::zeroed() },
-            hwndItem: HWND::default(),
-            hDC: HDC::default(),
-            rcItem: RECT::default(),
-            itemData: 0,
-        };
-        assert!(!handle_draw_item(LPARAM(&raw const draw as isize)));
-        assert!(!handle_draw_item(LPARAM(0)));
-    }
-
-    #[test]
-    fn a_themed_leaf_and_submenu_item_both_draw_without_a_live_popup() {
-        let mut menu = PopupMenu::themed(test_colors()).expect("CreatePopupMenu");
-        menu.add_item(1, "Leaf").expect("add_item");
-        let submenu = PopupMenu::themed(test_colors()).expect("CreatePopupMenu");
-        menu.add_submenu("Group", submenu).expect("add_submenu");
-        menu.add_separator().expect("add_separator");
-
-        let hdc = unsafe { GetDC(None) };
-        for position in 0..menu.item_count() {
-            let mut draw = DRAWITEMSTRUCT {
-                CtlType: ODT_MENU,
-                CtlID: 0,
-                itemID: 0,
-                itemAction: unsafe { std::mem::zeroed() },
-                itemState: unsafe { std::mem::zeroed() },
-                hwndItem: HWND(menu.handle().0 as *mut _),
-                hDC: hdc,
-                rcItem: RECT {
-                    left: 0,
-                    top: 0,
-                    right: 120,
-                    bottom: 22,
-                },
-                itemData: item_data(menu.handle(), position),
-            };
-            assert!(handle_draw_item(LPARAM(&raw mut draw as isize)));
-        }
-        unsafe { ReleaseDC(None, hdc) };
-    }
-
     /// Nested themed submenus, several owner-drawn items each — dropping
     /// this must reclaim every `ItemData` (see `free_owner_draw_data`)
     /// without crashing or double-freeing, whether an item was added
@@ -1074,17 +960,17 @@ mod tests {
     /// (the browsed-folder shape `append_item`/`append_submenu` exist for).
     #[test]
     fn dropping_a_themed_menu_with_nested_submenus_does_not_crash() {
-        let mut root = PopupMenu::themed(test_colors()).expect("CreatePopupMenu");
+        let mut root = PopupMenu::themed(test_design()).expect("CreatePopupMenu");
         root.add_item(1, "Leaf").expect("add_item");
         root.add_titled_separator("Section").expect("add_titled_separator");
 
-        let inner = PopupMenu::themed(test_colors()).expect("CreatePopupMenu");
+        let inner = PopupMenu::themed(test_design()).expect("CreatePopupMenu");
         inner.add_item(2, "Nested leaf").expect("add_item");
 
         let raw_submenu =
-            append_submenu(inner.handle(), "Raw", Some(test_colors())).expect("append_submenu");
-        append_item(raw_submenu, 3, "Raw leaf", Some(test_colors())).expect("append_item");
-        append_disabled_item(raw_submenu, "(empty)", Some(test_colors())).expect("append_disabled_item");
+            append_submenu(inner.handle(), "Raw", Some(test_design())).expect("append_submenu");
+        append_item(raw_submenu, 3, "Raw leaf", Some(test_design())).expect("append_item");
+        append_disabled_item(raw_submenu, "(empty)", Some(test_design())).expect("append_disabled_item");
 
         root.add_submenu("Group", inner).expect("add_submenu");
         drop(root);

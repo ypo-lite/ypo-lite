@@ -16,6 +16,7 @@ mod browse;
 mod builtins;
 mod launch;
 mod menu;
+mod skins;
 
 use windows::Win32::UI::WindowsAndMessaging::{
     HMENU, MB_ICONINFORMATION, MB_OK, MessageBoxW, WM_DRAWITEM, WM_HOTKEY, WM_INITMENUPOPUP,

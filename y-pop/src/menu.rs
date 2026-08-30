@@ -8,16 +8,15 @@
 //!
 //! # Theme
 //!
-//! [`resolve_colors`] turns the config's [`Theme`] into
-//! `Option<MenuColors>` — `None` for `Theme::Native` (plain OS chrome,
-//! `PopupMenu::new()`), `Some` for `Light`/`Dark`/`Auto` (owner-drawn,
-//! `PopupMenu::themed`). Resolved once per popup open, in [`build`], and
-//! carried on [`Session`] from there so every submenu — built up front in
-//! [`append_children`] or lazily in [`on_init_menu_popup`] — themes
-//! consistently with the root. [`LIGHT`]/[`DARK`] are `y-pop`'s own palette
-//! choice, not `y-core`'s: `y_core::menu::MenuColors` only defines the
-//! shape, the same split `y-snap`'s `Palette::LIGHT`/`DARK` already draws
-//! between its own app and `y-core`.
+//! [`crate::skins::resolve_design`] turns the config's `Theme` into
+//! `Option<MenuDesign>` — `None` for `Theme::Native` (plain OS chrome,
+//! `PopupMenu::new()`), `Some` for `Default`/`Flat`/`Dark`/`Auto`
+//! (owner-drawn, `PopupMenu::themed`). Resolved once per popup open, in
+//! [`build`], and carried on [`Session`] from there so every submenu —
+//! built up front in [`append_children`] or lazily in
+//! [`on_init_menu_popup`] — themes consistently with the root. The skin
+//! tables and the resolution logic itself live in `crate::skins`, not here
+//! — see that module's own doc comment.
 //!
 //! # Icons
 //!
@@ -79,69 +78,11 @@ use windows::core::Result;
 
 use y_core::icon::{Bitmap, Icon, IconCache};
 use y_core::ids::IDM_FIRST;
-use y_core::menu::{self, MenuColors, PopupMenu};
-use y_core::overlay::Color;
+use y_core::menu::{self, MenuDesign, PopupMenu};
 
-use y_pop::model::{
-    App, Browse, ConfigTree, EventMask, NodeData, NodeId, NodeKind, Theme, ThemeOverrides,
-};
+use y_pop::model::{App, Browse, ConfigTree, Defaults, EventMask, NodeData, NodeId, NodeKind};
 
-/// `y-pop`'s own palette choice for a themed menu — see the module doc's
-/// "Theme" section for why these live here and not in `y_core::menu`.
-/// Values close to Windows 11's own flyouts, the same reference point
-/// `y-snap`'s own `Palette::LIGHT` uses.
-const LIGHT: MenuColors = MenuColors {
-    back: Color::rgb(249, 249, 249),
-    text: Color::rgb(0, 0, 0),
-    hover_back: Color::rgb(0, 120, 215),
-    hover_text: Color::rgb(255, 255, 255),
-    disabled_text: Color::rgb(160, 160, 160),
-    border: Color::rgb(0, 120, 215),
-};
-
-const DARK: MenuColors = MenuColors {
-    back: Color::rgb(32, 32, 32),
-    text: Color::rgb(255, 255, 255),
-    disabled_text: Color::rgb(120, 120, 120),
-    ..LIGHT
-};
-
-/// [`Theme`] + [`ThemeOverrides`] → `Option<MenuColors>` — `None` means
-/// plain native chrome. The one place `Theme::Auto` is resolved against the
-/// live OS setting (`y_core::theme::is_dark`, a registry read); called
-/// fresh from [`build`] each time a popup opens rather than cached at
-/// config-load time, so flipping Windows' light/dark setting takes effect
-/// on the very next popup, not after a restart.
-///
-/// `theme="native"` (the default) with no `*-color` attribute at all stays
-/// plain chrome — the zero-surprise case [`Theme::Native`]'s own doc
-/// comment promises. But a config that sets a colour without also setting
-/// `theme` clearly wants *something* themed to paint that colour onto —
-/// PortAL's own custom-skin users never had to pick a base skin first
-/// either — so any override present resolves as if `theme="auto"` had been
-/// written too, then every set slot overrides that base.
-fn resolve_colors(theme: Theme, overrides: ThemeOverrides) -> Option<MenuColors> {
-    let effective = if theme == Theme::Native && overrides.any_set() {
-        Theme::Auto
-    } else {
-        theme
-    };
-    let base = match effective {
-        Theme::Native => return None,
-        Theme::Light => LIGHT,
-        Theme::Dark => DARK,
-        Theme::Auto if y_core::theme::is_dark() => DARK,
-        Theme::Auto => LIGHT,
-    };
-    Some(MenuColors {
-        back: overrides.back.unwrap_or(base.back),
-        text: overrides.text.unwrap_or(base.text),
-        hover_back: overrides.hover_back.unwrap_or(base.hover_back),
-        hover_text: overrides.hover_text.unwrap_or(base.hover_text),
-        disabled_text: overrides.disabled_text.unwrap_or(base.disabled_text),
-        border: overrides.border.unwrap_or(base.border),
-    })
-}
+use crate::skins::resolve_design;
 
 /// First id handed to a discovered (browsed) file — see the module doc.
 const DISCOVERED_ID_BASE: u32 = 1_000_000;
@@ -168,7 +109,7 @@ pub struct Session {
     /// Every submenu, whether built up front by [`append_children`] or
     /// lazily by [`on_init_menu_popup`], reads this rather than re-resolving
     /// [`Theme`] itself, so a whole popup always themes consistently.
-    colors: Option<MenuColors>,
+    design: Option<MenuDesign>,
 }
 
 struct PendingFolder {
@@ -182,17 +123,17 @@ struct PendingFolder {
 
 impl Session {
     pub(crate) fn new() -> Self {
-        Self::with_colors(None)
+        Self::with_design(None)
     }
 
-    fn with_colors(colors: Option<MenuColors>) -> Self {
+    fn with_design(design: Option<MenuDesign>) -> Self {
         Self {
             pending: HashMap::new(),
             discovered: HashMap::new(),
             next_discovered_id: DISCOVERED_ID_BASE,
             icons: IconCache::new(),
             bitmaps: Vec::new(),
-            colors,
+            design,
         }
     }
 
@@ -240,6 +181,24 @@ fn resolve_icon(icons: &mut IconCache, node: &NodeData) -> Option<Icon> {
     }
 }
 
+/// The right-aligned shortcut hint for `node`'s own menu row — `None` if
+/// `show-shortcuts` (this node's own override, else [`Defaults::
+/// show_shortcuts`]) is off, or the node has no hotkey to show at all.
+/// Applies to any node kind, not just a leaf `App` — a `<group>` (or
+/// `browse` folder) opened by its own `<hotkey>` gets a shortcut column too,
+/// matching PortAL's own `MENU_SUB | MENU_SHOWSC` measure-time check
+/// (`menu.cpp::OnMeasureItem`, confirmed by reading it). Only the first
+/// hotkey is shown for a node bound to more than one — `y-pop.xml` in
+/// practice never gives one node two (PortAL's own config didn't either),
+/// and there is no natural way to show more than one hint in one column
+/// anyway.
+fn shortcut_text(defaults: &Defaults, node: &NodeData) -> Option<String> {
+    if !node.show_shortcut.unwrap_or(defaults.show_shortcuts) {
+        return None;
+    }
+    node.hotkeys.first().map(|binding| binding.hotkey.to_string())
+}
+
 /// What a native menu's `track()` result turned out to mean.
 pub enum Selection {
     /// A real node — walk `ConfigTree` from here, same as before browsing
@@ -267,9 +226,9 @@ pub fn resolve_selection(id: u32, session: &mut Session) -> Option<Selection> {
 
 /// Builds a popup for `group`'s children.
 pub fn build(tree: &ConfigTree, group: NodeId) -> (PopupMenu, Session) {
-    let colors = resolve_colors(tree.defaults.theme, tree.defaults.theme_overrides);
-    let mut menu = PopupMenu::new_maybe_themed(colors).expect("CreatePopupMenu");
-    let mut session = Session::with_colors(colors);
+    let design = resolve_design(tree.defaults.theme, tree.defaults.theme_overrides);
+    let mut menu = PopupMenu::new_maybe_themed(design).expect("CreatePopupMenu");
+    let mut session = Session::with_design(design);
     append_children(tree, group, &mut menu, &mut session);
     (menu, session)
 }
@@ -280,16 +239,17 @@ fn append_children(tree: &ConfigTree, parent: NodeId, menu: &mut PopupMenu, sess
 
         match &node.kind {
             NodeKind::Group => {
-                let mut submenu = PopupMenu::new_maybe_themed(session.colors).expect("CreatePopupMenu");
+                let mut submenu = PopupMenu::new_maybe_themed(session.design).expect("CreatePopupMenu");
                 append_children(tree, child, &mut submenu, session);
 
                 let icon = resolve_icon(&mut session.icons, node);
-                let _ = menu.add_submenu(&node.name, submenu);
+                let shortcut = shortcut_text(&tree.defaults, node);
+                let _ = menu.add_submenu_with_shortcut(&node.name, submenu, shortcut.as_deref());
                 let position = menu.item_count().saturating_sub(1);
                 session.attach_icon(icon, |bitmap| menu.set_item_icon_by_position(position, bitmap));
             }
             NodeKind::App(app) if app.browse.is_some() => {
-                let submenu = PopupMenu::new_maybe_themed(session.colors).expect("CreatePopupMenu");
+                let submenu = PopupMenu::new_maybe_themed(session.design).expect("CreatePopupMenu");
                 session.pending.insert(
                     submenu.handle().0 as usize,
                     PendingFolder {
@@ -301,7 +261,8 @@ fn append_children(tree: &ConfigTree, parent: NodeId, menu: &mut PopupMenu, sess
                 );
 
                 let icon = resolve_icon(&mut session.icons, node);
-                let _ = menu.add_submenu(&node.name, submenu);
+                let shortcut = shortcut_text(&tree.defaults, node);
+                let _ = menu.add_submenu_with_shortcut(&node.name, submenu, shortcut.as_deref());
                 let position = menu.item_count().saturating_sub(1);
                 session.attach_icon(icon, |bitmap| menu.set_item_icon_by_position(position, bitmap));
             }
@@ -315,7 +276,8 @@ fn append_children(tree: &ConfigTree, parent: NodeId, menu: &mut PopupMenu, sess
             NodeKind::App(_) | NodeKind::About | NodeKind::Quit => {
                 let id = IDM_FIRST + child.as_u32();
                 let icon = resolve_icon(&mut session.icons, node);
-                let _ = menu.add_item(id, &node.name);
+                let shortcut = shortcut_text(&tree.defaults, node);
+                let _ = menu.add_item_with_shortcut(id, &node.name, shortcut.as_deref());
                 session.attach_icon(icon, |bitmap| menu.set_item_icon(id, bitmap));
             }
         }
@@ -337,14 +299,14 @@ pub fn on_init_menu_popup(session: &mut Session, hmenu: HMENU) {
 
     let entries = crate::browse::list(&pending.dir, &pending.browse);
     if entries.is_empty() {
-        let _ = menu::append_disabled_item(hmenu, "(empty)", session.colors);
+        let _ = menu::append_disabled_item(hmenu, "(empty)", session.design);
         return;
     }
 
     for entry in entries {
         if entry.is_dir {
             let icon = session.icons.for_directory();
-            let Ok(submenu) = menu::append_submenu(hmenu, &entry.name, session.colors) else {
+            let Ok(submenu) = menu::append_submenu(hmenu, &entry.name, session.design) else {
                 continue;
             };
             let position = menu::item_count(hmenu).saturating_sub(1);
@@ -364,7 +326,7 @@ pub fn on_init_menu_popup(session: &mut Session, hmenu: HMENU) {
         } else {
             let icon = session.icons.for_file(&entry.path, None);
             let id = session.next_discovered_id();
-            let _ = menu::append_item(hmenu, id, &entry.name, session.colors);
+            let _ = menu::append_item(hmenu, id, &entry.name, session.design);
             session.attach_icon(icon, |bitmap| menu::set_item_icon(hmenu, id, bitmap));
 
             session.discovered.insert(
@@ -395,7 +357,7 @@ pub fn on_init_menu_popup(session: &mut Session, hmenu: HMENU) {
 // anything appended here is still cleaned up correctly (owner-drawn items'
 // `ItemData` included — see `y_core::menu`'s module doc) when the root
 // `PopupMenu` (the one thing that actually owns a `Drop` impl) is dropped.
-// `session.colors` is threaded through so a browsed folder's own rows theme
+// `session.design` is threaded through so a browsed folder's own rows theme
 // the same as the rest of the popup — see this module's "Theme" section.
 
 /// These exercise the real thing: `CreatePopupMenu`/`AppendMenuW` and the
@@ -712,6 +674,54 @@ mod tests {
         assert!(!item_has_icon(popup.handle(), IDM_FIRST + quit_id.as_u32()));
     }
 
+    /// The bug report this feature exists for: `show-shortcuts="true"` (the
+    /// default) plus a node with a hotkey must actually draw the hint — on
+    /// the native (unthemed) popup `build` uses by default, that means
+    /// `add_item_with_shortcut`'s `"{text}\t{shortcut}"` composition
+    /// actually reached `AppendMenuW`, not just that `NodeData::hotkeys`
+    /// parsed correctly (see `config`'s own hotkey tests for that half).
+    #[test]
+    fn a_node_with_a_hotkey_shows_a_shortcut_by_default() {
+        let _guard = serialized();
+        let tree = config::load_str(
+            r#"<y-pop><group name="Root"><app name="Notepad" exe="notepad.exe"><hotkey key="Win+N"/></app></group></y-pop>"#,
+            &mut Vec::<Variable>::new(),
+        )
+        .expect("valid");
+        let root = tree.roots[0];
+
+        let (popup, _session) = build(&tree, root);
+        assert_eq!(item_text(popup.handle(), 0), "Notepad\tWin+N");
+    }
+
+    /// `show-shortcuts="false"` on the node itself overrides the (on-by-
+    /// default) global setting — see [`shortcut_text`]'s own doc comment.
+    #[test]
+    fn show_shortcuts_false_on_a_node_suppresses_its_own_hint() {
+        let _guard = serialized();
+        let tree = config::load_str(
+            r#"<y-pop><group name="Root"><app name="Notepad" exe="notepad.exe" show-shortcuts="false"><hotkey key="Win+N"/></app></group></y-pop>"#,
+            &mut Vec::<Variable>::new(),
+        )
+        .expect("valid");
+        let root = tree.roots[0];
+
+        let (popup, _session) = build(&tree, root);
+        assert_eq!(item_text(popup.handle(), 0), "Notepad");
+    }
+
+    /// A node with no hotkey at all shows no hint even with `show-shortcuts`
+    /// on — PortAL's own `getHotkeyText` returns `NULL` for exactly this
+    /// (see `hotKey.cpp`), not an empty string drawn anyway.
+    #[test]
+    fn a_node_with_no_hotkey_shows_no_shortcut() {
+        let _guard = serialized();
+        let (tree, root) = tree_with_app("notepad.exe");
+
+        let (popup, _session) = build(&tree, root);
+        assert_eq!(item_text(popup.handle(), 0), "App");
+    }
+
     #[test]
     fn a_discovered_file_gets_an_icon_once_the_submenu_opens() {
         let _guard = serialized();
@@ -743,31 +753,7 @@ mod tests {
         assert!(item_has_icon_by_position(top, 0));
     }
 
-    #[test]
-    fn theme_native_with_no_overrides_stays_unthemed() {
-        assert!(resolve_colors(Theme::Native, ThemeOverrides::default()).is_none());
-    }
-
-    #[test]
-    fn an_override_with_theme_left_native_still_themes_the_popup() {
-        let overrides = ThemeOverrides {
-            hover_back: Some(Color::rgb(0xff, 0x88, 0x00)),
-            ..ThemeOverrides::default()
-        };
-        let colors = resolve_colors(Theme::Native, overrides).expect(
-            "a colour override with no explicit theme must still resolve to a themed popup",
-        );
-        assert_eq!(colors.hover_back, Color::rgb(0xff, 0x88, 0x00));
-    }
-
-    #[test]
-    fn an_override_wins_over_the_base_theme_everywhere_else_matches_it() {
-        let overrides = ThemeOverrides {
-            back: Some(Color::rgb(1, 2, 3)),
-            ..ThemeOverrides::default()
-        };
-        let colors = resolve_colors(Theme::Light, overrides).expect("theme=\"light\" themes");
-        assert_eq!(colors.back, Color::rgb(1, 2, 3));
-        assert_eq!(colors.text, LIGHT.text, "every other slot keeps the base theme's value");
-    }
+    // `resolve_design` and the three built-in skins have their own test
+    // suite alongside the code that implements them — see `crate::skins`'s
+    // own `mod tests`.
 }

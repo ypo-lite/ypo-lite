@@ -68,7 +68,7 @@ use y_core::{
     hotkey::key_name,
     ids::WM_APP_FIRST,
     monitor::{self, Monitor},
-    overlay::{Color, Font, Overlay, OverlaySpec, TextAlign},
+    overlay::{Canvas, Color, Font, Overlay, OverlaySpec, TextAlign},
     virtual_desktop,
     window::WindowHandler,
 };
@@ -79,7 +79,7 @@ const WM_MOUSELEAVE: u32 = 0x02A3;
 
 use crate::action::Action;
 use crate::actions;
-use crate::config::{Item, Overlay as OverlayConfig};
+use crate::config::{Item, Overlay as OverlayConfig, Palette};
 use crate::mouse;
 
 /// Posted to the owner window when a tile is activated, by click or by key.
@@ -376,25 +376,7 @@ impl ActionOverlay {
         let canvas = overlay.canvas_mut();
         canvas.clear(palette.back.with_alpha(self.config.alpha));
 
-        let key_font = Font::new("Segoe UI", self.config.key_font_size as i32, true)?;
-        let label_font = Font::new("Segoe UI", self.config.label_font_size as i32, false)?;
-        let icon_font = Font::new(
-            &self.config.icon_font,
-            self.config.icon_font_size as i32,
-            false,
-        )?;
-        // A small corner badge on icon tiles, so the key that fires them is
-        // still visible even though the icon has taken over the spot the key
-        // letter would otherwise be drawn in. Sized off the same
-        // `key_font_size` as a standalone key rather than a fixed constant,
-        // so raising that setting also grows the badge; still visibly
-        // smaller than a standalone key, since it is the secondary hint on
-        // an icon-led tile, not the tile's main identity.
-        let badge_font = Font::new(
-            "Segoe UI",
-            (self.config.key_font_size * 3 / 4).max(11) as i32,
-            true,
-        )?;
+        let fonts = TileFonts::new(&self.config)?;
         // Capped well below the panel's own corner-radius: at a tile's size
         // (tens of pixels, not the whole popup's hundred-plus), the same
         // radius as the panel reads as bubbly rather than crisp. `corner-
@@ -409,102 +391,166 @@ impl ActionOverlay {
             let implemented = actions::is_implemented(item.action) && !current;
             let active = implemented && actions::toggle_state(item.action, target).unwrap_or(false);
             let hovered = implemented && self.hovered == Some(index);
+            let (back, text) = tile_colors(palette, implemented, hovered, active);
 
-            let (back, text) = match (implemented, hovered, active) {
-                (false, _, _) => (palette.disabled_back, palette.disabled_text),
-                (_, true, _) => (palette.hover_back, palette.hover_text),
-                (_, _, true) => (palette.active_back, palette.active_text),
-                (_, false, false) => (palette.back, palette.text),
-            };
-            canvas.fill_rect(tile.rect, back);
-
-            let glyph_height = (tile.rect.bottom - tile.rect.top) * 6 / 10;
-            let glyph_rect = RECT {
-                bottom: tile.rect.top + glyph_height,
-                ..tile.rect
-            };
-            let label_rect = RECT {
-                top: glyph_rect.bottom,
-                ..tile.rect
-            };
-
-            match item.icon.as_deref() {
-                Some(icon) => {
-                    canvas.draw_text(icon, glyph_rect, &icon_font, text, TextAlign::Centre)?;
-                    if let Some(key) = item.key {
-                        // A muted blend of `text` toward this tile's own
-                        // `back`, not a reduced alpha: draw_text stamps the
-                        // alpha of its *whole* rect to the colour it drew
-                        // with, so anything less than fully opaque here
-                        // would punch a translucent hole in an otherwise
-                        // solid tile. Blending the hue instead keeps the
-                        // badge fully opaque while still reading as a
-                        // secondary hint next to the icon's full-strength
-                        // colour — the colour difference this module's own
-                        // doc comment on the corner badge motivates.
-                        let badge_color = muted(text, back);
-                        let badge_margin = 4;
-                        let badge_rect = RECT {
-                            left: tile.rect.left + badge_margin,
-                            top: tile.rect.top + badge_margin,
-                            right: tile.rect.left + (tile.rect.right - tile.rect.left) * 2 / 5,
-                            bottom: tile.rect.top + (tile.rect.bottom - tile.rect.top) * 2 / 5,
-                        };
-                        canvas.draw_text(
-                            &key_name(key),
-                            badge_rect,
-                            &badge_font,
-                            badge_color,
-                            TextAlign::Left,
-                        )?;
-                    }
-                }
-                None => {
-                    let key = item.key.map(key_name).unwrap_or_default();
-                    canvas.draw_text(&key, glyph_rect, &key_font, text, TextAlign::Centre)?;
-                }
-            }
-
-            let label = if current {
-                Some("Current")
-            } else if active {
-                item.label_on.as_deref()
-            } else {
-                None
-            }
-            .or(item.label.as_deref());
-            if let Some(label) = label {
-                canvas.draw_text(label, label_rect, &label_font, text, TextAlign::Centre)?;
-            }
-
-            // Last, now that every GDI call touching this tile is done —
-            // same ordering requirement as the panel's own `round_corners`
-            // below, and for the same reason (text/icon drawing can bleed
-            // opaque pixels into the corner region a small radius carves
-            // out). Blends toward the panel's own background rather than
-            // toward transparent: a tile sits on the popup, not the desktop.
-            canvas.round_rect_corners(tile.rect, tile_radius, panel_back);
+            draw_tile(canvas, tile, item, &fonts, TileState { current, active, back, text }, tile_radius, panel_back)?;
         }
 
-        // A thin outline around the whole popup, distinct from the accent-
-        // coloured `focus_border` around the *target* window — just enough
-        // definition to read as a floating panel against whatever is behind
-        // it. Drawn last, before rounding, same as everything else: rounding
-        // has to see the finished image to cut a clean corner out of it.
-        //
-        // `stroke_rect` draws it straight, corners included; the corner
-        // fix-up is `round_corners_with_border`'s job, not a plain
-        // `round_corners` — see that method's own doc comment for why a
-        // straight stroke rounded off after the fact does not actually
-        // produce a border that follows the curve.
-        canvas.stroke_rect(bounds, palette.panel_border);
-        canvas.round_corners_with_border(
-            self.config.corner_radius as i32,
-            PANEL_BORDER_WIDTH,
-            palette.panel_border,
-        );
+        draw_panel_border(canvas, bounds, &self.config);
         Ok(())
     }
+}
+
+/// The four fonts a tile can draw with, built once per [`ActionOverlay::
+/// paint`] call rather than once per tile — every tile in a popup shares
+/// the same config, so there is nothing tile-specific to rebuild.
+struct TileFonts {
+    key: Font,
+    label: Font,
+    icon: Font,
+    /// A small corner badge on icon tiles, so the key that fires them is
+    /// still visible even though the icon has taken over the spot the key
+    /// letter would otherwise be drawn in. Sized off the same
+    /// `key_font_size` as a standalone key rather than a fixed constant, so
+    /// raising that setting also grows the badge; still visibly smaller
+    /// than a standalone key, since it is the secondary hint on an
+    /// icon-led tile, not the tile's main identity.
+    badge: Font,
+}
+
+impl TileFonts {
+    fn new(config: &OverlayConfig) -> Result<Self> {
+        Ok(Self {
+            key: Font::new("Segoe UI", config.key_font_size as i32, true)?,
+            label: Font::new("Segoe UI", config.label_font_size as i32, false)?,
+            icon: Font::new(&config.icon_font, config.icon_font_size as i32, false)?,
+            badge: Font::new("Segoe UI", (config.key_font_size * 3 / 4).max(11) as i32, true)?,
+        })
+    }
+}
+
+/// A tile's background/text colour pair for its current implemented/hovered/
+/// active combination — pure lookup, no drawing, so [`paint`](ActionOverlay::
+/// paint)'s own loop stays about *which* tile, not which colour that
+/// implies.
+fn tile_colors(palette: &Palette, implemented: bool, hovered: bool, active: bool) -> (Color, Color) {
+    match (implemented, hovered, active) {
+        (false, _, _) => (palette.disabled_back, palette.disabled_text),
+        (_, true, _) => (palette.hover_back, palette.hover_text),
+        (_, _, true) => (palette.active_back, palette.active_text),
+        (_, false, false) => (palette.back, palette.text),
+    }
+}
+
+/// The parts of a tile's state [`draw_tile`] needs but can't derive from
+/// `Tile`/`Item` alone — computed once per tile in [`ActionOverlay::paint`]'s
+/// own loop, since it already has `target`/`current_desktop`/`hovered` in
+/// scope there.
+struct TileState {
+    /// Whether this tile represents the desktop the target window is
+    /// already on — shows "Current" instead of the item's own label.
+    current: bool,
+    active: bool,
+    back: Color,
+    text: Color,
+}
+
+/// Draws one tile: its fill, icon-or-key glyph (plus the key's corner badge
+/// when both an icon and a key are set), label, and rounded corners — see
+/// [`ActionOverlay::paint`]'s own doc comment on `round_rect_corners`'s
+/// ordering for why the rounding happens last.
+fn draw_tile(
+    canvas: &mut Canvas,
+    tile: &Tile,
+    item: &Item,
+    fonts: &TileFonts,
+    state: TileState,
+    tile_radius: i32,
+    panel_back: Color,
+) -> Result<()> {
+    let TileState { current, active, back, text } = state;
+    canvas.fill_rect(tile.rect, back);
+
+    let glyph_height = (tile.rect.bottom - tile.rect.top) * 6 / 10;
+    let glyph_rect = RECT {
+        bottom: tile.rect.top + glyph_height,
+        ..tile.rect
+    };
+    let label_rect = RECT {
+        top: glyph_rect.bottom,
+        ..tile.rect
+    };
+
+    match item.icon.as_deref() {
+        Some(icon) => {
+            canvas.draw_text(icon, glyph_rect, &fonts.icon, text, TextAlign::Centre)?;
+            if let Some(key) = item.key {
+                // A muted blend of `text` toward this tile's own `back`, not
+                // a reduced alpha: draw_text stamps the alpha of its *whole*
+                // rect to the colour it drew with, so anything less than
+                // fully opaque here would punch a translucent hole in an
+                // otherwise solid tile. Blending the hue instead keeps the
+                // badge fully opaque while still reading as a secondary hint
+                // next to the icon's full-strength colour — the colour
+                // difference this module's own doc comment on the corner
+                // badge motivates.
+                let badge_color = muted(text, back);
+                let badge_margin = 4;
+                let badge_rect = RECT {
+                    left: tile.rect.left + badge_margin,
+                    top: tile.rect.top + badge_margin,
+                    right: tile.rect.left + (tile.rect.right - tile.rect.left) * 2 / 5,
+                    bottom: tile.rect.top + (tile.rect.bottom - tile.rect.top) * 2 / 5,
+                };
+                canvas.draw_text(&key_name(key), badge_rect, &fonts.badge, badge_color, TextAlign::Left)?;
+            }
+        }
+        None => {
+            let key = item.key.map(key_name).unwrap_or_default();
+            canvas.draw_text(&key, glyph_rect, &fonts.key, text, TextAlign::Centre)?;
+        }
+    }
+
+    let label = if current {
+        Some("Current")
+    } else if active {
+        item.label_on.as_deref()
+    } else {
+        None
+    }
+    .or(item.label.as_deref());
+    if let Some(label) = label {
+        canvas.draw_text(label, label_rect, &fonts.label, text, TextAlign::Centre)?;
+    }
+
+    // Last, now that every GDI call touching this tile is done — same
+    // ordering requirement as the panel's own `round_corners` in
+    // `draw_panel_border`, and for the same reason (text/icon drawing can
+    // bleed opaque pixels into the corner region a small radius carves
+    // out). Blends toward the panel's own background rather than toward
+    // transparent: a tile sits on the popup, not the desktop.
+    canvas.round_rect_corners(tile.rect, tile_radius, panel_back);
+    Ok(())
+}
+
+/// A thin outline around the whole popup, distinct from the accent-coloured
+/// `focus_border` around the *target* window — just enough definition to
+/// read as a floating panel against whatever is behind it. Drawn last,
+/// before rounding, same as every tile: rounding has to see the finished
+/// image to cut a clean corner out of it.
+///
+/// `stroke_rect` draws it straight, corners included; the corner fix-up is
+/// `round_corners_with_border`'s job, not a plain `round_corners` — see
+/// that method's own doc comment for why a straight stroke rounded off
+/// after the fact does not actually produce a border that follows the
+/// curve.
+fn draw_panel_border(canvas: &mut Canvas, bounds: RECT, config: &OverlayConfig) {
+    canvas.stroke_rect(bounds, config.palette.panel_border);
+    canvas.round_corners_with_border(
+        config.corner_radius as i32,
+        PANEL_BORDER_WIDTH,
+        config.palette.panel_border,
+    );
 }
 
 impl Drop for ActionOverlay {
