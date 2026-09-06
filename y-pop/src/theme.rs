@@ -76,6 +76,38 @@ pub struct ThemeOverrides {
     /// `<background-gradient start="" end="" direction=""/>`, a child of
     /// `<skin>` — same "fully set or not present" shape as `border`.
     pub background_gradient: Option<GradientOverride>,
+    /// `edge="idle"|"hover"|"always"` — see [`EdgeRule`]'s own doc comment
+    /// for why this uses those three names rather than PortAL's own
+    /// `edge="true"|"sel"|"unsel"`.
+    pub edge: Option<EdgeRule>,
+    /// `<icon-gradient start="" end="" direction=""/>`, a child of `<skin>`
+    /// — PortAL's own `<icon color="a:b" direction="h|v">` (`xmlconfig.cpp`'s
+    /// `loadMenuSkin`), reshaped to match `<background-gradient>`'s own
+    /// "fully set or not present" contract rather than PortAL's: its own
+    /// single-colour fallback (`<icon color="X"/>`, no `:`) is provably
+    /// buggy there — `getColorPair`'s `wcstok_s` still returns a non-`NULL`
+    /// pair for an un-delimited string, `background` defaulting to
+    /// `getColor(NULL) == 0` (black) rather than reaching the single-colour
+    /// branch the surrounding code clearly intends — so it isn't carried
+    /// forward; a flat colour here is written as `start`/`end` both equal,
+    /// the same convention [`GradientOverride`] and [`y_core::menu::Fill::
+    /// Gradient`] already use.
+    pub icon_gradient: Option<GradientOverride>,
+}
+
+/// `edge="idle"|"hover"|"always"` on `<skin>` — mirrors
+/// [`y_core::menu::EdgeRule`] rather than reusing it directly, the same
+/// "config-level type, converted downstream" split every other `<skin>`
+/// setting here follows (`GradientDirection` next to `y_core::menu::
+/// GradientDirection`, `BorderOverride`/`GradientOverride` next to `y_core::
+/// menu::Border`/`Gradient`) — converted in `y-pop/src/skins.rs::
+/// resolve_design`, the one place a `y-pop.xml` concept turns into a
+/// `y_core::menu` one.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum EdgeRule {
+    Idle,
+    Hover,
+    Always,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -119,6 +151,8 @@ impl ThemeOverrides {
             || self.margin.is_some()
             || self.border.is_some()
             || self.background_gradient.is_some()
+            || self.edge.is_some()
+            || self.icon_gradient.is_some()
     }
 }
 
@@ -173,6 +207,7 @@ impl Reader<'_> {
                 "disabled-text-color",
                 "padding",
                 "margin",
+                "edge",
             ],
         );
 
@@ -215,8 +250,20 @@ impl Reader<'_> {
             }
         }
 
+        overrides.edge = match skin.attr("edge") {
+            None => None,
+            Some("idle") => Some(EdgeRule::Idle),
+            Some("hover") => Some(EdgeRule::Hover),
+            Some("always") => Some(EdgeRule::Always),
+            Some(other) => {
+                self.warn(skin, format!("unknown edge {other:?}"));
+                None
+            }
+        };
+
         overrides.border = self.border_override(skin);
-        overrides.background_gradient = self.gradient_override(skin);
+        overrides.background_gradient = self.gradient_override(skin, "background-gradient");
+        overrides.icon_gradient = self.gradient_override(skin, "icon-gradient");
         overrides
     }
 
@@ -243,7 +290,10 @@ impl Reader<'_> {
         Some(BorderOverride { size, round, color })
     }
 
-    /// `<background-gradient start="" end="" direction=""/>`, a child of
+    /// `<background-gradient start="" end="" direction=""/>` or
+    /// `<icon-gradient .../>` (same shape, different child name — see
+    /// [`ThemeOverrides::icon_gradient`]'s own doc comment for why the
+    /// latter doesn't reuse PortAL's own `<icon color="a:b">`), a child of
     /// `<skin>` — named explicitly (not PortAL's bare `<background>`,
     /// which [[portal-analysis]] documents as meaning three different
     /// things depending on context) since this element is always exactly a
@@ -251,8 +301,8 @@ impl Reader<'_> {
     /// colour set is a config mistake, not a flat-colour fallback (see
     /// [[portal-analysis]]'s note on PortAL's own inconsistent handling of
     /// this exact case).
-    fn gradient_override(&mut self, skin: Element<'_>) -> Option<GradientOverride> {
-        let gradient = skin.child("background-gradient")?;
+    fn gradient_override(&mut self, skin: Element<'_>, child_name: &str) -> Option<GradientOverride> {
+        let gradient = skin.child(child_name)?;
         self.check(gradient, &["start", "end", "direction"]);
 
         let start = self.color_attr(gradient, "start")?;
@@ -489,5 +539,89 @@ mod tests {
 
         assert!(tree.warnings.is_empty(), "{:?}", tree.warnings);
         assert_eq!(tree.defaults.theme_overrides.margin, Some(5));
+    }
+
+    #[test]
+    fn edge_is_read_off_skin_directly() {
+        for (value, expected) in [
+            ("idle", EdgeRule::Idle),
+            ("hover", EdgeRule::Hover),
+            ("always", EdgeRule::Always),
+        ] {
+            let xml = format!(r#"<y-pop><skin edge="{value}"/><quit/></y-pop>"#);
+            let tree = load_str(&xml, &mut builtins()).expect("valid");
+            assert!(tree.warnings.is_empty(), "{:?}", tree.warnings);
+            assert_eq!(tree.defaults.theme_overrides.edge, Some(expected), "edge={value:?}");
+        }
+    }
+
+    #[test]
+    fn an_unknown_edge_value_warns_and_is_left_unset() {
+        let tree = load_str(
+            r#"<y-pop><skin edge="sel"/><quit/></y-pop>"#,
+            &mut builtins(),
+        )
+        .expect("valid");
+
+        assert_eq!(
+            tree.defaults.theme_overrides.edge, None,
+            "PortAL's own \"sel\"/\"unsel\"/\"true\" values are not carried over — see EdgeRule's own doc comment"
+        );
+        assert!(
+            tree.warnings.iter().any(|warning| warning.contains("edge")),
+            "{:?}",
+            tree.warnings
+        );
+    }
+
+    #[test]
+    fn an_icon_gradient_needs_both_start_and_end() {
+        let tree = load_str(
+            r#"<y-pop><skin><icon-gradient start="000000" end="ffffff" direction="v"/></skin><quit/></y-pop>"#,
+            &mut builtins(),
+        )
+        .expect("valid");
+
+        assert!(tree.warnings.is_empty(), "{:?}", tree.warnings);
+        let gradient = tree
+            .defaults
+            .theme_overrides
+            .icon_gradient
+            .expect("an <icon-gradient> was given");
+        assert_eq!(gradient.start, Color::rgb(0, 0, 0));
+        assert_eq!(gradient.end, Color::rgb(255, 255, 255));
+        assert_eq!(gradient.direction, GradientDirection::Vertical);
+
+        let missing_end = load_str(
+            r#"<y-pop><skin><icon-gradient start="000000"/></skin><quit/></y-pop>"#,
+            &mut builtins(),
+        )
+        .expect("valid");
+        assert_eq!(
+            missing_end.defaults.theme_overrides.icon_gradient, None,
+            "a half-set gradient is dropped, not defaulted"
+        );
+    }
+
+    /// `<background-gradient>` and `<icon-gradient>` are independent slots
+    /// on the same `<skin>` — one being set must not be read as, or drop,
+    /// the other.
+    #[test]
+    fn background_gradient_and_icon_gradient_are_independent() {
+        let tree = load_str(
+            r#"<y-pop><skin>
+                <background-gradient start="000000" end="ffffff"/>
+                <icon-gradient start="ff0000" end="00ff00"/>
+            </skin><quit/></y-pop>"#,
+            &mut builtins(),
+        )
+        .expect("valid");
+
+        assert!(tree.warnings.is_empty(), "{:?}", tree.warnings);
+        let background = tree.defaults.theme_overrides.background_gradient.expect("set");
+        let icon = tree.defaults.theme_overrides.icon_gradient.expect("set");
+        assert_eq!(background.start, Color::rgb(0, 0, 0));
+        assert_eq!(icon.start, Color::rgb(255, 0, 0));
+        assert_eq!(icon.end, Color::rgb(0, 255, 0));
     }
 }

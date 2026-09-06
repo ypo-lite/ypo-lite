@@ -30,7 +30,7 @@
 
 use windows::Win32::Foundation::{LPARAM, RECT, SIZE};
 use windows::Win32::Graphics::Gdi::{
-    AC_SRC_ALPHA, AC_SRC_OVER, AlphaBlend, BF_BOTTOM, BITMAP, BLENDFUNCTION, BeginPath, BitBlt,
+    AC_SRC_ALPHA, AC_SRC_OVER, AlphaBlend, BF_BOTTOM, BF_LEFT, BITMAP, BLENDFUNCTION, BeginPath, BitBlt,
     CreateCompatibleBitmap, CreateCompatibleDC, CreateRectRgnIndirect, CreateSolidBrush, DFC_MENU,
     DFCS_MENUARROW, DT_LEFT, DT_NOPREFIX, DT_RIGHT, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject,
     DrawEdge, DrawFrameControl, DrawTextW, EDGE_ETCHED, EndPath, ExcludeClipRect, FillRect,
@@ -45,7 +45,7 @@ use windows::Win32::UI::Controls::{
 
 use crate::overlay::Color;
 
-use super::{Fill, Gradient, GradientDirection, ItemData, ItemKind, MenuDesign};
+use super::{EdgeRule, Fill, Gradient, GradientDirection, ItemData, ItemKind, MenuDesign};
 
 /// The icon size every themed row's icon draws at, and the width reserved
 /// for it on *every* `Normal` row regardless of whether that particular
@@ -196,15 +196,28 @@ pub fn handle_draw_item(lparam: LPARAM) -> bool {
         (false, false) => (data.design.base.back, data.design.base.text),
     };
 
+    // A disabled row never reads as "selected" for either of these — see
+    // `EdgeRule`'s own doc comment (`edge`) and `MenuDesign::icon_backdrop`'s
+    // (idle-only, gated on the same flag PortAL's own `!ODS_SELECTED` check
+    // reads, but folded together with `disabled` here the same way the
+    // `base`/`text_color` match above already does for the row's fill).
+    let idle = !selected || disabled;
+
     if selected && !disabled {
         paint_selected_row(hdc, cell, &data.design);
     } else {
         fill_solid(hdc, cell, base);
+        if idle
+            && matches!(data.kind, ItemKind::Normal)
+            && let Some(icon_backdrop) = data.design.icon_backdrop
+        {
+            paint_icon_backdrop(hdc, cell, content_rect, icon_backdrop);
+        }
     }
 
     match data.kind {
         ItemKind::Separator => draw_separator(hdc, content_rect, data, text_color),
-        ItemKind::Normal => draw_normal_item(hdc, content_rect, item.rcItem, data, text_color),
+        ItemKind::Normal => draw_normal_item(hdc, content_rect, item.rcItem, data, text_color, idle),
     }
 
     true
@@ -317,6 +330,40 @@ fn fill_gradient(hdc: HDC, rect: RECT, gradient: Gradient) {
     }
 }
 
+/// Whether [`MenuDesign::edge`]'s rule draws on a row with the given
+/// idle/selected state — pulled out of [`draw_normal_item`] as a pure
+/// function (no `HDC`, no rect) so the row-state logic itself is directly
+/// unit-testable without a live GDI draw.
+fn edge_rule_draws(rule: EdgeRule, idle: bool) -> bool {
+    match rule {
+        EdgeRule::Idle => idle,
+        EdgeRule::Hover => !idle,
+        EdgeRule::Always => true,
+    }
+}
+
+/// [`MenuDesign::icon_backdrop`]'s extra fill, idle rows only — PortAL's own
+/// `icon_gradiant` (`menu.cpp::OnDrawItem`): a rect from the row's own left
+/// edge (`cell`, the same rect the plain base fill it paints over just
+/// used) out to just past the icon/text boundary — `content_rect.left +
+/// TEXT_PAD + ICON_SIZE + ICON_GAP / 2` is that boundary (see
+/// `draw_normal_item`'s own `icon_end` for the identical computation, used
+/// there to place [`MenuDesign::edge`]'s rule), `+ 2` more to bleed past it
+/// the same amount PortAL's own `iconSize.cx + 18` does (`+16` for the
+/// boundary itself, `+2` further) — confirmed by reading `menu.cpp`, not
+/// guessed. Drawn *before* [`draw_normal_item`] so the icon/text/arrow it
+/// goes on to draw land on top, same order PortAL's own call site uses.
+fn paint_icon_backdrop(hdc: HDC, cell: RECT, content_rect: RECT, gradient: Gradient) {
+    let icon_end = content_rect.left + TEXT_PAD + ICON_SIZE + ICON_GAP / 2 + 2;
+    let rect = RECT {
+        left: cell.left,
+        top: cell.top,
+        right: icon_end.min(cell.right),
+        bottom: cell.bottom,
+    };
+    fill_gradient(hdc, rect, gradient);
+}
+
 /// The clip region's bounding rect, backed up before [`set_round_clip`]
 /// narrows it — PortAL's own `fullRect` backup (`OnDrawItem`'s
 /// `GetClipBox` call), reused here for [`restore_clip`] to reconstruct a
@@ -365,8 +412,11 @@ fn restore_clip(hdc: HDC, rect: RECT) {
 /// padding/border/margin near the row's outer edge unprotected, letting
 /// the native arrow's fixed system colour peek through there (seen as a
 /// faint fixed-colour sliver on a light/flat theme, or a few stray pixels
-/// on hover on a dark one).
-fn draw_normal_item(hdc: HDC, rect: RECT, item_rect: RECT, data: &ItemData, text_color: Color) {
+/// on hover on a dark one). `idle` is this row's own idle/selected state —
+/// see [`MenuDesign::edge`]'s own doc comment for why its rule (drawn here,
+/// unlike [`MenuDesign::icon_backdrop`], since it needs the same icon/text
+/// boundary this function already computes) is gated on it.
+fn draw_normal_item(hdc: HDC, rect: RECT, item_rect: RECT, data: &ItemData, text_color: Color, idle: bool) {
     let mut text_rect = rect;
     text_rect.left += TEXT_PAD;
     text_rect.right -= TEXT_PAD;
@@ -381,7 +431,27 @@ fn draw_normal_item(hdc: HDC, rect: RECT, item_rect: RECT, data: &ItemData, text
         let y = rect.top + ((rect.bottom - rect.top) - h) / 2;
         blit_icon(hdc, text_rect.left, y, w, h, bitmap);
     }
+    let icon_end = text_rect.left + ICON_SIZE;
     text_rect.left += ICON_SIZE + ICON_GAP;
+
+    // A vertical rule between the icon column and the text — see
+    // `MenuDesign::edge`'s own doc comment for which rows this draws on,
+    // and why the config-facing names (`Idle`/`Hover`/`Always`) aren't
+    // PortAL's own `_SEL`/`_UNSEL`. Positioned at the midpoint of the
+    // icon/text gap, same as PortAL's own `iconSize.cx + 16` (`menu.cpp`,
+    // confirmed by reading it) — `icon_end` here already *is* PortAL's
+    // `iconSize.cx` term (both measured from the row's own left edge),
+    // `+ ICON_GAP / 2` the other half of their `+ 16` (`ICON_GAP == 16`,
+    // see its own doc comment).
+    if let Some(rule) = data.design.edge
+        && edge_rule_draws(rule, idle)
+    {
+        let x = icon_end + ICON_GAP / 2;
+        let mut bar = RECT { left: x, top: rect.top, right: rect.right, bottom: rect.bottom };
+        unsafe {
+            let _ = DrawEdge(hdc, &mut bar, EDGE_ETCHED, BF_LEFT);
+        }
+    }
 
     if data.submenu {
         let column_left = (rect.right - TEXT_PAD - ARROW_WIDTH).max(text_rect.left);
@@ -642,6 +712,8 @@ mod tests {
             fill: Fill::Solid,
             padding: 0,
             margin: 0,
+            edge: None,
+            icon_backdrop: None,
         }
     }
 
@@ -795,6 +867,68 @@ mod tests {
                 itemData: item_data(menu.handle(), position),
             };
             assert!(handle_draw_item(LPARAM(&raw mut draw as isize)));
+        }
+        unsafe { ReleaseDC(None, hdc) };
+    }
+
+    /// [`edge_rule_draws`]'s row-state logic, direct — no `HDC` needed. Pins
+    /// down the [`EdgeRule`] naming's whole point: `Idle` fires on an idle
+    /// row, `Hover` on a selected one, `Always` on both — the opposite of
+    /// what porting PortAL's own `_SEL`/`_UNSEL` bit names literally would
+    /// have given (see `EdgeRule`'s own doc comment for that history).
+    #[test]
+    fn edge_rule_draws_on_the_row_states_its_name_says() {
+        assert!(edge_rule_draws(EdgeRule::Idle, true));
+        assert!(!edge_rule_draws(EdgeRule::Idle, false));
+
+        assert!(!edge_rule_draws(EdgeRule::Hover, true));
+        assert!(edge_rule_draws(EdgeRule::Hover, false));
+
+        assert!(edge_rule_draws(EdgeRule::Always, true));
+        assert!(edge_rule_draws(EdgeRule::Always, false));
+    }
+
+    /// Same "draws without a live popup" coverage as the tests above, with
+    /// `edge`/`icon_backdrop` both set this time — `handle_draw_item`'s own
+    /// icon-backdrop branch and `draw_normal_item`'s edge-rule branch must
+    /// not panic on a real (if tiny) row.
+    #[test]
+    fn a_themed_item_with_an_edge_rule_and_icon_backdrop_draws_without_a_live_popup() {
+        let design = MenuDesign {
+            edge: Some(EdgeRule::Always),
+            icon_backdrop: Some(Gradient {
+                direction: GradientDirection::Horizontal,
+                start: Color::rgb(255, 217, 150),
+                end: Color::rgb(0, 0, 0),
+            }),
+            ..test_design()
+        };
+        let mut menu = PopupMenu::themed(design).expect("CreatePopupMenu");
+        menu.add_item(1, "Leaf").expect("add_item");
+        let submenu = PopupMenu::themed(design).expect("CreatePopupMenu");
+        menu.add_submenu("Group", submenu).expect("add_submenu");
+
+        let hdc = unsafe { GetDC(None) };
+        for position in 0..menu.item_count() {
+            for selected in [false, true] {
+                let mut draw = DRAWITEMSTRUCT {
+                    CtlType: ODT_MENU,
+                    CtlID: 0,
+                    itemID: 0,
+                    itemAction: unsafe { std::mem::zeroed() },
+                    itemState: if selected { ODS_SELECTED } else { unsafe { std::mem::zeroed() } },
+                    hwndItem: HWND(menu.handle().0 as *mut _),
+                    hDC: hdc,
+                    rcItem: RECT {
+                        left: 0,
+                        top: 0,
+                        right: 120,
+                        bottom: 22,
+                    },
+                    itemData: item_data(menu.handle(), position),
+                };
+                assert!(handle_draw_item(LPARAM(&raw mut draw as isize)));
+            }
         }
         unsafe { ReleaseDC(None, hdc) };
     }

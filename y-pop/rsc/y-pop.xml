@@ -28,11 +28,23 @@
 	    PortAL has no such gap; this is a y-pop-only addition)
 	  margin — gap WITHIN a row, between its border and its own icon/text,
 	    in pixels (also 0 in every built-in skin, also y-pop-only)
-	<skin> can also carry two child elements, both optional and
-	independently all-or-nothing (an incomplete one warns and is dropped):
+	  edge — "idle", "hover", or "always": draws a vertical rule between
+	    the icon column and the text on rows in that state ("default" is
+	    "idle", "dark" is "always", "flat" sets none). Not PortAL's own
+	    edge="true"/"sel"/"unsel" — those name which ODS_SELECTED bit is
+	    set, not which rows the rule actually appears on, which reads
+	    backwards from what the words say; "idle"/"hover"/"always" name
+	    the actual row state instead.
+	<skin> can also carry child elements, each optional and independently
+	all-or-nothing (an incomplete one warns and is dropped):
 	  <border size="1" round="8" color="3a3a3a"/>
 	  <background-gradient start="2b2b2b" end="1a1a1a" direction="v"/>
 	    (direction is "h" or "v", default "h")
+	  <icon-gradient start="ffd996" end="000000" direction="h"/>
+	    extra background painted behind the icon column only, idle rows
+	    only (a hovered/selected row's own fill already covers it) — same
+	    start/end/direction shape as <background-gradient>. A flat colour
+	    is written with start and end the same.
 -->
 <y-pop shell-execute="false" show-shortcuts="true" popup="native" theme="auto">
 

@@ -32,7 +32,10 @@
 use y_core::menu::{self, Border, ColorPair, Fill, Gradient, MenuDesign};
 use y_core::overlay::Color;
 
-use y_pop::theme::{GradientDirection as ConfigGradientDirection, Theme, ThemeOverrides};
+use y_pop::theme::{
+    EdgeRule as ConfigEdgeRule, GradientDirection as ConfigGradientDirection, GradientOverride,
+    Theme, ThemeOverrides,
+};
 
 const SYSTEM_LIKE_BASE: ColorPair = ColorPair {
     text: Color::rgb(0x00, 0x00, 0x00),
@@ -87,6 +90,11 @@ const DEFAULT: MenuDesign = MenuDesign {
     }),
     padding: 0,
     margin: 0,
+    // `design1.edge = PORTAL_ST_SEL` — idle rows only, per its actual
+    // (inverted-from-its-name) runtime meaning; see `y_core::menu::
+    // EdgeRule`'s own doc comment.
+    edge: Some(menu::EdgeRule::Idle),
+    icon_backdrop: None,
 };
 
 /// PortAL's `flat` skin (`menu.cpp`'s `design2`): 1px border, no round,
@@ -107,11 +115,15 @@ const FLAT: MenuDesign = MenuDesign {
     fill: Fill::Solid,
     padding: 0,
     margin: 0,
+    // `design2.edge = PORTAL_ST_NONE` — no rule at all.
+    edge: None,
+    icon_backdrop: None,
 };
 
 /// PortAL's `dark`/`black` skin (`menu.cpp`'s `design3`): no border,
 /// white-on-black base, system selected, a [`BLUE_ACCENT`]-to-black
-/// horizontal hover gradient.
+/// horizontal hover gradient, the identical gradient again as an idle-row
+/// icon-column backdrop, and an edge rule on every row.
 const DARK: MenuDesign = MenuDesign {
     base: ColorPair {
         text: Color::rgb(0xff, 0xff, 0xff),
@@ -125,6 +137,18 @@ const DARK: MenuDesign = MenuDesign {
         color: Color::rgb(0x00, 0x00, 0x00),
     },
     fill: Fill::Gradient(Gradient {
+        direction: menu::GradientDirection::Horizontal,
+        start: BLUE_ACCENT,
+        end: Color::rgb(0x00, 0x00, 0x00),
+    }),
+    // `design3.edge = PORTAL_ST_ALL` — every row, idle or selected.
+    // `design3.icon_gradiant = &cg2`, the exact same colours/direction as
+    // `background_gradiant` above (confirmed by reading `menu.cpp`'s own
+    // `cg2` literal, reused for both fields) — an idle row previews the
+    // same accent gradient in just its icon column that a hovered row
+    // shows across its whole cell.
+    edge: Some(menu::EdgeRule::Always),
+    icon_backdrop: Some(Gradient {
         direction: menu::GradientDirection::Horizontal,
         start: BLUE_ACCENT,
         end: Color::rgb(0x00, 0x00, 0x00),
@@ -181,26 +205,41 @@ pub(crate) fn resolve_design(theme: Theme, overrides: ThemeOverrides) -> Option<
             .unwrap_or(base.border),
         fill: overrides
             .background_gradient
-            .map(|g| {
-                Fill::Gradient(Gradient {
-                    direction: match g.direction {
-                        ConfigGradientDirection::Horizontal => menu::GradientDirection::Horizontal,
-                        ConfigGradientDirection::Vertical => menu::GradientDirection::Vertical,
-                    },
-                    start: g.start,
-                    end: g.end,
-                })
-            })
+            .map(|g| Fill::Gradient(convert_gradient(g)))
             .unwrap_or(base.fill),
         padding: overrides.padding.unwrap_or(base.padding),
         margin: overrides.margin.unwrap_or(base.margin),
+        edge: overrides.edge.map(convert_edge).or(base.edge),
+        icon_backdrop: overrides
+            .icon_gradient
+            .map(convert_gradient)
+            .or(base.icon_backdrop),
     })
+}
+
+fn convert_gradient(g: GradientOverride) -> Gradient {
+    Gradient {
+        direction: match g.direction {
+            ConfigGradientDirection::Horizontal => menu::GradientDirection::Horizontal,
+            ConfigGradientDirection::Vertical => menu::GradientDirection::Vertical,
+        },
+        start: g.start,
+        end: g.end,
+    }
+}
+
+fn convert_edge(edge: ConfigEdgeRule) -> menu::EdgeRule {
+    match edge {
+        ConfigEdgeRule::Idle => menu::EdgeRule::Idle,
+        ConfigEdgeRule::Hover => menu::EdgeRule::Hover,
+        ConfigEdgeRule::Always => menu::EdgeRule::Always,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use y_pop::theme::{BorderOverride, GradientOverride};
+    use y_pop::theme::BorderOverride;
 
     #[test]
     fn theme_native_with_no_overrides_stays_unthemed() {
@@ -330,5 +369,63 @@ mod tests {
             }
             menu::Fill::Solid => panic!("PortAL's dark skin has a background gradient"),
         }
+
+        assert_eq!(DEFAULT.edge, Some(menu::EdgeRule::Idle), "design1.edge = PORTAL_ST_SEL");
+        assert_eq!(FLAT.edge, None, "design2.edge = PORTAL_ST_NONE");
+        assert_eq!(DARK.edge, Some(menu::EdgeRule::Always), "design3.edge = PORTAL_ST_ALL");
+
+        assert!(DEFAULT.icon_backdrop.is_none());
+        assert!(FLAT.icon_backdrop.is_none());
+        let dark_gradient = match DARK.fill {
+            menu::Fill::Gradient(g) => g,
+            menu::Fill::Solid => unreachable!("checked above"),
+        };
+        assert_eq!(
+            DARK.icon_backdrop,
+            Some(dark_gradient),
+            "design3's icon_gradiant and background_gradiant are the identical &cg2"
+        );
+    }
+
+    #[test]
+    fn an_edge_override_replaces_the_base_themes_edge() {
+        let overrides = ThemeOverrides {
+            edge: Some(ConfigEdgeRule::Hover),
+            ..ThemeOverrides::default()
+        };
+        // `default` has its own `Idle` — confirm the override actually wins.
+        let design = resolve_design(Theme::Default, overrides).expect("theme=\"default\" themes");
+        assert_eq!(design.edge, Some(menu::EdgeRule::Hover));
+    }
+
+    #[test]
+    fn an_edge_override_is_not_lost_when_the_base_theme_has_none() {
+        let overrides = ThemeOverrides {
+            edge: Some(ConfigEdgeRule::Always),
+            ..ThemeOverrides::default()
+        };
+        // `flat` has no edge of its own (`None`) — the override must still
+        // come through, not be swallowed by `.or(base.edge)`'s fallback.
+        let design = resolve_design(Theme::Flat, overrides).expect("theme=\"flat\" themes");
+        assert_eq!(design.edge, Some(menu::EdgeRule::Always));
+    }
+
+    #[test]
+    fn an_icon_gradient_override_replaces_the_base_themes_icon_backdrop() {
+        let overrides = ThemeOverrides {
+            icon_gradient: Some(GradientOverride {
+                start: Color::rgb(1, 2, 3),
+                end: Color::rgb(4, 5, 6),
+                direction: ConfigGradientDirection::Vertical,
+            }),
+            ..ThemeOverrides::default()
+        };
+        // `default` has no icon backdrop of its own (`None`) — same "not
+        // swallowed by the fallback" case as the edge override above.
+        let design = resolve_design(Theme::Default, overrides).expect("theme=\"default\" themes");
+        let icon_backdrop = design.icon_backdrop.expect("the override set one");
+        assert_eq!(icon_backdrop.start, Color::rgb(1, 2, 3));
+        assert_eq!(icon_backdrop.end, Color::rgb(4, 5, 6));
+        assert_eq!(icon_backdrop.direction, menu::GradientDirection::Vertical);
     }
 }

@@ -138,6 +138,48 @@ pub struct MenuDesign {
     /// unset) keeps that baseline exactly as it was before this field
     /// existed.
     pub margin: u32,
+    /// A vertical rule between the icon column and the text — PortAL's own
+    /// `edge` (`menu.cpp`'s `PORTAL_ST_SEL`/`_UNSEL`/`_ALL`/`_NONE`, its
+    /// `default` skin uses `_SEL`, `dark` uses `_ALL`, `flat` uses `_NONE`).
+    /// `None` draws nothing — every existing skin's behaviour before this
+    /// field existed. See [`EdgeRule`]'s own doc comment for why this drops
+    /// PortAL's `_SEL`/`_UNSEL` naming rather than reusing it.
+    pub edge: Option<EdgeRule>,
+    /// Extra background painted behind the icon column *only*, idle rows
+    /// only — PortAL's own `icon_gradiant` (`menu.cpp`'s `OnDrawItem`,
+    /// gated on `!ODS_SELECTED`: a hovered/selected row's own [`Fill`]
+    /// already covers the whole cell, so this would be invisible there
+    /// anyway). `None` (every skin but `dark`) paints nothing extra — the
+    /// icon column just shows through `base.back` like the rest of the row.
+    /// A flat single colour is `start == end`, the same convention
+    /// [`Fill::Gradient`] already uses; no separate "flat" variant needed.
+    pub icon_backdrop: Option<Gradient>,
+}
+
+/// Which rows [`MenuDesign::edge`] draws its vertical rule on. PortAL's own
+/// `PORTAL_ST_SEL`/`_UNSEL` bits are *not* reused here (`Idle`/`Hover`
+/// instead): reading `menu.cpp::OnDrawItem` closely, its `itemSelected`
+/// local is assigned `!(itemState & ODS_SELECTED)` — the true value means
+/// "row is idle", the opposite of what its name says — so the `_SEL` bit
+/// literally gates the rule on *idle* rows (`default`'s own skin) and
+/// `_UNSEL` on *selected* ones, backwards from what the constant names
+/// read. Porting that naming forward would carry the confusion into every
+/// `y-pop.xml` a user writes; these two variants instead name the actual
+/// row state, matching the two skins that use it (`default` → `Idle`,
+/// `dark` → `Always`) with no ambiguity to untangle at a config-file call
+/// site. The literal draw behaviour (which rows get the rule) is
+/// unchanged, only the names are.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum EdgeRule {
+    /// Idle rows only — PortAL's `default` skin (`PORTAL_ST_SEL`, per its
+    /// actual — inverted-from-its-name — runtime meaning).
+    Idle,
+    /// Hovered/selected rows only — the other half of PortAL's pair
+    /// (`PORTAL_ST_UNSEL`), unused by any of its three built-in skins but
+    /// still a real combination its own `<skin edge="unsel">` could reach.
+    Hover,
+    /// Both — PortAL's `dark` skin (`PORTAL_ST_ALL`).
+    Always,
 }
 
 /// An idle or selected row's text/background colour pair — was `MenuDesign`'
@@ -175,7 +217,7 @@ pub enum Fill {
     Gradient(Gradient),
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Gradient {
     pub direction: GradientDirection,
     pub start: Color,
@@ -795,6 +837,8 @@ mod tests {
             fill: Fill::Solid,
             padding: 0,
             margin: 0,
+            edge: None,
+            icon_backdrop: None,
         }
     }
 
