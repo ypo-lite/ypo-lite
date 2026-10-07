@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["core", "y-coustic", "y-pop", "y-snap", "y-term"]
+members = ["core", "y-coustic", "y-pop", "y-snap", "y-snap-config", "y-term"]
 # The skeleton is a self-contained reference copy, not a workspace member:
 # it must keep building on its own when copied out of the repository.
 exclude = ["skeleton"]
@@ -12,6 +12,7 @@ edition = "2024"
 [workspace.dependencies]
 y-core = { path = "core" }
 embed-resource = "3.0.11"
+windows-reactor = "0.100"
 
 # One feature set for the whole workspace: the `windows` crate is compiled
 # once and shared by every application.

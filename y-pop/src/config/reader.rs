@@ -10,8 +10,8 @@
 use y_core::xml::Element;
 
 use crate::model::{
-    App, Browse, Builder, ConfigTree, Defaults, EventMask, HotkeyBinding, IconSource, NodeData,
-    NodeFlags, NodeId, NodeKind, PopupMode, PresenterStyle,
+    App, Browse, Builder, ConfigTree, Defaults, EventMask, HotkeyBinding, IconSource, MAX_DEPTH,
+    NodeData, NodeFlags, NodeId, NodeKind, OpenFolder, PopupMode, PresenterStyle,
 };
 use crate::variables::{self, Lookup, Pool, Variable};
 
@@ -164,6 +164,53 @@ impl<'b> Reader<'b> {
         }
     }
 
+    /// `depth="N"` — see [`crate::model::Browse::depth`]. Absent, or a value
+    /// that doesn't parse as a non-negative integer, is `0` — the same "no
+    /// folders shown" default a plain `browse="true"` had before this
+    /// attribute existed; a bad value warns rather than failing the whole
+    /// file, the same severity `check` itself uses for an unknown attribute.
+    /// Parsed as `u32` first, not straight into `Browse::depth`'s own `u8`,
+    /// so a value past [`MAX_DEPTH`] (or past `u8::MAX`) is a clamp-with-
+    /// warning rather than a silent parse failure that reads as "0".
+    fn depth(&mut self, element: Element<'_>) -> u8 {
+        let depth = match element.attr("depth") {
+            None => return 0,
+            Some(raw) => match raw.trim().parse::<u32>() {
+                Ok(depth) => depth,
+                Err(_) => {
+                    self.warn(element, format!("depth={raw:?} is not a non-negative integer"));
+                    return 0;
+                }
+            },
+        };
+        if depth > u32::from(MAX_DEPTH) {
+            self.warn(
+                element,
+                format!("depth={depth} is more than the {MAX_DEPTH} levels y-pop supports — clamped"),
+            );
+            return MAX_DEPTH;
+        }
+        // Always fits: checked against MAX_DEPTH (< u8::MAX) above.
+        u8::try_from(depth).unwrap_or(MAX_DEPTH)
+    }
+
+    /// `open-folder="all"|"max-depth"|"never"` — see [`OpenFolder`].
+    /// Defaults to, and falls back on an unknown value to, [`OpenFolder::
+    /// MaxDepth`], the least surprising of the three: no extra entries
+    /// anywhere, but a folder that would otherwise be unreachable (having
+    /// hit [`crate::model::Browse::depth`]) still shows up, openable.
+    fn open_folder(&mut self, element: Element<'_>) -> OpenFolder {
+        match element.attr("open-folder") {
+            None | Some("max-depth") => OpenFolder::MaxDepth,
+            Some("all") => OpenFolder::All,
+            Some("never") => OpenFolder::Never,
+            Some(other) => {
+                self.warn(element, format!("unknown open-folder {other:?}"));
+                OpenFolder::MaxDepth
+            }
+        }
+    }
+
     /// Parses `"path"` or `"path,index"` — PortAL's `ico="...,6"` shorthand
     /// for a multi-icon `.exe`/`.dll`/`.ico`.
     fn icon(&mut self, raw: &str) -> IconSource {
@@ -214,15 +261,14 @@ impl<'b> Reader<'b> {
     fn common_flags(&mut self, element: Element<'_>) -> NodeFlags {
         let mut flags = NodeFlags::default();
         flags.set_default(element.attr_bool("default").unwrap_or(false));
-        flags.set_break_after(element.attr_bool("break").unwrap_or(false));
         flags.set_auto_open(element.attr_bool("autoopen").unwrap_or(false));
         flags
     }
 
     /// Walks every child of `element` that is a menu node (`group`, `app`,
-    /// `separator`, `about`, `quit`), skipping `<hotkey>` (already consumed
-    /// by [`Reader::hotkeys`]) and `<variables>`, and warning on anything
-    /// else.
+    /// `separator`, `about`, `quit`, `break`), skipping `<hotkey>` (already
+    /// consumed by [`Reader::hotkeys`]) and `<variables>`, and warning on
+    /// anything else.
     pub(super) fn read_children(&mut self, element: Element<'_>) -> Vec<NodeId> {
         let mut children = Vec::new();
         for child in element.children() {
@@ -237,10 +283,31 @@ impl<'b> Reader<'b> {
                 "separator" => children.push(self.read_leaf(child, NodeKind::Separator, "")),
                 "about" => children.push(self.read_leaf(child, NodeKind::About, "About")),
                 "quit" => children.push(self.read_leaf(child, NodeKind::Quit, "Quit")),
+                "break" => children.push(self.read_break(child)),
                 other => self.warn(child, format!("unknown element <{other}>, skipping")),
             }
         }
         children
+    }
+
+    /// `<break/>` — a menu-column break at this exact point among its
+    /// siblings, see [`NodeKind::Break`]. Takes no attributes at all: unlike
+    /// `<separator/>` it has no name/icon/tooltip to show (there's nothing
+    /// to draw), and unlike every other node kind it has nothing a hotkey
+    /// could meaningfully target either.
+    fn read_break(&mut self, element: Element<'_>) -> NodeId {
+        self.check(element, &[]);
+        self.builder.push(NodeData {
+            kind: NodeKind::Break,
+            name: self.pool.intern(String::new()),
+            icon: None,
+            tooltip: None,
+            hotkeys: Vec::new(),
+            flags: NodeFlags::default(),
+            show_shortcut: None,
+            popup: None,
+            children: Vec::new(),
+        })
     }
 
     fn read_group(&mut self, element: Element<'_>) -> NodeId {
@@ -251,7 +318,6 @@ impl<'b> Reader<'b> {
                 "icon",
                 "tooltip",
                 "default",
-                "break",
                 "autoopen",
                 "show-shortcuts",
                 "popup",
@@ -295,7 +361,6 @@ impl<'b> Reader<'b> {
                 "icon",
                 "tooltip",
                 "default",
-                "break",
                 "show-shortcuts",
                 "exe",
                 "app-id",
@@ -306,7 +371,8 @@ impl<'b> Reader<'b> {
                 "events",
                 "browse",
                 "filter",
-                "recurse",
+                "depth",
+                "open-folder",
             ],
         );
 
@@ -338,7 +404,8 @@ impl<'b> Reader<'b> {
             .unwrap_or(false)
             .then(|| Browse {
                 filter: self.opt_text(element, "filter"),
-                recurse: element.attr_bool("recurse").unwrap_or(false),
+                depth: self.depth(element),
+                open_folder: self.open_folder(element),
             });
 
         let mut events = EventMask::default();
@@ -387,7 +454,7 @@ impl<'b> Reader<'b> {
     /// defaulted — a written-but-empty attribute is a choice, not an
     /// omission.
     fn read_leaf(&mut self, element: Element<'_>, kind: NodeKind, default_name: &str) -> NodeId {
-        self.check(element, &["name", "icon", "tooltip", "default", "break"]);
+        self.check(element, &["name", "icon", "tooltip", "default"]);
 
         let hotkeys = self.hotkeys(element);
         let flags = self.common_flags(element);

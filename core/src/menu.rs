@@ -65,12 +65,14 @@ use windows::Win32::Graphics::Gdi::{CreateSolidBrush, DeleteObject, HBITMAP};
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, DestroyMenu, GetMenuInfo, GetMenuItemCount, GetMenuItemInfoW,
     HMENU, MENU_ITEM_FLAGS, MENUINFO, MENUITEMINFOW, MF_CHECKED, MF_DISABLED, MF_GRAYED,
-    MF_OWNERDRAW, MF_POPUP, MF_SEPARATOR, MF_STRING, MFT_OWNERDRAW, MIIM_BITMAP, MIIM_DATA,
-    MIIM_FTYPE, MIIM_SUBMENU, MIM_BACKGROUND, PostMessageW, SetForegroundWindow, SetMenuInfo,
-    SetMenuItemInfoW, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD, TPM_RIGHTBUTTON,
-    TrackPopupMenu, WM_NULL,
+    MF_MENUBREAK, MF_OWNERDRAW, MF_POPUP, MF_SEPARATOR, MF_STRING, MFT_OWNERDRAW, MIIM_BITMAP,
+    MIIM_DATA, MIIM_FTYPE, MIIM_SUBMENU, MIM_BACKGROUND, PostMessageW, SetForegroundWindow,
+    SetMenuInfo, SetMenuItemInfoW, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD,
+    TPM_RIGHTBUTTON, TrackPopupMenu, WM_NULL,
 };
 use windows::core::{HSTRING, PCWSTR, Result};
+
+use std::cell::Cell;
 
 use crate::overlay::Color;
 
@@ -88,6 +90,12 @@ pub struct PopupMenu {
     /// owner-drawn with this design. `None` is the plain, native-rendered
     /// path every other caller in the workspace still uses.
     design: Option<MenuDesign>,
+    /// Armed by [`PopupMenu::add_break`], consumed by whichever `add_*` call
+    /// appends the next item — see that method's own doc comment. A `Cell`,
+    /// not a plain `bool`, so `add_break` (and every `add_*` method that
+    /// reads it) can stay `&self` rather than `&mut self`, matching every
+    /// other method here except [`PopupMenu::add_submenu`] itself.
+    pending_break: Cell<bool>,
 }
 
 /// The design an owner-drawn [`PopupMenu`] paints itself with — replaces the
@@ -292,6 +300,7 @@ impl PopupMenu {
             handle,
             owned: Vec::new(),
             design: None,
+            pending_break: Cell::new(false),
         })
     }
 
@@ -309,7 +318,30 @@ impl PopupMenu {
             handle,
             owned: Vec::new(),
             design: Some(design),
+            pending_break: Cell::new(false),
         })
+    }
+
+    /// Marks a menu break just before whatever this menu appends next —
+    /// Win32's `MF_MENUBREAK`, which starts a new column at that item.
+    /// PortAL's own `break="true"` sat on the item *after* which the break
+    /// happens; `y-pop.xml`'s `<break/>` instead names the point itself, as
+    /// a sibling between two other children (see `y-pop::menu::
+    /// append_children`) — so this doesn't append an item of its own, it
+    /// only arms the very next `add_*` call, which consumes the flag whether
+    /// or not it actually uses it (a `<break/>` with nothing after it — the
+    /// last child of its parent — arms a flag nothing ever reads, which is
+    /// harmless, same as PortAL's own `break="true"` on a group's last item
+    /// having nothing to visibly do).
+    pub fn add_break(&self) {
+        self.pending_break.set(true);
+    }
+
+    /// Whether [`PopupMenu::add_break`] was called since the last item —
+    /// consumed (not just read), so a break only ever applies to the one
+    /// item right after it.
+    fn take_break(&self) -> bool {
+        self.pending_break.take()
     }
 
     /// [`PopupMenu::new`] or [`PopupMenu::themed`] depending on whether a
@@ -350,6 +382,7 @@ impl PopupMenu {
                     text,
                     shortcut,
                     kind: ItemKind::Normal,
+                    menu_break: self.take_break(),
                 },
                 design,
             ),
@@ -406,7 +439,15 @@ impl PopupMenu {
         match self.design {
             Some(design) => append_owner_draw(
                 self.handle,
-                NewItem { id: 0, disabled: true, submenu: false, text, shortcut: None, kind: ItemKind::Normal },
+                NewItem {
+                    id: 0,
+                    disabled: true,
+                    submenu: false,
+                    text,
+                    shortcut: None,
+                    kind: ItemKind::Normal,
+                    menu_break: self.take_break(),
+                },
                 design,
             ),
             None => self.append(MF_STRING | MF_DISABLED | MF_GRAYED, 0, text),
@@ -436,6 +477,7 @@ impl PopupMenu {
                     text: title,
                     shortcut: None,
                     kind: ItemKind::Separator,
+                    menu_break: self.take_break(),
                 },
                 design,
             ),
@@ -471,6 +513,7 @@ impl PopupMenu {
                     text,
                     shortcut,
                     kind: ItemKind::Normal,
+                    menu_break: self.take_break(),
                 },
                 design,
             ),
@@ -488,6 +531,7 @@ impl PopupMenu {
     }
 
     fn append(&self, flags: MENU_ITEM_FLAGS, id: usize, text: &str) -> Result<()> {
+        let flags = if self.take_break() { flags | MF_MENUBREAK } else { flags };
         let text = HSTRING::from(text);
         unsafe { AppendMenuW(self.handle, flags, id, PCWSTR(text.as_ptr())) }
     }
@@ -576,6 +620,11 @@ struct NewItem<'a> {
     text: &'a str,
     shortcut: Option<&'a str>,
     kind: ItemKind,
+    /// `MF_MENUBREAK` — see [`PopupMenu::add_break`]. Always `false` from
+    /// the raw-`HMENU` free functions (`append_item` and friends): those
+    /// exist for `y-pop`'s browse-lazy listing, which is filesystem content
+    /// with no `<break/>` of its own to carry.
+    menu_break: bool,
 }
 
 /// Appends one owner-drawn item to a raw `HMENU` — the free-function form
@@ -584,7 +633,7 @@ struct NewItem<'a> {
 /// `on_init_menu_popup`, populating a submenu from its raw handle — see
 /// `core::menu`'s module doc).
 fn append_owner_draw(menu: HMENU, item: NewItem, design: MenuDesign) -> Result<()> {
-    let NewItem { id, disabled, submenu, text, shortcut, kind } = item;
+    let NewItem { id, disabled, submenu, text, shortcut, kind, menu_break } = item;
     let separator = matches!(kind, ItemKind::Separator);
 
     let data = Box::new(ItemData {
@@ -611,6 +660,9 @@ fn append_owner_draw(menu: HMENU, item: NewItem, design: MenuDesign) -> Result<(
     if disabled {
         flags |= MF_DISABLED | MF_GRAYED;
     }
+    if menu_break {
+        flags |= MF_MENUBREAK;
+    }
 
     let result = unsafe { AppendMenuW(menu, flags, id, PCWSTR(data as *const u16)) };
     if result.is_err() {
@@ -628,7 +680,15 @@ pub fn append_item(menu: HMENU, id: u32, text: &str, design: Option<MenuDesign>)
     match design {
         Some(design) => append_owner_draw(
             menu,
-            NewItem { id: id as usize, disabled: false, submenu: false, text, shortcut: None, kind: ItemKind::Normal },
+            NewItem {
+                id: id as usize,
+                disabled: false,
+                submenu: false,
+                text,
+                shortcut: None,
+                kind: ItemKind::Normal,
+                menu_break: false,
+            },
             design,
         ),
         None => {
@@ -644,7 +704,15 @@ pub fn append_disabled_item(menu: HMENU, text: &str, design: Option<MenuDesign>)
     match design {
         Some(design) => append_owner_draw(
             menu,
-            NewItem { id: 0, disabled: true, submenu: false, text, shortcut: None, kind: ItemKind::Normal },
+            NewItem {
+                id: 0,
+                disabled: true,
+                submenu: false,
+                text,
+                shortcut: None,
+                kind: ItemKind::Normal,
+                menu_break: false,
+            },
             design,
         ),
         None => {
@@ -658,6 +726,28 @@ pub fn append_disabled_item(menu: HMENU, text: &str, design: Option<MenuDesign>)
                 )
             }
         }
+    }
+}
+
+/// A plain separator on a raw `HMENU` — the [`append_item`] counterpart for
+/// setting a browsed submenu's extra "open folder" entry apart from the
+/// folder's own listing (`y-pop`'s `open-folder="all"`).
+pub fn append_separator(menu: HMENU, design: Option<MenuDesign>) -> Result<()> {
+    match design {
+        Some(design) => append_owner_draw(
+            menu,
+            NewItem {
+                id: 0,
+                disabled: false,
+                submenu: false,
+                text: "",
+                shortcut: None,
+                kind: ItemKind::Separator,
+                menu_break: false,
+            },
+            design,
+        ),
+        None => unsafe { AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null()) },
     }
 }
 
@@ -681,6 +771,7 @@ pub fn append_submenu(menu: HMENU, text: &str, design: Option<MenuDesign>) -> Re
                     text,
                     shortcut: None,
                     kind: ItemKind::Normal,
+                    menu_break: false,
                 },
                 design,
             )?
@@ -808,7 +899,9 @@ pub fn item_count(menu: HMENU) -> u32 {
 #[cfg(test)]
 mod tests {
     use windows::Win32::Graphics::Gdi::CreateBitmap;
-    use windows::Win32::UI::WindowsAndMessaging::{MIIM_BITMAP, MIIM_DATA, MIIM_FTYPE};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        MFT_MENUBREAK, MIIM_BITMAP, MIIM_DATA, MIIM_FTYPE,
+    };
 
     use super::*;
 
@@ -1018,5 +1111,42 @@ mod tests {
 
         root.add_submenu("Group", inner).expect("add_submenu");
         drop(root);
+    }
+
+    fn has_menu_break(menu: HMENU, position: u32) -> bool {
+        let mut info: MENUITEMINFOW = unsafe { std::mem::zeroed() };
+        info.cbSize = size_of::<MENUITEMINFOW>() as u32;
+        info.fMask = MIIM_FTYPE;
+        unsafe { GetMenuItemInfoW(menu, position, true, &mut info) }.expect("GetMenuItemInfoW");
+        info.fType.contains(MFT_MENUBREAK)
+    }
+
+    /// [`PopupMenu::add_break`] arms the very next item, native and themed
+    /// alike, and nothing else — the item before it, and any item after the
+    /// one right after it, stay unmarked.
+    #[test]
+    fn add_break_marks_only_the_item_right_after_it() {
+        for design in [None, Some(test_design())] {
+            let menu = PopupMenu::new_maybe_themed(design).expect("CreatePopupMenu");
+            menu.add_item(1, "Before").expect("add_item");
+            menu.add_break();
+            menu.add_item(2, "After").expect("add_item");
+            menu.add_item(3, "Unmarked").expect("add_item");
+
+            assert!(!has_menu_break(menu.handle(), 0));
+            assert!(has_menu_break(menu.handle(), 1));
+            assert!(!has_menu_break(menu.handle(), 2));
+        }
+    }
+
+    /// A break armed with nothing appended after it is simply never
+    /// consumed — not carried onto whatever some *other*, later-built menu
+    /// happens to append next.
+    #[test]
+    fn a_trailing_add_break_is_harmless() {
+        let menu = PopupMenu::new().expect("CreatePopupMenu");
+        menu.add_item(1, "Only").expect("add_item");
+        menu.add_break();
+        assert!(!has_menu_break(menu.handle(), 0));
     }
 }

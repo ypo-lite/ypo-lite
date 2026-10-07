@@ -9,3 +9,6 @@ name = "y_pop"
 [dependencies]
 y-core.workspace = true
 windows.workspace = true
+
+[build-dependencies]
+y-core = { path = "../core", default-features = false, features = ["build"] }

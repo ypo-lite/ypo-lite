@@ -1,0 +1,10 @@
+[package]
+name = "y-snap-config"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+windows = { workspace = true }
+windows-reactor = { workspace = true }
+y-core = { workspace = true }
+y-snap = { path = "../y-snap" }

@@ -1,0 +1,787 @@
+<title>y-snap Config</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+  :root{
+    --paper:#F3F5F9;
+    --surface:#FFFFFF;
+    --surface-2:#EAEDF3;
+    --ink:#191C22;
+    --muted:#5B6270;
+    --line:#DCE0E9;
+    --accent:#4C5FD5;
+    --accent-ink:#FFFFFF;
+    --accent-soft:#E9EBFB;
+    --ok:#1E8E5A;
+    --ok-soft:#E4F5EC;
+    --warn:#B7791F;
+    --warn-soft:#FBF1DF;
+    --danger:#C4433A;
+    --danger-soft:#FBEAE8;
+    --focus:#4C5FD5;
+
+    --preview-bg:#242833;
+    --preview-tile:#2E3340;
+    --preview-tile-active:#1E8E5A;
+    --preview-tile-hover:#4C5FD5;
+    --preview-ink:#F1F2F6;
+    --preview-key:#9AA3B8;
+    --preview-border: rgba(255,255,255,0.08);
+
+    --shadow: 0 1px 2px rgba(20,22,30,0.06), 0 8px 24px -12px rgba(20,22,30,0.18);
+    --radius: 10px;
+    --radius-sm: 6px;
+  }
+
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --paper:#14161B;
+      --surface:#1C1F27;
+      --surface-2:#242833;
+      --ink:#E8EAF0;
+      --muted:#9199AC;
+      --line:#2B2F3A;
+      --accent:#7B87F5;
+      --accent-ink:#12131A;
+      --accent-soft:#262A45;
+      --ok:#4FCB8C;
+      --ok-soft:#173327;
+      --warn:#E3AC53;
+      --warn-soft:#3A2E15;
+      --danger:#E8695F;
+      --danger-soft:#3B1F1D;
+
+      --preview-bg:#0E1015;
+      --preview-tile:#1C2029;
+      --preview-border: rgba(255,255,255,0.06);
+      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 10px 30px -14px rgba(0,0,0,0.6);
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#14161B;
+    --surface:#1C1F27;
+    --surface-2:#242833;
+    --ink:#E8EAF0;
+    --muted:#9199AC;
+    --line:#2B2F3A;
+    --accent:#7B87F5;
+    --accent-ink:#12131A;
+    --accent-soft:#262A45;
+    --ok:#4FCB8C;
+    --ok-soft:#173327;
+    --warn:#E3AC53;
+    --warn-soft:#3A2E15;
+    --danger:#E8695F;
+    --danger-soft:#3B1F1D;
+
+    --preview-bg:#0E1015;
+    --preview-tile:#1C2029;
+    --preview-border: rgba(255,255,255,0.06);
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 10px 30px -14px rgba(0,0,0,0.6);
+  }
+
+  *{box-sizing:border-box;}
+  body{
+    background:var(--paper);
+    color:var(--ink);
+    font-family:"Inter","Segoe UI",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  h1,h2,h3,.nav-label,.brand,button{font-family:"Manrope","Segoe UI",system-ui,sans-serif;}
+  code,.mono,.pill-key,.hex{font-family:"JetBrains Mono",ui-monospace,monospace;}
+  h1,h2,h3{text-wrap:balance;}
+
+  a{color:inherit;}
+  button{font:inherit;cursor:pointer;}
+
+  /* ---------- page shell (this mockup's own chrome, not the app's) ---------- */
+  .stage{
+    min-height:100dvh;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    padding:32px 20px 56px;
+    gap:16px;
+  }
+  .stage-head{
+    width:100%;
+    max-width:1180px;
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    gap:16px;
+    flex-wrap:wrap;
+  }
+  .stage-head h1{font-size:15px; font-weight:700; letter-spacing:.01em; margin:0;}
+  .stage-head p{margin:2px 0 0; font-size:12.5px; color:var(--muted); max-width:56ch;}
+  .theme-toggle{
+    display:flex; gap:2px; padding:3px;
+    background:var(--surface-2); border:1px solid var(--line); border-radius:999px;
+  }
+  .theme-toggle button{
+    border:0; background:transparent; color:var(--muted);
+    font-size:11.5px; font-weight:600; padding:5px 12px; border-radius:999px;
+  }
+  .theme-toggle button.is-active{background:var(--surface); color:var(--ink); box-shadow:var(--shadow);}
+
+  /* ---------- the simulated app window ---------- */
+  .window{
+    width:100%;
+    max-width:1180px;
+    height:min(760px, 82dvh);
+    background:var(--surface);
+    border:1px solid var(--line);
+    border-radius:12px;
+    box-shadow:var(--shadow);
+    overflow:hidden;
+    display:flex;
+    flex-direction:column;
+  }
+  .titlebar{
+    height:40px;
+    flex:0 0 auto;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:0 8px 0 14px;
+    background:var(--surface);
+    border-bottom:1px solid var(--line);
+  }
+  .titlebar .brand{
+    display:flex; align-items:center; gap:8px;
+    font-size:12.5px; font-weight:700; color:var(--muted);
+  }
+  .titlebar .brand .glyph{
+    width:16px;height:16px;border-radius:4px;
+    background:var(--accent); display:inline-block;
+    position:relative;
+  }
+  .titlebar .brand .glyph::before{
+    content:"";
+    position:absolute; inset:3px;
+    border:1.5px solid var(--accent-ink);
+    opacity:.85;
+    border-radius:1px;
+  }
+  .capbtns{display:flex;}
+  .capbtns span{
+    width:28px;height:28px;display:flex;align-items:center;justify-content:center;
+    color:var(--muted); border-radius:4px;
+  }
+  .capbtns span svg{width:10px;height:10px;}
+  .capbtns .close:hover{background:#E8514640;color:#E85146;}
+
+  .body{
+    flex:1 1 auto;
+    display:flex;
+    min-height:0;
+  }
+
+  /* ---------- nav rail ---------- */
+  .rail{
+    width:190px;
+    flex:0 0 auto;
+    background:var(--surface-2);
+    border-right:1px solid var(--line);
+    display:flex;
+    flex-direction:column;
+    padding:14px 10px;
+    gap:2px;
+  }
+  .rail .nav-label{
+    font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.08em;
+    color:var(--muted); padding:8px 10px 6px;
+  }
+  .rail button{
+    all:unset;
+    display:flex; align-items:center; gap:9px;
+    padding:8px 10px; border-radius:var(--radius-sm);
+    font-size:13px; font-weight:600; color:var(--ink);
+    cursor:pointer;
+  }
+  .rail button .dot{width:6px;height:6px;border-radius:50%;background:var(--line);flex:0 0 auto;}
+  .rail button:hover{background:var(--surface);}
+  .rail button.is-active{background:var(--accent-soft); color:var(--accent);}
+  .rail button.is-active .dot{background:var(--accent);}
+  .rail button:focus-visible{outline:2px solid var(--focus); outline-offset:1px;}
+  .rail-foot{margin-top:auto; padding:10px; font-size:11px; color:var(--muted); line-height:1.5;}
+  .rail-foot .path{display:block; font-family:"JetBrains Mono",monospace; font-size:10px; word-break:break-all; color:var(--muted); margin-top:3px;}
+
+  /* ---------- content ---------- */
+  .content{
+    flex:1 1 auto;
+    min-width:0;
+    display:flex;
+    flex-direction:column;
+    min-height:0;
+  }
+  .panel{
+    flex:1 1 auto;
+    min-height:0;
+    overflow-y:auto;
+    padding:22px 26px 18px;
+    display:none;
+  }
+  .panel.is-active{display:block;}
+  .panel h2{font-size:16px; margin:0 0 3px;}
+  .panel .lede{font-size:12.5px; color:var(--muted); margin:0 0 18px; max-width:60ch;}
+
+  .section-title{
+    font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.07em;
+    color:var(--muted); margin:22px 0 10px;
+  }
+  .section-title:first-of-type{margin-top:0;}
+
+  /* ---------- action bar (persistent) ---------- */
+  .actionbar{
+    flex:0 0 auto;
+    display:flex; align-items:center; gap:10px;
+    padding:10px 20px;
+    border-top:1px solid var(--line);
+    background:var(--surface);
+    font-size:12px;
+  }
+  .actionbar .status{display:flex; align-items:center; gap:7px; color:var(--muted);}
+  .actionbar .status .dot{width:6px;height:6px;border-radius:50%;background:var(--ok);}
+  .actionbar .spacer{flex:1;}
+  .btn{
+    border-radius:var(--radius-sm); border:1px solid var(--line);
+    background:var(--surface); color:var(--ink);
+    padding:6px 13px; font-size:12.5px; font-weight:600;
+  }
+  .btn:hover{background:var(--surface-2);}
+  .btn.primary{background:var(--accent); border-color:var(--accent); color:var(--accent-ink);}
+  .btn.primary:hover{filter:brightness(1.06);}
+  .btn:focus-visible, input:focus-visible, select:focus-visible{outline:2px solid var(--focus); outline-offset:1px;}
+
+  /* ---------- hotkeys table ---------- */
+  table{width:100%; border-collapse:collapse; font-size:12.5px;}
+  thead th{
+    text-align:left; font-size:10.5px; font-weight:700; text-transform:uppercase;
+    letter-spacing:.06em; color:var(--muted); padding:0 10px 8px; border-bottom:1px solid var(--line);
+  }
+  tbody td{padding:9px 10px; border-bottom:1px solid var(--line); vertical-align:middle;}
+  tbody tr:last-child td{border-bottom:0;}
+  tbody tr:hover{background:var(--surface-2);}
+
+  .pill-key{
+    display:inline-flex; gap:3px; align-items:center;
+    background:var(--surface-2); border:1px solid var(--line);
+    padding:3px 8px; border-radius:6px; font-size:11.5px; font-weight:500;
+  }
+  .pill-key b{font-weight:600; color:var(--accent);}
+  select, .field-input{
+    font:inherit; font-size:12.5px;
+    border:1px solid var(--line); border-radius:var(--radius-sm);
+    background:var(--surface); color:var(--ink);
+    padding:5px 8px;
+  }
+  .target-focused{color:var(--muted);}
+  .target-pointed{color:var(--accent); font-weight:600;}
+  .toggle-mini{
+    display:inline-flex; align-items:center; gap:6px; font-size:11.5px; color:var(--muted);
+  }
+  .switch{
+    width:28px; height:16px; border-radius:999px; background:var(--line);
+    position:relative; flex:0 0 auto;
+  }
+  .switch.on{background:var(--accent);}
+  .switch::after{
+    content:""; position:absolute; top:2px; left:2px;
+    width:12px; height:12px; border-radius:50%; background:var(--surface);
+  }
+  .switch.on::after{left:14px;}
+  .row-actions{display:flex; gap:2px; justify-content:flex-end;}
+  .icon-btn{
+    all:unset; width:24px;height:24px; display:flex; align-items:center; justify-content:center;
+    border-radius:6px; color:var(--muted); cursor:pointer;
+  }
+  .icon-btn:hover{background:var(--surface-2); color:var(--ink);}
+  .icon-btn svg{width:13px;height:13px;}
+  .add-row{
+    display:flex; align-items:center; gap:6px;
+    margin-top:12px; font-size:12.5px; font-weight:600; color:var(--accent);
+  }
+  .add-row .icon-btn{color:var(--accent);}
+
+  /* ---------- mouse gestures ---------- */
+  .gesture-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:12px;}
+  .gesture-card{
+    border:1px solid var(--line); border-radius:var(--radius);
+    padding:14px; display:flex; flex-direction:column; gap:10px;
+    background:var(--surface);
+  }
+  .gesture-card.is-off{opacity:.55;}
+  .gesture-card .gtitle{display:flex; align-items:center; justify-content:space-between;}
+  .gesture-card .gtitle span{font-size:13px; font-weight:700;}
+  .gesture-card .ghint{font-size:11px; color:var(--muted); line-height:1.5; margin:0;}
+  .field-row{display:flex; flex-direction:column; gap:4px;}
+  .field-row label{font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--muted);}
+  .mod-chips{display:flex; gap:5px; flex-wrap:wrap;}
+  .mod-chip{
+    font-size:11px; font-weight:600; padding:4px 9px; border-radius:999px;
+    border:1px solid var(--line); color:var(--muted);
+  }
+  .mod-chip.on{background:var(--accent-soft); border-color:var(--accent); color:var(--accent);}
+
+  /* ---------- overlay screen (two-pane workspace) ---------- */
+  .workspace{display:grid; grid-template-columns:1.15fr 1fr; gap:22px; align-items:start;}
+  .field-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:10px 12px; margin-bottom:6px;}
+  .field-grid .field-row.span2{grid-column:span 2;}
+  .palette-grid{display:grid; grid-template-columns:repeat(5,1fr); gap:8px;}
+  .swatch{display:flex; flex-direction:column; gap:5px;}
+  .swatch label{font-size:10px; color:var(--muted); font-weight:600;}
+  .swatch .chip{
+    height:26px; border-radius:6px; border:1px solid var(--line);
+    display:flex; align-items:center; justify-content:center;
+  }
+  .swatch .hex{font-size:9px; color:var(--muted);}
+
+  .group-row{
+    display:flex; align-items:center; gap:8px;
+    border:1px solid var(--line); border-radius:var(--radius-sm);
+    padding:7px 10px; font-size:12px; margin-bottom:6px;
+  }
+  .group-row .gid{font-weight:700; font-family:"JetBrains Mono",monospace; font-size:11.5px;}
+  .group-row .meta{color:var(--muted); margin-left:auto; font-size:11px;}
+
+  .tile-list{display:flex; flex-direction:column; gap:4px; max-height:230px; overflow-y:auto; padding-right:2px;}
+  .tile-row{
+    display:grid; grid-template-columns:26px 20px 1fr auto; align-items:center; gap:9px;
+    padding:6px 8px; border-radius:6px; font-size:12px;
+  }
+  .tile-row:hover{background:var(--surface-2);}
+  .tile-row .key{
+    font-family:"JetBrains Mono",monospace; font-weight:700; font-size:11px;
+    background:var(--surface-2); border:1px solid var(--line); border-radius:4px;
+    text-align:center; padding:2px 0;
+  }
+  .tile-row .glyph{font-size:13px; text-align:center;}
+  .tile-row .lbl{color:var(--ink);}
+  .tile-row .lbl small{display:block; color:var(--muted); font-size:10px; font-weight:500;}
+  .tile-row .grp{font-size:10px; color:var(--accent); font-weight:600;}
+
+  /* live preview (mirrors the actual overlay's own look) */
+  .preview-wrap{
+    position:sticky; top:0;
+    background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+    padding:14px;
+  }
+  .preview-wrap .ptitle{
+    display:flex; align-items:center; justify-content:space-between;
+    margin-bottom:10px;
+  }
+  .preview-wrap .ptitle span{font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--muted);}
+  .preview-wrap .ptitle .live{
+    font-size:10px; font-weight:700; color:var(--ok); display:flex; align-items:center; gap:5px;
+  }
+  .preview-wrap .ptitle .live .dot{width:5px;height:5px;border-radius:50%;background:var(--ok);}
+
+  .overlay-stage{
+    background:var(--preview-bg); border-radius:12px; padding:18px;
+    border:1px solid var(--preview-border);
+  }
+  .overlay-grid{
+    display:grid; grid-template-columns:repeat(4, 1fr); gap:8px;
+  }
+  .overlay-tile{
+    aspect-ratio:88/64;
+    background:var(--preview-tile);
+    border-radius:8px;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
+    color:var(--preview-ink);
+    position:relative;
+    border:1px solid var(--preview-border);
+  }
+  .overlay-tile .g{font-size:15px;}
+  .overlay-tile .l{font-size:8.5px; font-weight:600; color:var(--preview-ink); opacity:.85;}
+  .overlay-tile .k{
+    position:absolute; top:4px; left:5px; font-size:8px; font-weight:700;
+    color:var(--preview-key); font-family:"JetBrains Mono",monospace;
+  }
+  .overlay-tile.active{background:var(--preview-tile-active); color:#fff;}
+  .overlay-tile.active .l, .overlay-tile.active .k{color:#fff; opacity:.9;}
+  .overlay-tile.hovered{outline:2px solid var(--preview-tile-hover); outline-offset:-1px;}
+
+  .overlay-group-label{
+    grid-column:1/-1; font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.08em;
+    color:var(--preview-key); margin:10px 0 -2px;
+  }
+  .overlay-group{
+    grid-column:1/-1; display:grid; grid-template-columns:repeat(9,1fr); gap:6px;
+  }
+  .overlay-group .overlay-tile{aspect-ratio:64/48;}
+  .overlay-group .overlay-tile .l{display:none;}
+  .overlay-group .overlay-tile .g{font-size:11px; font-weight:700;}
+
+  /* ---------- min-button screen ---------- */
+  .minbutton-layout{display:grid; grid-template-columns:1fr 1fr; gap:22px;}
+  .slider-row{display:flex; align-items:center; gap:12px;}
+  .slider-row input[type="range"]{flex:1; accent-color:var(--accent);}
+  .slider-row .val{
+    font-family:"JetBrains Mono",monospace; font-size:12px; font-weight:600;
+    background:var(--surface-2); border:1px solid var(--line); border-radius:6px;
+    padding:3px 8px; min-width:64px; text-align:center;
+  }
+  .mb-preview{
+    background:var(--preview-bg); border-radius:10px; padding:14px;
+    border:1px solid var(--preview-border);
+    display:flex; flex-direction:column; align-items:center; gap:10px;
+  }
+  .mb-preview .window-stub{
+    width:100%; height:34px; background:var(--preview-tile); border-radius:6px 6px 0 0;
+    display:flex; align-items:center; padding:0 8px; gap:6px;
+  }
+  .mb-preview .window-stub .traffic{width:7px;height:7px;border-radius:50%;background:var(--preview-key); opacity:.5;}
+  .mb-preview .window-stub .min-btn{
+    margin-left:auto; width:16px;height:16px;border-radius:4px;
+    background:var(--preview-tile-hover); display:flex; align-items:center; justify-content:center;
+    color:#fff; font-size:9px; font-weight:700;
+  }
+  .mb-row{display:flex; gap:6px;}
+  .mb-tile{
+    background:var(--preview-tile); border-radius:8px; padding:8px 12px;
+    display:flex; flex-direction:column; align-items:center; gap:3px; color:var(--preview-ink);
+    border:1px solid var(--preview-border);
+  }
+  .mb-tile .g{font-size:14px;}
+  .mb-tile .l{font-size:8px; font-weight:600; opacity:.85;}
+
+  .note{
+    font-size:11.5px; color:var(--muted); line-height:1.6; margin-top:14px;
+    padding:10px 12px; background:var(--surface-2); border-radius:var(--radius-sm);
+    border-left:3px solid var(--accent);
+  }
+
+  @media (prefers-reduced-motion: no-preference){
+    .panel, .rail button, .btn, .switch{transition:background-color .12s ease, color .12s ease;}
+  }
+
+  @media (max-width: 860px){
+    .workspace, .minbutton-layout, .gesture-grid{grid-template-columns:1fr;}
+    .field-grid{grid-template-columns:repeat(2,1fr);}
+  }
+</style>
+
+<div class="stage">
+  <div class="stage-head">
+    <div>
+      <h1>y-snap Config — layout mock</h1>
+      <p>Static walkthrough for agreeing on the screens before building them for real in windows-reactor. Data shown is the shipped <code class="mono">rsc/y-snap.xml</code>. Nothing here writes to disk.</p>
+    </div>
+    <div class="theme-toggle" role="group" aria-label="Preview theme">
+      <button type="button" data-theme-btn="system" class="is-active">System</button>
+      <button type="button" data-theme-btn="light">Light</button>
+      <button type="button" data-theme-btn="dark">Dark</button>
+    </div>
+  </div>
+
+  <div class="window">
+    <div class="titlebar">
+      <div class="brand"><span class="glyph"></span>y-snap — Configuration</div>
+      <div class="capbtns">
+        <span aria-hidden="true"><svg viewBox="0 0 10 10"><rect x="0" y="4.5" width="10" height="1" fill="currentColor"/></svg></span>
+        <span aria-hidden="true"><svg viewBox="0 0 10 10"><rect x="0" y="0" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1"/></svg></span>
+        <span class="close" aria-hidden="true"><svg viewBox="0 0 10 10"><line x1="0" y1="0" x2="10" y2="10" stroke="currentColor" stroke-width="1.1"/><line x1="10" y1="0" x2="0" y2="10" stroke="currentColor" stroke-width="1.1"/></svg></span>
+      </div>
+    </div>
+
+    <div class="body">
+      <nav class="rail" aria-label="Sections">
+        <div class="nav-label">Configure</div>
+        <button type="button" data-nav="hotkeys" class="is-active"><span class="dot"></span>Hotkeys</button>
+        <button type="button" data-nav="mouse"><span class="dot"></span>Mouse gestures</button>
+        <button type="button" data-nav="overlay"><span class="dot"></span>Action overlay</button>
+        <button type="button" data-nav="minbutton"><span class="dot"></span>Minimize button</button>
+        <div class="rail-foot">
+          Loaded from
+          <span class="path">%APPDATA%\Ypo-Lite\y-snap.xml</span>
+        </div>
+      </nav>
+
+      <div class="content">
+        <!-- ============ HOTKEYS ============ -->
+        <section class="panel is-active" id="panel-hotkeys">
+          <h2>Hotkeys</h2>
+          <p class="lede">Global key combinations, each bound to one action. <b>Target</b> decides whether it acts on the focused window or whatever the pointer is over.</p>
+
+          <table>
+            <thead>
+              <tr><th style="width:16%">Key</th><th style="width:22%">Action</th><th style="width:16%">Target</th><th style="width:14%">Desktop</th><th style="width:16%">Steal from shell</th><th></th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="pill-key"><b>Win</b>+OEM7</span></td>
+                <td><select><option selected>minimize</option><option>maximize</option><option>close</option></select></td>
+                <td><span class="target-pointed">pointed</span></td>
+                <td>—</td>
+                <td><span class="toggle-mini"><span class="switch"></span>off</span></td>
+                <td class="row-actions"><button class="icon-btn" aria-label="Delete"><svg viewBox="0 0 12 12"><path d="M2 3h8M4.5 3V2h3v1M3 3l.5 7h5L9 3" fill="none" stroke="currentColor" stroke-width="1.1"/></svg></button></td>
+              </tr>
+              <tr>
+                <td><span class="pill-key"><b>Win</b>+Esc</span></td>
+                <td><select><option selected>close</option><option>minimize</option></select></td>
+                <td><span class="target-pointed">pointed</span></td>
+                <td>—</td>
+                <td><span class="toggle-mini"><span class="switch"></span>off</span></td>
+                <td class="row-actions"><button class="icon-btn" aria-label="Delete"><svg viewBox="0 0 12 12"><path d="M2 3h8M4.5 3V2h3v1M3 3l.5 7h5L9 3" fill="none" stroke="currentColor" stroke-width="1.1"/></svg></button></td>
+              </tr>
+              <tr>
+                <td><span class="pill-key"><b>Ctrl</b>+Space</span></td>
+                <td><select><option selected>overlay</option></select></td>
+                <td><span class="target-pointed">pointed</span></td>
+                <td>—</td>
+                <td><span class="toggle-mini"><span class="switch"></span>off</span></td>
+                <td class="row-actions"><button class="icon-btn" aria-label="Delete"><svg viewBox="0 0 12 12"><path d="M2 3h8M4.5 3V2h3v1M3 3l.5 7h5L9 3" fill="none" stroke="currentColor" stroke-width="1.1"/></svg></button></td>
+              </tr>
+              <tr>
+                <td><span class="pill-key"><b>Ctrl</b>+<b>Shift</b>+P</span></td>
+                <td><select><option selected>center-cursor</option></select></td>
+                <td><span class="target-focused">focused</span></td>
+                <td>—</td>
+                <td><span class="toggle-mini"><span class="switch"></span>off</span></td>
+                <td class="row-actions"><button class="icon-btn" aria-label="Delete"><svg viewBox="0 0 12 12"><path d="M2 3h8M4.5 3V2h3v1M3 3l.5 7h5L9 3" fill="none" stroke="currentColor" stroke-width="1.1"/></svg></button></td>
+              </tr>
+              <tr>
+                <td><span class="pill-key" style="color:var(--muted)">click to set…</span></td>
+                <td><select><option selected>desktop-move</option></select></td>
+                <td><span class="target-focused">focused</span></td>
+                <td><input class="field-input" style="width:44px" value="3" /></td>
+                <td><span class="toggle-mini"><span class="switch on"></span>on</span></td>
+                <td class="row-actions"><button class="icon-btn" aria-label="Delete"><svg viewBox="0 0 12 12"><path d="M2 3h8M4.5 3V2h3v1M3 3l.5 7h5L9 3" fill="none" stroke="currentColor" stroke-width="1.1"/></svg></button></td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="add-row">
+            <button type="button" class="icon-btn" aria-label="Add hotkey"><svg viewBox="0 0 12 12"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="1.3"/></svg></button>
+            Add hotkey
+          </div>
+
+          <div class="note">Steal from shell registers the combination with a low-level keyboard hook when Windows already owns it (e.g. most <b>Win+…</b> chords). It applies to every keystroke on the machine, so it's off by default and called out per-row rather than buried in an advanced tab.</div>
+        </section>
+
+        <!-- ============ MOUSE ============ -->
+        <section class="panel" id="panel-mouse">
+          <h2>Mouse gestures</h2>
+          <p class="lede">Hold the modifier and use the button anywhere on a window — no need to aim for the title bar or the edge.</p>
+
+          <div class="gesture-grid">
+            <div class="gesture-card">
+              <div class="gtitle"><span>Drag</span><span class="switch on"></span></div>
+              <p class="ghint">Moves the window under the pointer.</p>
+              <div class="field-row"><label>Button</label>
+                <select><option selected>Left</option><option>Right</option><option>Middle</option><option>Wheel</option></select>
+              </div>
+              <div class="field-row"><label>Modifiers</label>
+                <div class="mod-chips">
+                  <span class="mod-chip">Win</span><span class="mod-chip">Ctrl</span><span class="mod-chip on">Alt</span><span class="mod-chip">Shift</span>
+                </div>
+              </div>
+            </div>
+            <div class="gesture-card">
+              <div class="gtitle"><span>Resize</span><span class="switch on"></span></div>
+              <p class="ghint">Resizes from the nearest edge or corner.</p>
+              <div class="field-row"><label>Button</label>
+                <select><option>Left</option><option selected>Right</option><option>Middle</option><option>Wheel</option></select>
+              </div>
+              <div class="field-row"><label>Modifiers</label>
+                <div class="mod-chips">
+                  <span class="mod-chip">Win</span><span class="mod-chip">Ctrl</span><span class="mod-chip on">Alt</span><span class="mod-chip">Shift</span>
+                </div>
+              </div>
+            </div>
+            <div class="gesture-card is-off">
+              <div class="gtitle"><span>Switch</span><span class="switch"></span></div>
+              <p class="ghint">Cycles z-order under the pointer. Off — no button assigned.</p>
+              <div class="field-row"><label>Button</label>
+                <select><option>Left</option><option>Right</option><option>Middle</option><option selected>Wheel</option></select>
+              </div>
+              <div class="field-row"><label>Modifiers</label>
+                <div class="mod-chips">
+                  <span class="mod-chip">Win</span><span class="mod-chip">Ctrl</span><span class="mod-chip on">Alt</span><span class="mod-chip">Shift</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="note">A gesture with no button assigned is off — there's no separate enable switch to fall out of sync with it. Turning "Switch" on here is just picking a button for it.</div>
+        </section>
+
+        <!-- ============ OVERLAY ============ -->
+        <section class="panel" id="panel-overlay">
+          <h2>Action overlay</h2>
+          <p class="lede">The tile grid shown on <b>Ctrl+Space</b>. Edit the grid and palette on the left; the panel on the right always mirrors what the popup will actually look like.</p>
+
+          <div class="workspace">
+            <div>
+              <div class="section-title">Layout</div>
+              <div class="field-grid">
+                <div class="field-row"><label>Columns</label><input class="field-input" value="4" /></div>
+                <div class="field-row"><label>Tile width</label><input class="field-input" value="88" /></div>
+                <div class="field-row"><label>Tile height</label><input class="field-input" value="64" /></div>
+                <div class="field-row"><label>Corner radius</label><input class="field-input" value="8" /></div>
+                <div class="field-row"><label>Border width</label><input class="field-input" value="2" /></div>
+                <div class="field-row"><label>Background alpha</label><input class="field-input" value="235" /></div>
+              </div>
+
+              <div class="section-title">Palette — theme: auto</div>
+              <div class="palette-grid">
+                <div class="swatch"><label>Back</label><div class="chip" style="background:#F9F9F9;border-color:#ddd"></div><span class="hex">#F9F9F9</span></div>
+                <div class="swatch"><label>Text</label><div class="chip" style="background:#000"></div><span class="hex">#000000</span></div>
+                <div class="swatch"><label>Hover</label><div class="chip" style="background:#0078D7"></div><span class="hex">#0078D7</span></div>
+                <div class="swatch"><label>Active</label><div class="chip" style="background:#107C10"></div><span class="hex">#107C10</span></div>
+                <div class="swatch"><label>Border</label><div class="chip" style="background:#0078D7"></div><span class="hex">#0078D7</span></div>
+              </div>
+
+              <div class="section-title">Groups</div>
+              <div class="group-row"><span class="gid">desktops</span><span class="meta">9 cols · 64×48</span>
+                <button class="icon-btn" aria-label="Edit group"><svg viewBox="0 0 12 12"><path d="M2 10l.7-3L8.5 1.2a1 1 0 0 1 1.4 1.4L4.1 8.4l-3 .7z" fill="none" stroke="currentColor" stroke-width="1"/></svg></button>
+              </div>
+
+              <div class="section-title">Tiles — 16</div>
+              <div class="tile-list">
+                <div class="tile-row"><span class="key">M</span><span class="glyph">➖</span><span class="lbl">Minimize</span></div>
+                <div class="tile-row"><span class="key">X</span><span class="glyph">🔲</span><span class="lbl">Maximize<small>Restore, when maximized</small></span></div>
+                <div class="tile-row"><span class="key">C</span><span class="glyph">❌</span><span class="lbl">Close</span></div>
+                <div class="tile-row"><span class="key">T</span><span class="glyph">🔝</span><span class="lbl">On top<small>Remove top, when active</small></span></div>
+                <div class="tile-row"><span class="key">I</span><span class="glyph">📥</span><span class="lbl">Iconize</span></div>
+                <div class="tile-row"><span class="key">Y</span><span class="glyph">📤</span><span class="lbl">Traynize</span></div>
+                <div class="tile-row"><span class="key">B</span><span class="glyph">🖼️</span><span class="lbl">Borderless</span></div>
+                <div class="tile-row"><span class="key">F</span><span class="glyph">🌫️</span><span class="lbl">Fade</span></div>
+                <div class="tile-row"><span class="key">R</span><span class="glyph">🔼</span><span class="lbl">Roll up</span></div>
+                <div class="tile-row"><span class="key">H</span><span class="glyph">🚫</span><span class="lbl">Hide</span></div>
+                <div class="tile-row"><span class="key">U</span><span class="glyph">📌</span><span class="lbl">Pin</span></div>
+                <div class="tile-row"><span class="key">P</span><span class="glyph">🎯</span><span class="lbl">Center cursor</span></div>
+                <div class="tile-row"><span class="key">N</span><span class="glyph">➕</span><span class="lbl">New desktop</span></div>
+                <div class="tile-row"><span class="key">◀</span><span class="glyph">◀️</span><span class="lbl">Prev desktop</span></div>
+                <div class="tile-row"><span class="key">▶</span><span class="glyph">▶️</span><span class="lbl">Next desktop</span></div>
+                <div class="tile-row"><span class="key">—</span><span class="glyph">🗂️</span><span class="lbl">Desktop<small>expands per desktop</small><span class="grp">desktops</span></span></div>
+              </div>
+              <div class="add-row">
+                <button type="button" class="icon-btn" aria-label="Add tile"><svg viewBox="0 0 12 12"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="1.3"/></svg></button>
+                Add tile
+              </div>
+            </div>
+
+            <div class="preview-wrap">
+              <div class="ptitle"><span>Live preview</span><span class="live"><span class="dot"></span>synced</span></div>
+              <div class="overlay-stage">
+                <div class="overlay-grid">
+                  <div class="overlay-tile"><span class="k">M</span><span class="g">➖</span><span class="l">Minimize</span></div>
+                  <div class="overlay-tile"><span class="k">X</span><span class="g">🔲</span><span class="l">Maximize</span></div>
+                  <div class="overlay-tile"><span class="k">C</span><span class="g">❌</span><span class="l">Close</span></div>
+                  <div class="overlay-tile active"><span class="k">T</span><span class="g">🔝</span><span class="l">On top</span></div>
+                  <div class="overlay-tile"><span class="k">I</span><span class="g">📥</span><span class="l">Iconize</span></div>
+                  <div class="overlay-tile"><span class="k">Y</span><span class="g">📤</span><span class="l">Traynize</span></div>
+                  <div class="overlay-tile"><span class="k">B</span><span class="g">🖼️</span><span class="l">Borderless</span></div>
+                  <div class="overlay-tile hovered"><span class="k">F</span><span class="g">🌫️</span><span class="l">Fade</span></div>
+                  <div class="overlay-tile"><span class="k">R</span><span class="g">🔼</span><span class="l">Roll up</span></div>
+                  <div class="overlay-tile"><span class="k">H</span><span class="g">🚫</span><span class="l">Hide</span></div>
+                  <div class="overlay-tile"><span class="k">U</span><span class="g">📌</span><span class="l">Pin</span></div>
+                  <div class="overlay-tile"><span class="k">P</span><span class="g">🎯</span><span class="l">Center</span></div>
+
+                  <div class="overlay-group-label">Desktop</div>
+                  <div class="overlay-group">
+                    <div class="overlay-tile"><span class="g">1</span></div>
+                    <div class="overlay-tile active"><span class="g">2</span></div>
+                    <div class="overlay-tile"><span class="g">3</span></div>
+                    <div class="overlay-tile"><span class="g">+</span></div>
+                    <div class="overlay-tile"><span class="g">◀</span></div>
+                    <div class="overlay-tile"><span class="g">▶</span></div>
+                  </div>
+                </div>
+              </div>
+              <div class="note" style="margin-top:12px;">Hover and active states (amber outline, green fill above) are shown here as fixed examples — in the real popup they follow the pointer and each window's current state.</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============ MIN BUTTON ============ -->
+        <section class="panel" id="panel-minbutton">
+          <h2>Minimize-button popup</h2>
+          <p class="lede">Hover a window's minimize button to get a small row of tiles instead of minimizing right away; a plain right-click skips the popup and fires one action directly.</p>
+
+          <div class="minbutton-layout">
+            <div>
+              <div class="section-title">Behaviour</div>
+              <div class="field-row" style="margin-bottom:14px;">
+                <label>Hover delay before the popup appears</label>
+                <div class="slider-row">
+                  <input type="range" min="0" max="2000" value="700" />
+                  <span class="val">700 ms</span>
+                </div>
+              </div>
+              <div class="field-row">
+                <label>Right-click action</label>
+                <select style="max-width:220px;"><option selected>traynize</option><option>always-on-top</option><option>none</option></select>
+              </div>
+
+              <div class="section-title">Popup tiles — 2</div>
+              <div class="tile-list">
+                <div class="tile-row"><span class="key">—</span><span class="glyph">📤</span><span class="lbl">Traynize</span></div>
+                <div class="tile-row"><span class="key">—</span><span class="glyph">🔝</span><span class="lbl">On top</span></div>
+              </div>
+              <div class="add-row">
+                <button type="button" class="icon-btn" aria-label="Add tile"><svg viewBox="0 0 12 12"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="1.3"/></svg></button>
+                Add tile
+              </div>
+            </div>
+
+            <div class="preview-wrap">
+              <div class="ptitle"><span>Live preview</span><span class="live"><span class="dot"></span>synced</span></div>
+              <div class="mb-preview">
+                <div class="window-stub">
+                  <span class="traffic"></span><span class="traffic"></span><span class="traffic"></span>
+                  <span class="min-btn">﹘</span>
+                </div>
+                <div class="mb-row">
+                  <div class="mb-tile"><span class="g">📤</span><span class="l">Traynize</span></div>
+                  <div class="mb-tile"><span class="g">🔝</span><span class="l">On top</span></div>
+                </div>
+              </div>
+              <div class="note" style="margin-top:12px;">Shown as if the pointer had already dwelt on the button for 700&nbsp;ms.</div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <div class="actionbar">
+      <span class="status"><span class="dot"></span>Loaded — 5 hotkeys, 16 overlay tiles</span>
+      <span class="spacer"></span>
+      <button class="btn">Reload from disk</button>
+      <button class="btn primary">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function(){
+    var navButtons = document.querySelectorAll('[data-nav]');
+    var panels = document.querySelectorAll('.panel');
+    navButtons.forEach(function(btn){
+      btn.addEventListener('click', function(){
+        navButtons.forEach(function(b){ b.classList.remove('is-active'); });
+        panels.forEach(function(p){ p.classList.remove('is-active'); });
+        btn.classList.add('is-active');
+        document.getElementById('panel-' + btn.dataset.nav).classList.add('is-active');
+      });
+    });
+
+    var themeButtons = document.querySelectorAll('[data-theme-btn]');
+    var root = document.documentElement;
+    function applyTheme(mode){
+      if(mode === 'system'){ root.removeAttribute('data-theme'); }
+      else { root.setAttribute('data-theme', mode); }
+      themeButtons.forEach(function(b){ b.classList.toggle('is-active', b.dataset.themeBtn === mode); });
+      try{ localStorage.setItem('y-snap-config-mock-theme', mode); }catch(e){}
+    }
+    themeButtons.forEach(function(b){
+      b.addEventListener('click', function(){ applyTheme(b.dataset.themeBtn); });
+    });
+    try{
+      var saved = localStorage.getItem('y-snap-config-mock-theme');
+      if(saved){ applyTheme(saved); }
+    }catch(e){}
+  })();
+</script>

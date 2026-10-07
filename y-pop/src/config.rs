@@ -149,7 +149,7 @@ fn argument_path() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{NodeKind, PresenterStyle};
+    use crate::model::{NodeKind, OpenFolder, PresenterStyle};
     use crate::variables::Variable;
 
     fn builtins() -> Vec<Variable> {
@@ -195,7 +195,7 @@ mod tests {
             .as_ref()
             .expect("browse=\"true\" should have parsed");
         assert_eq!(browse.filter.as_deref(), Some("*.*"));
-        assert!(!browse.recurse);
+        assert_eq!(browse.depth, 0);
     }
 
     #[test]
@@ -235,6 +235,36 @@ mod tests {
             "off unless explicitly requested"
         );
         assert_eq!(tree.hotkey_owner(bindings[0].0), Some(tree.roots[0]));
+    }
+
+    #[test]
+    fn a_break_element_parses_as_its_own_node_with_no_attributes_allowed() {
+        let tree = load_str(
+            r#"<y-pop>
+                <group name="Dev">
+                    <app name="A" exe="a.exe"/>
+                    <break/>
+                    <app name="B" exe="b.exe"/>
+                </group>
+            </y-pop>"#,
+            &mut builtins(),
+        )
+        .expect("valid");
+        assert!(tree.warnings.is_empty(), "{:?}", tree.warnings);
+
+        let group = tree.node(tree.roots[0]);
+        assert_eq!(group.children.len(), 3);
+        assert!(matches!(tree.node(group.children[1]).kind, NodeKind::Break));
+    }
+
+    #[test]
+    fn a_break_with_an_attribute_warns() {
+        let tree = load_str(
+            r#"<y-pop><group name="Dev"><break foo="1"/></group></y-pop>"#,
+            &mut builtins(),
+        )
+        .expect("valid");
+        assert_eq!(tree.warnings.len(), 1, "{:?}", tree.warnings);
     }
 
     #[test]
@@ -341,6 +371,59 @@ mod tests {
         };
         let browse = app.browse.as_ref().expect("browse requested");
         assert_eq!(browse.filter.as_deref(), Some("*.sln"));
+    }
+
+    #[test]
+    fn depth_and_open_folder_are_read_off_a_browse_app() {
+        let tree = load_str(
+            r#"<y-pop><app name="Projects" exe="%win%\projects" browse="true" depth="3" open-folder="all"/></y-pop>"#,
+            &mut builtins(),
+        )
+        .expect("valid");
+        assert!(tree.warnings.is_empty(), "{:?}", tree.warnings);
+
+        let NodeKind::App(app) = &tree.node(tree.roots[0]).kind else {
+            unreachable!()
+        };
+        let browse = app.browse.as_ref().expect("browse requested");
+        assert_eq!(browse.depth, 3);
+        assert_eq!(browse.open_folder, OpenFolder::All);
+    }
+
+    /// A `depth` past [`crate::model::MAX_DEPTH`] is clamped, with a
+    /// warning, rather than either failing the whole file or silently
+    /// wrapping — nobody sanely nests this deep, but a typo (an extra digit)
+    /// shouldn't produce a `u8` wraparound either.
+    #[test]
+    fn a_depth_past_the_hard_limit_is_clamped_with_a_warning() {
+        let tree = load_str(
+            r#"<y-pop><app name="Projects" exe="%win%\projects" browse="true" depth="9999"/></y-pop>"#,
+            &mut builtins(),
+        )
+        .expect("valid");
+        assert_eq!(tree.warnings.len(), 1, "{:?}", tree.warnings);
+
+        let NodeKind::App(app) = &tree.node(tree.roots[0]).kind else {
+            unreachable!()
+        };
+        let browse = app.browse.as_ref().expect("browse requested");
+        assert_eq!(browse.depth, crate::model::MAX_DEPTH);
+    }
+
+    #[test]
+    fn an_unknown_open_folder_value_warns_and_falls_back_to_max_depth() {
+        let tree = load_str(
+            r#"<y-pop><app name="Projects" exe="%win%\projects" browse="true" open-folder="sometimes"/></y-pop>"#,
+            &mut builtins(),
+        )
+        .expect("valid");
+        assert_eq!(tree.warnings.len(), 1, "{:?}", tree.warnings);
+
+        let NodeKind::App(app) = &tree.node(tree.roots[0]).kind else {
+            unreachable!()
+        };
+        let browse = app.browse.as_ref().expect("browse requested");
+        assert_eq!(browse.open_folder, OpenFolder::MaxDepth);
     }
 
     #[test]

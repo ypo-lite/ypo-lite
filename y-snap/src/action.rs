@@ -160,6 +160,20 @@ impl Target {
             _ => None,
         }
     }
+
+    /// The name [`Target::from_name`] reads back.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Focused => "focused",
+            Self::Pointed => "pointed",
+        }
+    }
+}
+
+impl fmt::Display for Target {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.name())
+    }
 }
 
 #[cfg(test)]
@@ -199,6 +213,13 @@ mod tests {
     fn rejects_unknown_names() {
         for name in ["", "minimise", "always_on_top", "Minimize"] {
             assert_eq!(Action::from_name(name), None, "{name:?}");
+        }
+    }
+
+    #[test]
+    fn every_target_round_trips_through_its_name() {
+        for target in [Target::Focused, Target::Pointed] {
+            assert_eq!(Target::from_name(target.name()), Some(target));
         }
     }
 }

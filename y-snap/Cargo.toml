@@ -6,3 +6,6 @@ edition.workspace = true
 [dependencies]
 y-core.workspace = true
 windows.workspace = true
+
+[build-dependencies]
+y-core = { path = "../core", default-features = false, features = ["build"] }

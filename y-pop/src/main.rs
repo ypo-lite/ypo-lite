@@ -107,7 +107,7 @@ impl YPop {
             // these (see `menu::append_children`), and neither does a
             // hotkey binding meaningfully target one — kept only so this
             // match stays exhaustive as `NodeKind` grows.
-            NodeKind::Separator => {}
+            NodeKind::Separator | NodeKind::Break => {}
         }
     }
 

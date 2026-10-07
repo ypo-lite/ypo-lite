@@ -9,14 +9,17 @@
 
 #![windows_subsystem = "windows"]
 
-mod action;
 mod actions;
-mod config;
 mod min_overlay;
 mod mouse;
 mod overlay;
 mod target;
 mod window;
+
+// `action` and `config` live in this package's library target (`src/lib.rs`)
+// instead, so `y-snap-config` can read and write `Settings` too — see there.
+use y_snap::action;
+use y_snap::config;
 
 use windows::Win32::UI::{
     Shell::ShellExecuteW,

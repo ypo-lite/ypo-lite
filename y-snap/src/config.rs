@@ -11,12 +11,14 @@
 //! See `README.md` for the schema.
 
 use std::fmt;
-use std::path::PathBuf;
+use std::fmt::Write as _;
+use std::io;
+use std::path::{Path, PathBuf};
 
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     HOT_KEY_MODIFIERS, MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, VIRTUAL_KEY,
 };
-use y_core::hotkey::{Hotkey, key_from_name};
+use y_core::hotkey::{Hotkey, key_from_name, key_name};
 use y_core::overlay::Color;
 use y_core::theme;
 use y_core::xml::{self, Document, Element};
@@ -121,6 +123,16 @@ impl Button {
             "wheel" => Self::Wheel,
             _ => return None,
         })
+    }
+
+    /// The name [`Button::from_name`] reads back.
+    fn name(self) -> &'static str {
+        match self {
+            Self::Left => "left",
+            Self::Right => "right",
+            Self::Middle => "middle",
+            Self::Wheel => "wheel",
+        }
     }
 }
 
@@ -308,6 +320,262 @@ impl Settings {
         };
         Ok(settings)
     }
+
+    /// Renders this configuration as `y-snap.xml`, in the shape
+    /// [`Settings::load_from`] reads back — what a settings app calls before
+    /// [`Settings::save`].
+    ///
+    /// Two things a hand-edited file can have are not preserved: comments and
+    /// layout (this is a generator, not an editor of the text), and the
+    /// `theme` attribute — [`Overlay::palette`] no longer remembers which
+    /// theme (if any) produced it once the file has been read, so it is
+    /// always written back as its ten colour attributes instead. A freshly
+    /// loaded `theme="auto"` file therefore has its colours fixed to whatever
+    /// was active at load time the first time a settings app saves it. Noted
+    /// here rather than silently, per the project's convention on
+    /// simplifications made while porting.
+    pub fn to_xml(&self) -> String {
+        let mut out = String::new();
+        out.push_str("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<y-snap>\n");
+
+        write_mouse(&mut out, &self.mouse);
+        write_hotkeys(&mut out, &self.hotkeys);
+        write_overlay(&mut out, &self.overlay);
+        write_min_button(&mut out, &self.min_button);
+
+        out.push_str("</y-snap>\n");
+        out
+    }
+
+    /// Writes [`Settings::to_xml`] to [`Settings::path`].
+    pub fn save(&self) -> io::Result<()> {
+        self.save_to(&self.path)
+    }
+
+    /// Writes [`Settings::to_xml`] to `path`, regardless of what
+    /// [`Settings::path`] says — "save as", or saving a configuration built
+    /// in memory rather than loaded from a file.
+    pub fn save_to(&self, path: &Path) -> io::Result<()> {
+        std::fs::write(path, self.to_xml())
+    }
+}
+
+fn write_mouse(out: &mut String, mouse: &Mouse) {
+    out.push_str("\t<mouse>\n");
+    for (name, gesture) in [
+        ("drag", mouse.drag),
+        ("resize", mouse.resize),
+        ("switch", mouse.switch),
+    ] {
+        let Some(gesture) = gesture else { continue };
+        let _ = write!(out, "\t\t<{name} button=\"{}\"", gesture.button.name());
+        // "Alt" is what a missing `mod` attribute reads as (see `Reader::mouse`).
+        if gesture.modifiers != MOD_ALT {
+            let _ = write!(out, " mod=\"{}\"", format_modifiers(gesture.modifiers));
+        }
+        out.push_str("/>\n");
+    }
+    out.push_str("\t</mouse>\n");
+}
+
+fn write_hotkeys(out: &mut String, hotkeys: &[Binding]) {
+    out.push_str("\t<hotkeys>\n");
+    for binding in hotkeys {
+        let _ = write!(
+            out,
+            "\t\t<hotkey key=\"{}\" action=\"{}\"",
+            binding.hotkey, binding.action
+        );
+        if binding.target != Target::default() {
+            let _ = write!(out, " target=\"{}\"", binding.target);
+        }
+        if binding.desktop != 0 {
+            let _ = write!(out, " desktop=\"{}\"", binding.desktop);
+        }
+        if binding.steal {
+            out.push_str(" steal-from-shell=\"true\"");
+        }
+        out.push_str("/>\n");
+    }
+    out.push_str("\t</hotkeys>\n");
+}
+
+fn write_overlay(out: &mut String, overlay: &Overlay) {
+    let defaults = Overlay::default();
+
+    out.push_str("\t<overlay");
+    if overlay.focus_border {
+        out.push_str(" focus-border=\"true\"");
+    }
+    write_u32_if_changed(out, "border-width", overlay.border_width, defaults.border_width);
+    write_u32_if_changed(
+        out,
+        "corner-radius",
+        overlay.corner_radius,
+        defaults.corner_radius,
+    );
+    write_u32_if_changed(out, "alpha", overlay.alpha as u32, defaults.alpha as u32);
+    write_u32_if_changed(out, "columns", overlay.columns, defaults.columns);
+    write_u32_if_changed(out, "tile-width", overlay.tile.0, defaults.tile.0);
+    write_u32_if_changed(out, "tile-height", overlay.tile.1, defaults.tile.1);
+    write_u32_if_changed(
+        out,
+        "key-font-size",
+        overlay.key_font_size,
+        defaults.key_font_size,
+    );
+    write_u32_if_changed(
+        out,
+        "label-font-size",
+        overlay.label_font_size,
+        defaults.label_font_size,
+    );
+    if overlay.icon_font != defaults.icon_font {
+        let _ = write!(out, " icon-font=\"{}\"", escape_attr(&overlay.icon_font));
+    }
+    write_u32_if_changed(
+        out,
+        "icon-font-size",
+        overlay.icon_font_size,
+        defaults.icon_font_size,
+    );
+
+    let palette = &overlay.palette;
+    for (name, color) in [
+        ("back-color", palette.back),
+        ("text-color", palette.text),
+        ("hover-back-color", palette.hover_back),
+        ("hover-text-color", palette.hover_text),
+        ("active-back-color", palette.active_back),
+        ("active-text-color", palette.active_text),
+        ("disabled-back-color", palette.disabled_back),
+        ("disabled-text-color", palette.disabled_text),
+        ("border-color", palette.border),
+        ("panel-border-color", palette.panel_border),
+    ] {
+        let _ = write!(out, " {name}=\"{}\"", color_hex(color));
+    }
+    out.push_str(">\n");
+
+    for group in &overlay.groups {
+        let _ = write!(out, "\t\t<group id=\"{}\"", escape_attr(&group.id));
+        if let Some(columns) = group.columns {
+            let _ = write!(out, " columns=\"{columns}\"");
+        }
+        if let Some(width) = group.tile_width {
+            let _ = write!(out, " tile-width=\"{width}\"");
+        }
+        if let Some(height) = group.tile_height {
+            let _ = write!(out, " tile-height=\"{height}\"");
+        }
+        out.push_str("/>\n");
+    }
+
+    for item in &overlay.items {
+        out.push_str("\t\t<action");
+        if let Some(key) = item.key {
+            let _ = write!(out, " key=\"{}\"", key_name(key));
+        }
+        let _ = write!(out, " action=\"{}\"", item.action);
+        write_opt_attr(out, "label", item.label.as_deref());
+        write_opt_attr(out, "label-on", item.label_on.as_deref());
+        write_opt_attr(out, "icon", item.icon.as_deref());
+        write_opt_attr(out, "group", item.group.as_deref());
+        if item.desktop != 0 {
+            let _ = write!(out, " desktop=\"{}\"", item.desktop);
+        }
+        out.push_str("/>\n");
+    }
+
+    out.push_str("\t</overlay>\n");
+}
+
+fn write_min_button(out: &mut String, min_button: &MinButton) {
+    out.push_str("\t<minbutton");
+    if min_button.hover_delay_ms != MinButton::default().hover_delay_ms {
+        let _ = write!(out, " hover-delay=\"{}\"", min_button.hover_delay_ms);
+    }
+    match min_button.right_click_action {
+        Some(action) => {
+            let _ = write!(out, " right-click-action=\"{action}\"");
+        }
+        None => out.push_str(" right-click-action=\"none\""),
+    }
+    out.push_str(">\n");
+
+    for item in &min_button.items {
+        let _ = write!(out, "\t\t<action action=\"{}\"", item.action);
+        write_opt_attr(out, "label", item.label.as_deref());
+        write_opt_attr(out, "icon", item.icon.as_deref());
+        out.push_str("/>\n");
+    }
+
+    out.push_str("\t</minbutton>\n");
+}
+
+fn write_opt_attr(out: &mut String, name: &str, value: Option<&str>) {
+    if let Some(value) = value {
+        let _ = write!(out, " {name}=\"{}\"", escape_attr(value));
+    }
+}
+
+fn write_u32_if_changed(out: &mut String, name: &str, value: u32, default: u32) {
+    if value != default {
+        let _ = write!(out, " {name}=\"{value}\"");
+    }
+}
+
+/// Renders modifiers the way [`parse_modifiers`] reads them back: `"none"`
+/// when empty, `"Win+Alt"` otherwise — the same spelling and order as
+/// [`Hotkey`]'s own `Display`, so `<mouse>` and `<hotkeys>` speak one dialect.
+fn format_modifiers(modifiers: HOT_KEY_MODIFIERS) -> String {
+    let mut text = String::new();
+    for (flag, name) in [
+        (MOD_WIN, "Win"),
+        (MOD_CONTROL, "Ctrl"),
+        (MOD_ALT, "Alt"),
+        (MOD_SHIFT, "Shift"),
+    ] {
+        if modifiers.0 & flag.0 != 0 {
+            if !text.is_empty() {
+                text.push('+');
+            }
+            text.push_str(name);
+        }
+    }
+    if text.is_empty() {
+        "none".to_owned()
+    } else {
+        text
+    }
+}
+
+/// `#RRGGBB`, or `#RRGGBBAA` when the colour is not fully opaque — what
+/// [`Color::parse`] reads back.
+fn color_hex(color: Color) -> String {
+    if color.a == 255 {
+        format!("#{:02X}{:02X}{:02X}", color.r, color.g, color.b)
+    } else {
+        format!(
+            "#{:02X}{:02X}{:02X}{:02X}",
+            color.r, color.g, color.b, color.a
+        )
+    }
+}
+
+/// Escapes the five characters an XML attribute value cannot contain as-is.
+fn escape_attr(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            _ => out.push(ch),
+        }
+    }
+    out
 }
 
 /// Where the configuration file lives, in the order the places are tried.
@@ -785,7 +1053,9 @@ impl Reader {
 /// left to configure beyond that. Excludes `desktop-list` (there is no key
 /// here to drive its per-desktop expansion) and `overlay` (opening the big
 /// overlay from inside this small one is not a feature).
-fn is_minbutton_action(action: Action) -> bool {
+///
+/// Public so `y-snap-config` offers exactly what this reader accepts.
+pub fn is_minbutton_action(action: Action) -> bool {
     action.needs_window() && !matches!(action, Action::DesktopList | Action::Overlay)
 }
 
@@ -1033,6 +1303,56 @@ mod tests {
         assert_eq!(settings.overlay.groups.len(), 1);
         assert_eq!(settings.overlay.items.len(), 16);
         assert_eq!(settings.min_button.items.len(), 2);
+    }
+
+    /// `to_xml` has to produce exactly what `load_from` would accept back —
+    /// the round trip a settings app relies on to save without losing or
+    /// corrupting anything it did not touch.
+    #[test]
+    fn round_trips_the_default_configuration_through_to_xml() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("rsc")
+            .join(FILE_NAME);
+        let original = Settings::load_from(path).expect("loads");
+
+        let saved = std::env::temp_dir().join("y-snap-roundtrip.xml");
+        original.save_to(&saved).expect("writes");
+        let reloaded = Settings::load_from(saved.clone()).expect("reloads");
+        let _ = std::fs::remove_file(&saved);
+
+        assert!(reloaded.warnings.is_empty(), "{:?}", reloaded.warnings);
+        assert_eq!(reloaded.hotkeys.len(), original.hotkeys.len());
+        for (before, after) in original.hotkeys.iter().zip(&reloaded.hotkeys) {
+            assert_eq!(before.hotkey.to_string(), after.hotkey.to_string());
+            assert_eq!(before.action, after.action);
+            assert_eq!(before.target, after.target);
+            assert_eq!(before.desktop, after.desktop);
+            assert_eq!(before.steal, after.steal);
+        }
+
+        assert_eq!(
+            original.mouse.drag.map(|g| g.button),
+            reloaded.mouse.drag.map(|g| g.button)
+        );
+        assert_eq!(
+            original.mouse.resize.map(|g| g.button),
+            reloaded.mouse.resize.map(|g| g.button)
+        );
+
+        assert_eq!(reloaded.overlay.groups.len(), original.overlay.groups.len());
+        assert_eq!(reloaded.overlay.items.len(), original.overlay.items.len());
+        assert_eq!(reloaded.overlay.palette.back, original.overlay.palette.back);
+        assert_eq!(reloaded.overlay.palette.text, original.overlay.palette.text);
+        assert_eq!(reloaded.overlay.columns, original.overlay.columns);
+
+        assert_eq!(
+            reloaded.min_button.items.len(),
+            original.min_button.items.len()
+        );
+        assert_eq!(
+            reloaded.min_button.right_click_action,
+            original.min_button.right_click_action
+        );
     }
 
     #[test]

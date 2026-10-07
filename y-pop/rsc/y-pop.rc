@@ -1,0 +1,49 @@
+// Resource script: compiled by build.rs through `y_core::build::embed_resources`.
+//
+// Identifiers must stay in sync with `y_core::resources`.
+// Paths are relative to this file.
+//
+// The version numbers below are checked against Cargo.toml at build time,
+// so bumping the crate version without touching this file fails the build.
+
+/////////////////////////////////////////////////////////////////////////////
+// Icon
+//
+// The lowest-numbered icon resource becomes the icon Explorer shows for the
+// executable, so keep IDI_APP_ICON first.
+
+#define IDI_APP_ICON 101
+
+IDI_APP_ICON ICON "y-pop.ico"
+
+/////////////////////////////////////////////////////////////////////////////
+// Version information (Explorer's "Details" tab)
+
+1 VERSIONINFO
+ FILEVERSION    0,1,0,0
+ PRODUCTVERSION 0,1,0,0
+ FILEFLAGSMASK  0x3fL
+ FILEFLAGS      0x0L
+ FILEOS         0x40004L   // VOS_NT_WINDOWS32
+ FILETYPE       0x1L       // VFT_APP
+ FILESUBTYPE    0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"   // US English, Unicode
+        BEGIN
+            VALUE "CompanyName",      "guipro"
+            VALUE "FileDescription",  "y-pop"
+            VALUE "FileVersion",      "0.1.0.0"
+            VALUE "InternalName",     "y-pop"
+            VALUE "LegalCopyright",   "Copyright (C) 2026"
+            VALUE "OriginalFilename", "y-pop.exe"
+            VALUE "ProductName",      "y-pop"
+            VALUE "ProductVersion",   "0.1.0.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

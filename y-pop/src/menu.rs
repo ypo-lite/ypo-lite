@@ -80,7 +80,9 @@ use y_core::icon::{Bitmap, Icon, IconCache};
 use y_core::ids::IDM_FIRST;
 use y_core::menu::{self, MenuDesign, PopupMenu};
 
-use y_pop::model::{App, Browse, ConfigTree, Defaults, EventMask, NodeData, NodeId, NodeKind};
+use y_pop::model::{
+    App, Browse, ConfigTree, Defaults, EventMask, NodeData, NodeId, NodeKind, OpenFolder,
+};
 
 use crate::skins::resolve_design;
 
@@ -119,6 +121,15 @@ struct PendingFolder {
     /// folder turns out to contain — see the module doc's second section.
     shell: bool,
     elevate: bool,
+    /// This folder's own distance from the browse app's root — `0` for the
+    /// root itself. Threaded through to [`crate::browse::list`] so it can
+    /// tell whether *its* children have room left under `browse.depth` to
+    /// become their own submenus, or have reached the deepest allowed level
+    /// and should be flattened instead — see `Browse::depth`. `u8`, matching
+    /// `Browse::depth` itself: `level` only ever climbs one past a config's
+    /// own (already `MAX_DEPTH`-clamped) `depth`, so it never comes close to
+    /// wrapping.
+    level: u8,
 }
 
 impl Session {
@@ -257,6 +268,7 @@ fn append_children(tree: &ConfigTree, parent: NodeId, menu: &mut PopupMenu, sess
                         browse: app.browse.clone().expect("checked by this arm's guard"),
                         shell: app.shell,
                         elevate: app.elevate,
+                        level: 0,
                     },
                 );
 
@@ -273,6 +285,11 @@ fn append_children(tree: &ConfigTree, parent: NodeId, menu: &mut PopupMenu, sess
             NodeKind::Separator => {
                 let _ = menu.add_titled_separator(&node.name);
             }
+            // Appends nothing of its own — arms `menu`'s next append (the
+            // following sibling, or nothing at all if this was the last
+            // child) to start a new column. See `NodeKind::Break`'s own doc
+            // comment and `y_core::menu::PopupMenu::add_break`.
+            NodeKind::Break => menu.add_break(),
             NodeKind::App(_) | NodeKind::About | NodeKind::Quit => {
                 let id = IDM_FIRST + child.as_u32();
                 let icon = resolve_icon(&mut session.icons, node);
@@ -297,7 +314,20 @@ pub fn on_init_menu_popup(session: &mut Session, hmenu: HMENU) {
         return;
     };
 
-    let entries = crate::browse::list(&pending.dir, &pending.browse);
+    // `open-folder="all"`: every real submenu — this one included — gets an
+    // extra entry up front to open the folder it lists directly, set apart
+    // from the listing itself by a separator. Every `pending` this function
+    // is ever called for is, by construction, a real submenu (a folder shown
+    // flattened per `Browse::depth` never gets registered as one — see the
+    // branch below), so this check needs no level comparison of its own.
+    if pending.browse.open_folder == OpenFolder::All {
+        let id = session.next_discovered_id();
+        let _ = menu::append_item(hmenu, id, "Open folder", session.design);
+        session.discovered.insert(id, open_folder_app(&pending.dir));
+        let _ = menu::append_separator(hmenu, session.design);
+    }
+
+    let entries = crate::browse::list(&pending.dir, &pending.browse, pending.level);
     if entries.is_empty() {
         let _ = menu::append_disabled_item(hmenu, "(empty)", session.design);
         return;
@@ -306,23 +336,34 @@ pub fn on_init_menu_popup(session: &mut Session, hmenu: HMENU) {
     for entry in entries {
         if entry.is_dir {
             let icon = session.icons.for_directory();
-            let Ok(submenu) = menu::append_submenu(hmenu, &entry.name, session.design) else {
-                continue;
-            };
-            let position = menu::item_count(hmenu).saturating_sub(1);
-            session.attach_icon(icon, |bitmap| {
-                menu::set_item_icon_by_position(hmenu, position, bitmap)
-            });
+            if entry.browsable {
+                let Ok(submenu) = menu::append_submenu(hmenu, &entry.name, session.design) else {
+                    continue;
+                };
+                let position = menu::item_count(hmenu).saturating_sub(1);
+                session.attach_icon(icon, |bitmap| {
+                    menu::set_item_icon_by_position(hmenu, position, bitmap)
+                });
 
-            session.pending.insert(
-                submenu.0 as usize,
-                PendingFolder {
-                    dir: entry.path,
-                    browse: pending.browse.clone(),
-                    shell: pending.shell,
-                    elevate: pending.elevate,
-                },
-            );
+                session.pending.insert(
+                    submenu.0 as usize,
+                    PendingFolder {
+                        dir: entry.path,
+                        browse: pending.browse.clone(),
+                        shell: pending.shell,
+                        elevate: pending.elevate,
+                        level: pending.level + 1,
+                    },
+                );
+            } else {
+                // Reached `Browse::depth` — shown flattened: a plain item,
+                // no submenu, that opens the folder itself instead of
+                // listing further.
+                let id = session.next_discovered_id();
+                let _ = menu::append_item(hmenu, id, &entry.name, session.design);
+                session.attach_icon(icon, |bitmap| menu::set_item_icon(hmenu, id, bitmap));
+                session.discovered.insert(id, open_folder_app(&entry.path));
+            }
         } else {
             let icon = session.icons.for_file(&entry.path, None);
             let id = session.next_discovered_id();
@@ -343,6 +384,28 @@ pub fn on_init_menu_popup(session: &mut Session, hmenu: HMENU) {
                 },
             );
         }
+    }
+}
+
+/// An `App` that opens `dir` itself — via `ShellExecuteExW`'s default
+/// "open" verb on a directory, which is Explorer, the same way double-
+/// clicking a folder there does — for a flattened max-depth folder item or
+/// an `open-folder="all"` entry. Always `shell: true`: `CreateProcessW`
+/// can't launch a directory at all, so this can't inherit the browse node's
+/// own (possibly `false`) `shell` the way a discovered *file* does. Always
+/// `elevate: false` too, deliberately not inherited either — opening a
+/// folder in Explorer never needs elevation, and eagerly asking for it here
+/// would be a UAC prompt for something that doesn't need one.
+fn open_folder_app(dir: &str) -> App {
+    App {
+        exe: Some(Arc::from(dir)),
+        app_id: None,
+        param: None,
+        path: None,
+        shell: true,
+        elevate: false,
+        events: EventMask::default(),
+        browse: None,
     }
 }
 
@@ -373,7 +436,7 @@ mod tests {
 
     use windows::Win32::UI::WindowsAndMessaging::{
         GetMenuItemCount, GetMenuItemID, GetMenuItemInfoW, GetMenuStringW, MENUITEMINFOW,
-        MF_BYPOSITION, MIIM_BITMAP,
+        MF_BYPOSITION, MFT_MENUBREAK, MIIM_BITMAP, MIIM_FTYPE,
     };
 
     use y_pop::config;
@@ -478,6 +541,16 @@ mod tests {
         info.fMask = MIIM_BITMAP;
         let ok = unsafe { GetMenuItemInfoW(menu, item, by_position, &mut info) };
         ok.is_ok() && !info.hbmpItem.is_invalid()
+    }
+
+    /// Whether the item at `position` starts a new menu column —
+    /// `MFT_MENUBREAK`, what [`NodeKind::Break`] turns into.
+    fn item_starts_new_column(menu: HMENU, position: u32) -> bool {
+        let mut info: MENUITEMINFOW = unsafe { std::mem::zeroed() };
+        info.cbSize = size_of::<MENUITEMINFOW>() as u32;
+        info.fMask = MIIM_FTYPE;
+        let ok = unsafe { GetMenuItemInfoW(menu, position, true, &mut info) };
+        ok.is_ok() && info.fType.contains(MFT_MENUBREAK)
     }
 
     /// The one `browse` submenu's raw handle — panics if `session` doesn't
@@ -585,12 +658,12 @@ mod tests {
     }
 
     #[test]
-    fn recurse_lists_subfolders_and_they_stay_lazy_too() {
+    fn depth_lists_subfolders_and_they_stay_lazy_too() {
         let _guard = serialized();
-        let dir = TempDir::new("recurse");
+        let dir = TempDir::new("depth");
         dir.mkdir("Sub");
         dir.touch("top.txt");
-        let (tree, root) = tree_with_browse(&dir.path(), r#"recurse="true""#);
+        let (tree, root) = tree_with_browse(&dir.path(), r#"depth="1""#);
 
         let (_popup, mut session) = build(&tree, root);
         let top = only_pending_handle(&session);
@@ -608,6 +681,102 @@ mod tests {
         on_init_menu_popup(&mut session, sub); // opening it in turn still works
         assert_eq!(item_count(sub), 1); // Sub itself is empty -> the placeholder
         assert_eq!(item_text(sub, 0), "(empty)");
+    }
+
+    /// A folder exactly at `depth` is shown, but flattened: a plain item —
+    /// not a submenu, and not one more entry in `session.pending` — that
+    /// resolves to opening the folder itself. Needs two levels of nesting:
+    /// with `depth="1"`, the *first* level (`Sub`) is still a real,
+    /// browsable submenu — it's `Sub`'s own child (`SubSub`, level 2) that
+    /// has run out of room.
+    #[test]
+    fn a_folder_past_max_depth_is_flattened_and_opens_via_the_shell() {
+        let _guard = serialized();
+        let dir = TempDir::new("max-depth-flatten");
+        dir.mkdir("Sub");
+        dir.mkdir("Sub/SubSub");
+        let (tree, root) = tree_with_browse(&dir.path(), r#"depth="1""#);
+
+        let (_popup, mut session) = build(&tree, root);
+        let top = only_pending_handle(&session);
+        on_init_menu_popup(&mut session, top);
+        assert_eq!(item_text(top, 0), "Sub");
+        assert_eq!(session.pending.len(), 1, "Sub is still browsable at level 1");
+
+        let sub = HMENU(*session.pending.keys().next().unwrap() as *mut _);
+        on_init_menu_popup(&mut session, sub);
+        assert_eq!(item_count(sub), 1);
+        assert_eq!(item_text(sub, 0), "SubSub");
+
+        // Not a submenu this time — level 2 is past `depth`, so nothing was
+        // registered in `session.pending` for it.
+        assert!(session.pending.is_empty());
+
+        let id = unsafe { GetMenuItemID(sub, 0) };
+        match resolve_selection(id, &mut session).expect("a known id") {
+            Selection::Launch(app) => {
+                assert!(app.shell, "a directory can only be launched via the shell");
+                assert!(app.exe.unwrap().ends_with("SubSub"));
+            }
+            Selection::Node(_) => panic!("expected a discovered folder, not a tree node"),
+        }
+    }
+
+    /// `open-folder="never"` drops a folder past `depth` entirely rather
+    /// than flattening it — there would be nothing left the user could do
+    /// with it (no submenu, and no "open" affordance either). Same two-level
+    /// nesting as the flattening test above: `Sub` (level 1) is still a real
+    /// submenu regardless of `open-folder`; it's `SubSub` (level 2, past
+    /// `depth`) that gets dropped.
+    #[test]
+    fn open_folder_never_drops_a_folder_past_max_depth() {
+        let _guard = serialized();
+        let dir = TempDir::new("open-folder-never");
+        dir.mkdir("Sub");
+        dir.mkdir("Sub/SubSub");
+        dir.touch("Sub/inside.txt");
+        let (tree, root) = tree_with_browse(&dir.path(), r#"depth="1" open-folder="never""#);
+
+        let (_popup, mut session) = build(&tree, root);
+        let top = only_pending_handle(&session);
+        on_init_menu_popup(&mut session, top);
+        assert_eq!(item_text(top, 0), "Sub");
+
+        let sub = HMENU(*session.pending.keys().next().unwrap() as *mut _);
+        on_init_menu_popup(&mut session, sub);
+
+        assert_eq!(item_count(sub), 1, "inside.txt only — SubSub is dropped");
+        assert_eq!(item_text(sub, 0), "inside.txt");
+    }
+
+    /// `open-folder="all"` adds an "Open folder" entry (and a separator)
+    /// ahead of a real submenu's own listing.
+    #[test]
+    fn open_folder_all_adds_an_open_entry_ahead_of_the_listing() {
+        let _guard = serialized();
+        let dir = TempDir::new("open-folder-all");
+        dir.touch("top.txt");
+        let (tree, root) = tree_with_browse(&dir.path(), r#"open-folder="all""#);
+
+        let (_popup, mut session) = build(&tree, root);
+        let top = only_pending_handle(&session);
+        on_init_menu_popup(&mut session, top);
+
+        assert_eq!(item_text(top, 0), "Open folder");
+        // Position 1 is the separator this adds ahead of the (empty, since
+        // depth defaults to 0 and this folder has no other files) listing —
+        // `open-folder` doesn't change `depth`'s own default.
+        assert_eq!(item_count(top), 3, "Open folder, a separator, then top.txt");
+        assert_eq!(item_text(top, 2), "top.txt");
+
+        let id = unsafe { GetMenuItemID(top, 0) };
+        match resolve_selection(id, &mut session).expect("a known id") {
+            Selection::Launch(app) => {
+                assert!(app.shell);
+                assert!(app.exe.unwrap().ends_with("open-folder-all"));
+            }
+            Selection::Node(_) => panic!("expected the discovered open-folder entry"),
+        }
     }
 
     #[test]
@@ -742,7 +911,7 @@ mod tests {
         let _guard = serialized();
         let dir = TempDir::new("icon-folder");
         dir.mkdir("Sub");
-        let (tree, root) = tree_with_browse(&dir.path(), r#"recurse="true""#);
+        let (tree, root) = tree_with_browse(&dir.path(), r#"depth="1""#);
 
         let (_popup, mut session) = build(&tree, root);
         let top = only_pending_handle(&session);
@@ -751,6 +920,53 @@ mod tests {
         // Folders sort before files (see `browse`), and this folder is the
         // only entry — position 0.
         assert!(item_has_icon_by_position(top, 0));
+    }
+
+    /// `<break/>` appends nothing of its own — item_count only ever grows by
+    /// two, not three — but arms `MFT_MENUBREAK` on whichever sibling comes
+    /// right after it.
+    #[test]
+    fn a_break_starts_a_new_column_on_the_item_right_after_it() {
+        let _guard = serialized();
+        let tree = config::load_str(
+            r#"<y-pop><group name="Root">
+                <app name="Before" exe="notepad.exe"/>
+                <break/>
+                <app name="After" exe="notepad.exe"/>
+            </group></y-pop>"#,
+            &mut Vec::<Variable>::new(),
+        )
+        .expect("valid");
+        let root = tree.roots[0];
+
+        let (popup, _session) = build(&tree, root);
+        assert_eq!(item_count(popup.handle()), 2, "<break/> adds no item of its own");
+        assert_eq!(item_text(popup.handle(), 0), "Before");
+        assert_eq!(item_text(popup.handle(), 1), "After");
+        assert!(!item_starts_new_column(popup.handle(), 0));
+        assert!(item_starts_new_column(popup.handle(), 1));
+    }
+
+    /// A `<break/>` with nothing after it (the last child of its parent) has
+    /// nothing to visibly do — the flag it arms is simply never consumed,
+    /// not a dangling break carried onto whatever gets added to this menu
+    /// next by some *other* caller.
+    #[test]
+    fn a_trailing_break_is_harmless() {
+        let _guard = serialized();
+        let tree = config::load_str(
+            r#"<y-pop><group name="Root">
+                <app name="Only" exe="notepad.exe"/>
+                <break/>
+            </group></y-pop>"#,
+            &mut Vec::<Variable>::new(),
+        )
+        .expect("valid");
+        let root = tree.roots[0];
+
+        let (popup, _session) = build(&tree, root);
+        assert_eq!(item_count(popup.handle()), 1);
+        assert!(!item_starts_new_column(popup.handle(), 0));
     }
 
     // `resolve_design` and the three built-in skins have their own test

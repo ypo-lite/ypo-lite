@@ -114,24 +114,23 @@ pub enum PresenterStyle {
     Radial,
 }
 
-/// One `key="1" mod="2" break="3" auto_open="4"`-style set of booleans,
-/// packed into a byte instead of four fields — `show_shortcut` is not in
-/// here because it is tri-state (inherit the global default, or override it
-/// either way), which does not fit a plain bit.
+/// A small set of per-node booleans, packed into a byte instead of separate
+/// fields — `show_shortcut` is not in here because it is tri-state (inherit
+/// the global default, or override it either way), which does not fit a
+/// plain bit. A menu-column break used to live here too (PortAL's own
+/// `break="true"`, one more flag on the item *after* which the break
+/// happens) — it's [`NodeKind::Break`] instead now, its own node between two
+/// siblings rather than a property of one of them; see that variant's doc
+/// comment for why.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub struct NodeFlags(u8);
 
 impl NodeFlags {
     const DEFAULT: u8 = 1 << 0;
-    const BREAK_AFTER: u8 = 1 << 1;
     const AUTO_OPEN: u8 = 1 << 2;
 
     pub fn is_default(self) -> bool {
         self.0 & Self::DEFAULT != 0
-    }
-
-    pub fn breaks_after(self) -> bool {
-        self.0 & Self::BREAK_AFTER != 0
     }
 
     /// `<group autoopen="true">` — opens on tray hover, no click. PortAL's
@@ -142,10 +141,6 @@ impl NodeFlags {
 
     pub fn set_default(&mut self, value: bool) {
         self.set(Self::DEFAULT, value);
-    }
-
-    pub fn set_break_after(&mut self, value: bool) {
-        self.set(Self::BREAK_AFTER, value);
     }
 
     pub fn set_auto_open(&mut self, value: bool) {
@@ -242,6 +237,20 @@ pub enum NodeKind {
     Separator,
     About,
     Quit,
+    /// `<break/>` — a menu-column break at exactly this point among its
+    /// siblings (`y_core::menu::PopupMenu::add_break`, Win32's
+    /// `MF_MENUBREAK`), not an item of its own: [`crate::menu::
+    /// append_children`] doesn't append anything for it, only arms the
+    /// break flag the sibling right after it picks up. PortAL's own
+    /// `break="true"` instead sat as one more attribute on the item the
+    /// break follows — a node of its own is a better fit for `y-pop.xml`:
+    /// it names the point between two children directly, doesn't need
+    /// carrying on whichever sibling happens to precede it, and reads the
+    /// same as `<separator/>` already does for "a thing between items that
+    /// isn't itself choosable." A `<break/>` with nothing after it (the
+    /// last child of its parent) has nothing to visibly do — same as
+    /// PortAL's own `break="true"` on a group's last item.
+    Break,
 }
 
 #[derive(Clone, Debug)]
@@ -267,7 +276,64 @@ pub struct App {
 #[derive(Clone, Debug)]
 pub struct Browse {
     pub filter: Option<Arc<str>>,
-    pub recurse: bool,
+    /// How many levels of subfolders become their own, further-browsable
+    /// submenus — PortAL's own `browse`/`path` only ever went one level deep
+    /// or unbounded (`recurse="true"`/`"false"`); `depth` generalises that to
+    /// any level. `0`, the default (no `depth` attribute at all), means no
+    /// folders are shown in the listing whatsoever — this app's own files
+    /// only — the same as `y-pop`'s previous `recurse="false"` default, kept
+    /// as a deliberate special case rather than falling out of the general
+    /// rule below so that a plain `browse="true"` with no other attributes
+    /// keeps behaving exactly as it always has.
+    ///
+    /// For `depth >= 1`: a subfolder at level *n* (the browsed folder's own
+    /// immediate children are level 1) gets a real submenu — listed lazily,
+    /// same as any other browsed folder — as long as `n <= depth`. A
+    /// subfolder at level `depth + 1` has reached the deepest allowed level:
+    /// it is shown flattened, a plain item with no submenu of its own, that
+    /// opens the folder directly via the default application (Explorer)
+    /// instead of listing further — see [`OpenFolder`] for whether it's
+    /// shown at all. Nothing deeper than `depth + 1` is ever reached, since
+    /// a flattened folder has no submenu left to list from.
+    ///
+    /// `u8`, not `usize`/`u32`: nobody sanely nests 200 levels of submenus
+    /// (see [`MAX_DEPTH`], which `crate::config` clamps a config file's own
+    /// `depth=""` to), and every one of Ypo-Lite's apps is built to stay
+    /// low-memory — a byte that can't represent a value the feature has no
+    /// real use for beats a wider int "just in case".
+    pub depth: u8,
+    /// Whether — and when — a browsed submenu also carries an extra entry to
+    /// open the folder it lists directly, rather than only being reachable
+    /// by digging into its contents.
+    pub open_folder: OpenFolder,
+}
+
+/// The hard ceiling [`crate::config`] clamps a `depth=""` attribute to — see
+/// [`Browse::depth`]'s doc for why a `u8` at all. Chosen well above anything
+/// a real config would ever ask for (a filesystem doesn't usefully nest this
+/// deep either) while leaving headroom under `u8::MAX` for
+/// [`crate::menu::PendingFolder::level`] to count one past it without
+/// wrapping.
+pub const MAX_DEPTH: u8 = 200;
+
+/// See [`Browse::open_folder`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum OpenFolder {
+    /// Every real submenu (the browsed folder itself, and every subfolder
+    /// that still has one of its own per [`Browse::depth`]) gets an extra
+    /// "open this folder" entry inside it, in addition to a folder at the
+    /// deepest allowed level being shown flattened (see below).
+    All,
+    /// The default: no extra entry is added to any real submenu. A folder at
+    /// the deepest allowed level is still shown, flattened — with no
+    /// submenu of its own, it would otherwise be unreachable at all.
+    #[default]
+    MaxDepth,
+    /// No such affordance anywhere, at any level: a folder that has reached
+    /// the deepest allowed level (and so cannot get a real submenu) is
+    /// simply left out of the listing entirely, rather than shown with no
+    /// way to act on it.
+    Never,
 }
 
 impl ConfigTree {

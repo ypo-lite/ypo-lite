@@ -11,16 +11,24 @@
 use std::fs::Metadata;
 use std::os::windows::fs::MetadataExt;
 
-use y_pop::model::Browse;
+use y_pop::model::{Browse, OpenFolder};
 
-/// One directory entry [`list`] found: a file to launch, or (only when
-/// [`Browse::recurse`] asked for it) a subfolder to browse further.
+/// One directory entry [`list`] found: a file to launch, or a subfolder —
+/// either one to browse further ([`Entry::browsable`]) or one that has
+/// already reached [`Browse::depth`] and is shown flattened instead. See
+/// [`list`]'s own doc for how `level` decides which.
 pub struct Entry {
     /// What the menu shows — extension hidden for [`HIDDEN_EXTENSIONS`],
     /// untouched for a folder.
     pub name: String,
     pub path: String,
     pub is_dir: bool,
+    /// Only meaningful when `is_dir`: `true` means this folder gets a real,
+    /// further-browsable submenu; `false` means it has reached [`Browse::
+    /// depth`] and is a plain, already-flattened item instead — see
+    /// `menu.rs`'s use of this field for what each one turns into. Always
+    /// `false` for a file.
+    pub browsable: bool,
 }
 
 /// Extensions hidden from a listed file's display name — the file *is*
@@ -40,15 +48,22 @@ const HIDDEN_EXTENSIONS: &[&str] = &["exe", "lnk"];
 /// `MetadataExt::file_attributes`.
 const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
 
-/// Lists `dir`, applying `browse`'s filter and recurse setting. An
-/// unreadable directory (removed, permission denied, a network path that
-/// timed out) yields an empty list rather than an error — the submenu opens
-/// showing nothing rather than not opening at all, the same tolerance
-/// [`crate::launch`] extends a clipboard it can't read.
+/// Lists `dir`, applying `browse`'s filter, depth and open-folder settings.
+/// `level` is `dir`'s own distance from the browsed app's root (the root
+/// itself, and every folder [`crate::menu`] calls this for, is one level
+/// below its parent — `0` for the very first call). An unreadable directory
+/// (removed, permission denied, a network path that timed out) yields an
+/// empty list rather than an error — the submenu opens showing nothing
+/// rather than not opening at all, the same tolerance [`crate::launch`]
+/// extends a clipboard it can't read.
 ///
 /// Folders sort before files, both alphabetically — PortAL's own ordering
-/// (`HandleSubDirectory` lists subdirectories, then files).
-pub fn list(dir: &str, browse: &Browse) -> Vec<Entry> {
+/// (`HandleSubDirectory` lists subdirectories, then files). Every directory
+/// entry this returns is browsable further (see [`Entry::browsable`]) unless
+/// it sits exactly at `browse.depth` levels below the root — one past that
+/// and it isn't returned at all, since nothing calls `list` on a folder that
+/// wasn't itself returned as browsable.
+pub fn list(dir: &str, browse: &Browse, level: u8) -> Vec<Entry> {
     let Ok(read_dir) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
@@ -63,18 +78,34 @@ pub fn list(dir: &str, browse: &Browse) -> Vec<Entry> {
 
             let is_dir = metadata.is_dir();
             let file_name = entry.file_name().to_string_lossy().into_owned();
+            let browsable;
             if is_dir {
-                if !browse.recurse || file_name == "." || file_name == ".." {
+                if file_name == "." || file_name == ".." {
                     return None;
                 }
-            } else if !matches(&file_name, browse.filter.as_deref()) {
-                return None;
+                // `depth == 0` is the "no folders shown at all" special case
+                // documented on `Browse::depth` — kept separate from the
+                // general rule below rather than falling out of it, so a
+                // plain `browse="true"` behaves exactly as it always has.
+                if browse.depth == 0 {
+                    return None;
+                }
+                browsable = level < browse.depth;
+                if !browsable && browse.open_folder == OpenFolder::Never {
+                    return None;
+                }
+            } else {
+                if !matches(&file_name, browse.filter.as_deref()) {
+                    return None;
+                }
+                browsable = false;
             }
 
             Some(Entry {
                 name: display_name(&file_name, is_dir),
                 path: entry.path().display().to_string(),
                 is_dir,
+                browsable,
             })
         })
         .collect();
@@ -136,7 +167,7 @@ mod tests {
 
     /// A throwaway directory under the system temp folder, removed on drop
     /// — real files on real disk, since `list` itself (folder sorting,
-    /// hidden-file skipping, `recurse`) is the one piece the pure
+    /// hidden-file skipping, depth/open-folder) is the one piece the pure
     /// `matches`/`display_name` tests below don't touch at all.
     struct TempDir(std::path::PathBuf);
 
@@ -167,6 +198,10 @@ mod tests {
         }
     }
 
+    fn browse(depth: u8, open_folder: OpenFolder) -> Browse {
+        Browse { filter: None, depth, open_folder }
+    }
+
     #[test]
     fn lists_folders_before_files_both_alphabetical() {
         let dir = TempDir::new("ordering");
@@ -175,11 +210,7 @@ mod tests {
         dir.mkdir("Zeta");
         dir.mkdir("Alpha");
 
-        let browse = Browse {
-            filter: None,
-            recurse: true,
-        };
-        let names: Vec<_> = list(dir.path(), &browse)
+        let names: Vec<_> = list(dir.path(), &browse(1, OpenFolder::MaxDepth), 0)
             .into_iter()
             .map(|entry| entry.name)
             .collect();
@@ -187,16 +218,12 @@ mod tests {
     }
 
     #[test]
-    fn subfolders_are_skipped_unless_recurse_is_set() {
-        let dir = TempDir::new("recurse");
+    fn subfolders_are_skipped_when_depth_is_zero() {
+        let dir = TempDir::new("depth-zero");
         dir.touch("file.txt");
         dir.mkdir("sub");
 
-        let no_recurse = Browse {
-            filter: None,
-            recurse: false,
-        };
-        let names: Vec<_> = list(dir.path(), &no_recurse)
+        let names: Vec<_> = list(dir.path(), &browse(0, OpenFolder::MaxDepth), 0)
             .into_iter()
             .map(|entry| entry.name)
             .collect();
@@ -204,12 +231,59 @@ mod tests {
     }
 
     #[test]
+    fn a_folder_within_depth_is_browsable() {
+        let dir = TempDir::new("within-depth");
+        dir.mkdir("sub");
+
+        // level 0 -> the listed folder is level 1, at or under depth 2.
+        let entries = list(dir.path(), &browse(2, OpenFolder::MaxDepth), 0);
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].is_dir);
+        assert!(entries[0].browsable, "level 1 <= depth 2, should still get a submenu");
+    }
+
+    #[test]
+    fn a_folder_exactly_at_max_depth_is_flattened_not_browsable() {
+        let dir = TempDir::new("at-max-depth");
+        dir.mkdir("sub");
+
+        // level 0 -> the listed folder is level 1, one past depth 0.
+        let entries = list(dir.path(), &browse(0, OpenFolder::MaxDepth), 0);
+        // depth == 0 is the "no folders at all" special case, so this alone
+        // doesn't show it — bump depth to 1 and list one level deeper to
+        // actually land a folder exactly on the max-depth boundary.
+        assert!(entries.is_empty());
+
+        let entries = list(dir.path(), &browse(1, OpenFolder::MaxDepth), 1);
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].is_dir);
+        assert!(!entries[0].browsable, "level 2 > depth 1, should be flattened");
+    }
+
+    #[test]
+    fn open_folder_never_hides_a_folder_past_max_depth() {
+        let dir = TempDir::new("open-folder-never");
+        dir.mkdir("sub");
+
+        let entries = list(dir.path(), &browse(1, OpenFolder::Never), 1);
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn open_folder_all_still_only_flattens_past_max_depth() {
+        let dir = TempDir::new("open-folder-all");
+        dir.mkdir("sub");
+
+        // `open-folder="all"` adds entries inside real submenus; it doesn't
+        // extend how deep those submenus go.
+        let entries = list(dir.path(), &browse(1, OpenFolder::All), 1);
+        assert_eq!(entries.len(), 1);
+        assert!(!entries[0].browsable);
+    }
+
+    #[test]
     fn an_unreadable_directory_yields_an_empty_list_not_an_error() {
-        let browse = Browse {
-            filter: None,
-            recurse: false,
-        };
-        assert!(list(r"Z:\this\does\not\exist", &browse).is_empty());
+        assert!(list(r"Z:\this\does\not\exist", &browse(0, OpenFolder::MaxDepth), 0).is_empty());
     }
 
     #[test]
