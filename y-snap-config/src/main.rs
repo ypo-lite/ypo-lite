@@ -8,7 +8,8 @@
 //!   adding or changing a screen.**
 //! - [`shell`] — the window frame (nav pane, page scroller, Save bar) and
 //!   the content [`ui::viewport::Viewport`] it leaves for screens.
-//! - [`keys`] / [`key_picker`] — the key catalog and the picker built on it.
+//! - [`keys`] / [`key_picker`] — the key catalog and the picker built on it;
+//!   [`icons`] / [`icon_picker`] — the same for tile icons.
 //! - one module per screen: [`hotkeys`], [`mouse`], [`overlay`], [`min_button`].
 //!
 //! State lives here, in one place: `ConfigApp` owns the loaded `Settings`
@@ -27,6 +28,8 @@
 #![windows_subsystem = "windows"]
 
 mod hotkeys;
+mod icon_picker;
+mod icons;
 mod key_picker;
 mod keys;
 mod min_button;
@@ -42,6 +45,8 @@ use y_core::overlay::Color as CoreColor;
 use y_snap::action::{Action, Target};
 use y_snap::config::{Binding, Button as MouseButton, Gesture, Group, Item, LoadError, QuickAction, Settings};
 
+use icon_picker::IconPickerUi;
+use icons::IconCategory;
 use key_picker::KeyPickerUi;
 use keys::KeyCategory;
 use mouse::GestureKind;
@@ -64,6 +69,9 @@ struct ConfigApp {
     /// The key picker's own state (category tab, search text) — shared by
     /// whichever editor is showing a picker, since only one ever is.
     key_picker: KeyPickerUi,
+    /// The icon picker inside the open tile editor (Overlay or Minimize
+    /// button) — closed whenever a new editor opens.
+    icon_picker: IconPickerUi,
     overlay_section: OverlaySection,
     /// The window's client width in DIPs, from `on_window_size`. Starts at
     /// the initial window width; the first delivery corrects it.
@@ -149,6 +157,10 @@ enum Msg {
     KeyCategorySelected(KeyCategory),
     KeySearchChanged(String),
     KeySearchChosen(String),
+    IconPickerToggled,
+    IconCategorySelected(IconCategory),
+    IconSearchChanged(String),
+    IconPicked(&'static str),
 
     HotkeyActionChanged(usize, Option<usize>),
     HotkeyTargetChanged(usize, Option<usize>),
@@ -204,6 +216,7 @@ impl Component for ConfigApp {
             save_error: None,
             editing: None,
             key_picker: KeyPickerUi::default(),
+            icon_picker: IconPickerUi::default(),
             overlay_section: OverlaySection::Layout,
             window_width: shell::INITIAL_WINDOW.0,
         }
@@ -216,6 +229,8 @@ impl Component for ConfigApp {
             Msg::WindowResized(size) => self.window_width = size.width,
             Msg::KeyCategorySelected(category) => self.key_picker.category = category,
             Msg::KeySearchChanged(text) => self.key_picker.search = text,
+            Msg::IconCategorySelected(category) => self.icon_picker.category = category,
+            Msg::IconSearchChanged(text) => self.icon_picker.search = text,
             Msg::Reload => {
                 self.editing = None;
                 self.settings = Settings::load();
@@ -270,6 +285,7 @@ impl Component for ConfigApp {
                         editing_palette: palette,
                     },
                     &self.key_picker,
+                    &self.icon_picker,
                     viewport,
                     context,
                 )
@@ -279,7 +295,14 @@ impl Component for ConfigApp {
                     Some(Editing::QuickAction { index, .. }) => Some(index),
                     _ => None,
                 };
-                min_button::min_button_view(&settings.min_button, &settings.overlay, editing, viewport, context)
+                min_button::min_button_view(
+                    &settings.min_button,
+                    &settings.overlay,
+                    editing,
+                    &self.icon_picker,
+                    viewport,
+                    context,
+                )
             }
         };
 
@@ -354,6 +377,8 @@ impl ConfigApp {
             | Msg::WindowResized(_)
             | Msg::KeyCategorySelected(_)
             | Msg::KeySearchChanged(_)
+            | Msg::IconCategorySelected(_)
+            | Msg::IconSearchChanged(_)
             | Msg::Reload => unreachable!("settled by Component::update"),
 
             Msg::EditHotkey(index) => {
@@ -371,6 +396,7 @@ impl ConfigApp {
                 if reopen {
                     let original = settings.overlay.items[index].clone();
                     self.key_picker = KeyPickerUi::opening_on(original.key);
+                    self.icon_picker = IconPickerUi::default();
                     self.editing = Some(Editing::Tile { index, original });
                 }
             }
@@ -549,6 +575,7 @@ impl ConfigApp {
             Msg::OverlayItemActionChanged(index, Some(choice)) => {
                 let action = overlay::OVERLAY_ACTIONS[choice];
                 let item = &mut settings.overlay.items[index];
+                item.icon = icons::after_action_change(item.icon.as_deref(), item.action, action);
                 item.action = action;
                 // `desktop-list` expands into per-desktop tiles that carry
                 // their own keys; a key on the placeholder would be dead data.
@@ -586,7 +613,7 @@ impl ConfigApp {
                     action: Action::Minimize,
                     label: Some("New tile".to_owned()),
                     label_on: None,
-                    icon: None,
+                    icon: Some(icons::default_for(Action::Minimize).to_owned()),
                     group: None,
                     desktop: 0,
                 });
@@ -594,6 +621,31 @@ impl ConfigApp {
                 self.editing = None;
                 let index = settings.overlay.items.len() - 1;
                 self.edit(Msg::EditTile(index));
+            }
+
+            Msg::IconPickerToggled => {
+                if self.icon_picker.open {
+                    self.icon_picker.open = false;
+                } else {
+                    let current = match self.editing {
+                        Some(Editing::Tile { index, .. }) => settings.overlay.items[index].icon.as_deref(),
+                        Some(Editing::QuickAction { index, .. }) => settings.min_button.items[index].icon.as_deref(),
+                        _ => None,
+                    };
+                    self.icon_picker = IconPickerUi::opening_on(current);
+                }
+            }
+            Msg::IconPicked(icon) => {
+                let target = match self.editing {
+                    Some(Editing::Tile { index, .. }) => Some(&mut settings.overlay.items[index].icon),
+                    Some(Editing::QuickAction { index, .. }) => Some(&mut settings.min_button.items[index].icon),
+                    _ => None,
+                };
+                if let Some(target) = target {
+                    *target = Some(icon.to_owned());
+                    self.dirty = true;
+                }
+                self.icon_picker = IconPickerUi::default();
             }
 
             // WinUI's `Slider`/`NumberBox` report a value on first render,
@@ -618,11 +670,15 @@ impl ConfigApp {
                 self.editing = None;
                 if reopen {
                     let original = settings.min_button.items[index].clone();
+                    self.icon_picker = IconPickerUi::default();
                     self.editing = Some(Editing::QuickAction { index, original });
                 }
             }
             Msg::QuickActionActionChanged(index, Some(choice)) => {
-                settings.min_button.items[index].action = min_button::actions()[choice];
+                let action = min_button::actions()[choice];
+                let item = &mut settings.min_button.items[index];
+                item.icon = icons::after_action_change(item.icon.as_deref(), item.action, action);
+                item.action = action;
                 self.dirty = true;
             }
             Msg::QuickActionLabelChanged(index, text) => {
@@ -642,7 +698,7 @@ impl ConfigApp {
                 settings.min_button.items.push(QuickAction {
                     action: Action::Minimize,
                     label: Some("New tile".to_owned()),
-                    icon: None,
+                    icon: Some(icons::default_for(Action::Minimize).to_owned()),
                 });
                 self.dirty = true;
                 self.editing = None;

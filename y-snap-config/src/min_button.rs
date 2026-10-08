@@ -11,6 +11,7 @@
 //! No reordering yet (same as overlay tiles): the popup shows tiles in file
 //! order, so a new tile goes at the end.
 
+use crate::icon_picker::{IconPickerUi, icon_field, icon_picker};
 use crate::overlay::OVERLAY_ACTIONS;
 use crate::overlay::palette::to_ui_color;
 use crate::ui::prelude::*;
@@ -42,11 +43,12 @@ pub fn min_button_view(
     min_button: &MinButton,
     overlay: &Overlay,
     editing: Option<usize>,
+    icons: &IconPickerUi,
     viewport: Viewport,
     context: &ViewContext<ConfigApp>,
 ) -> View {
     let split = Split::new(viewport).min_widths(SETTINGS_MIN_WIDTH, PREVIEW_MIN_WIDTH).weights(1.2, 1.0);
-    let settings = settings(min_button, editing, split.primary(), context);
+    let settings = settings(min_button, editing, icons, split.primary(), context);
     let preview = preview(min_button, overlay, split.secondary());
 
     page(
@@ -60,6 +62,7 @@ pub fn min_button_view(
 fn settings(
     min_button: &MinButton,
     editing: Option<usize>,
+    icons: &IconPickerUi,
     viewport: Viewport,
     context: &ViewContext<ConfigApp>,
 ) -> View {
@@ -100,7 +103,7 @@ fn settings(
     let detail_viewport = table.detail_viewport(viewport).inset(CARD_INSET);
     let rows = min_button.items.iter().enumerate().map(|(index, item)| {
         let open = editing == Some(index);
-        let detail = open.then(|| tile_editor(index, item, &actions, detail_viewport, context));
+        let detail = open.then(|| tile_editor(index, item, &actions, icons, detail_viewport, context));
         Row::new(index.to_string(), cells(index, item, open, context)).detail(detail)
     });
 
@@ -148,6 +151,7 @@ fn tile_editor(
     index: usize,
     item: &QuickAction,
     actions: &[Action],
+    icons: &IconPickerUi,
     viewport: Viewport,
     context: &ViewContext<ConfigApp>,
 ) -> View {
@@ -178,13 +182,11 @@ fn tile_editor(
         )
         .item(
             "icon",
-            field(
-                "Icon",
-                text_box(
-                    item.icon.clone().unwrap_or_default(),
-                    "A glyph or emoji",
-                    context.callback(move |t| Msg::QuickActionIconChanged(index, t)),
-                ),
+            icon_field(
+                item.icon.as_deref(),
+                icons.open,
+                context.callback(move |t| Msg::QuickActionIconChanged(index, t)),
+                context,
             ),
         );
 
@@ -192,6 +194,10 @@ fn tile_editor(
         format!("Popup tile — {}", item.label.as_deref().unwrap_or(item.action.name())),
         Stack::vertical(space::L)
             .child("fields", fields.build(viewport))
+            .maybe(
+                "icon-picker",
+                icons.open.then(|| icon_picker(item.icon.as_deref(), item.action, icons, viewport, context)),
+            )
             .child("note", note("The popup shows the icon; the label is shown only when there's no icon.")),
         context.callback(|()| Msg::EditorClosed(EditorClose::Revert)),
         context.callback(|()| Msg::EditorClosed(EditorClose::Keep)),

@@ -86,7 +86,7 @@ such as page padding. A component that knows its own minimum width should use
 |---|---|---|
 | A screen | `page(title, lede, body)` | Title and lede from the type ramp, `XL` gap to the body. |
 | Vertical list of blocks | `Stack::vertical(space::L).child(key, view)…` | `.maybe(key, Option<View>)` for optional children. |
-| N same-kind fields/cards/swatches | `AutoGrid::new(min_item).max_columns(n).items(…).build(viewport)` | Equal widths, wraps to fewer columns, `Auto` rows (never clips height). |
+| N same-kind fields/cards/swatches | `AutoGrid::new(min_item).max_columns(n).items(…).build(viewport)` | Equal widths, wraps to fewer columns, `Auto` rows (never clips height). `.keep_columns()` for same-size buttons whose count varies (search results), so two results don't stretch to half the row each. |
 | Editor + preview | `Split::new(viewport).min_widths(a, b).weights(…)` | Ask `primary()`/`secondary()` first, build the panes, then call `build`. |
 | Rows of records | `Table::new(&COLUMNS).rows(…).build(viewport)` | `Column::flex(header, min)`, `fixed`, `actions`. Becomes cards below `min_width()`. |
 | Edit one row in place | `Row::new(key, cells).detail(Some(editor(…)))` | The editor spans the row, directly under it. |

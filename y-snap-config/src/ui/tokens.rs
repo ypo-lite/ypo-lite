@@ -66,6 +66,8 @@ pub mod size {
     /// A reservation, not a size the button is forced to — forcing 32px is
     /// what cropped the icons.
     pub const ICON_BUTTON: f64 = 44.0;
+    /// One emoji button in the icon picker.
+    pub const ICON_CHOICE: f64 = 48.0;
     /// The colour bar of a palette swatch.
     pub const SWATCH_HEIGHT: f64 = 24.0;
     /// Border thickness of cards, table rules and keycaps.

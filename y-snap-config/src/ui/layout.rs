@@ -104,19 +104,28 @@ impl From<Stack> for View {
 /// grid share one column width, so labels of different lengths never make
 /// their fields different widths.
 ///
-/// Never more columns than items: three gesture cards on a wide window are
-/// three wide cards, not three narrow ones and two empty slots.
+/// Never more columns than items (unless [`AutoGrid::keep_columns`]): three
+/// gesture cards on a wide window are three wide cards, not three narrow
+/// ones and two empty slots.
 pub struct AutoGrid {
     min_item_width: f64,
     max_columns: usize,
     column_gap: f64,
     row_gap: f64,
+    fill_row: bool,
     items: Vec<(Key, View)>,
 }
 
 impl AutoGrid {
     pub fn new(min_item_width: f64) -> Self {
-        Self { min_item_width, max_columns: 12, column_gap: space::M, row_gap: space::M, items: Vec::new() }
+        Self {
+            min_item_width,
+            max_columns: 12,
+            column_gap: space::M,
+            row_gap: space::M,
+            fill_row: true,
+            items: Vec::new(),
+        }
     }
 
     pub fn max_columns(mut self, columns: usize) -> Self {
@@ -130,9 +139,20 @@ impl AutoGrid {
         self
     }
 
+    /// Keep the column count the width allows even when there are fewer
+    /// items than columns, instead of stretching the few items across the
+    /// row — for a grid of same-size buttons whose item count varies (the
+    /// icon picker's search results): two results stay two key-sized
+    /// buttons, not two half-width ones.
+    pub fn keep_columns(mut self) -> Self {
+        self.fill_row = false;
+        self
+    }
+
     /// How many columns `count` items get in `viewport`.
     pub fn columns_for(&self, viewport: Viewport, count: usize) -> usize {
-        viewport.columns(self.min_item_width, self.column_gap, self.max_columns).min(count.max(1))
+        let columns = viewport.columns(self.min_item_width, self.column_gap, self.max_columns);
+        if self.fill_row { columns.min(count.max(1)) } else { columns }
     }
 
     /// The viewport each of `count` items will get — for items whose own

@@ -1,0 +1,46 @@
+# y-snap-config roadmap
+
+Gaps found by auditing the app against everything `y-snap.xml` can hold
+(`y-snap/src/config.rs`) and against how `y-snap` picks up a saved file. Every
+section of the file has a screen; what's left is below, in the order to do it.
+
+Status: ⬜ todo · 🔨 in progress · ✅ done (verify live where noted)
+
+## 1. Data safety: saving must not lose anything silently
+
+Save regenerates the whole file from `Settings` (`Settings::to_xml`). Anything
+`Settings` doesn't hold is gone after the first save.
+
+| # | Item | Status | Notes |
+|---|---|---|---|
+| 1.1 | **Show load warnings.** | ✅ | `Settings::load` skips broken entries (unknown action, bad combo, action not allowed in `<minbutton>`, unknown attribute) and records a warning, but the app never showed them, so the first save dropped those entries from the file without a word. Now: a closable warning banner above every screen listing them, and the status line warns that saving will drop them. After a successful save the list is cleared: the file no longer contains those entries. |
+| 1.2 | **Keep `theme="auto"` across saves.** | ✅ (`y-snap` change) | `to_xml` used to write all ten colours resolved at load time instead of the theme. The shipped file is `auto`, so the first save stopped the overlay following light/dark mode. Now `Overlay` keeps its `theme` and the palette that theme produced (`theme_palette`), and `to_xml` writes `theme` plus only the colours that differ from it. Palette tab: Theme dropdown (auto/light/dark; switching resets colours to the theme) and a "N colours customised" note with a reset. |
+| 1.3 | **Say that comments and formatting aren't kept.** | ✅ | By design (`to_xml` is a generator). Stated in the Save button's tooltip. |
+
+## 2. From the app to a running y-snap
+
+| # | Item | Status | Notes |
+|---|---|---|---|
+| 2.1 | **Apply on save.** | ⬜ | `y-snap` doesn't watch the file; the user has to pick "Reload configuration" in the tray. Preferred: after a successful save, find `y-snap`'s window and post it the reload command (needs a small agreed message or class name in `y-snap`/`y-core`). Minimum: status says "Saved — reload y-snap to apply". |
+| 2.2 | **Tray "Open configuration" launches this app.** | ⬜ | Today it `ShellExecute`s the XML into the default editor. Launch `y-snap-config.exe` from next to `y-snap.exe`, falling back to the XML when it's absent. |
+
+## 3. Settings with no editor yet (round-trip untouched today)
+
+| # | Item | Status | Notes |
+|---|---|---|---|
+| 3.1 | Overlay text: `key-font-size`, `label-font-size`, `icon-font`, `icon-font-size` | ⬜ | A "Text" group on the Layout tab; the preview already reads them. `icon-font` as free text with the common choices (Segoe UI Emoji, Segoe Fluent Icons). |
+| 3.2 | Tile `label-on` | ⬜ | In the tile editor, only for actions with a toggle state (maximize, on top, borderless, fade, roll up, hide, pin). |
+| 3.3 | Rename a group | ⬜ | Rename in place, rewriting every tile's `group` reference in the same message. |
+
+## 4. Quality of life
+
+| # | Item | Status | Notes |
+|---|---|---|---|
+| 4.1 | Reorder hotkeys, overlay tiles, popup tiles | ⬜ | Tile order is display order in both popups. Move up/down icon buttons in the actions column; close the editor first, like delete does. |
+| 4.2 | Conflict warnings | ⬜ | Same combo bound twice; two overlay tiles on one key. Inline on the row (a warning icon with a tooltip), not blocking. |
+
+## Not planned
+
+- Live key capture (decided: picker only, no keyboard hook).
+- Preserving comments/formatting: would need an XML editor rather than a generator; out of proportion for a settings app.
+- Fluent icon glyphs in the icon picker: nothing in `windows-reactor` can render them (no font choice on `TextBlock`).

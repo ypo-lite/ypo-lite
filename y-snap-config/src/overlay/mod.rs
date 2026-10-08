@@ -19,6 +19,7 @@ pub mod palette;
 pub mod preview;
 pub mod tiles;
 
+use crate::icon_picker::IconPickerUi;
 use crate::key_picker::KeyPickerUi;
 use crate::ui::prelude::*;
 use crate::{ConfigApp, Msg};
@@ -109,6 +110,7 @@ pub fn overlay_view(
     overlay: &Overlay,
     state: OverlayState,
     picker: &KeyPickerUi,
+    icons: &IconPickerUi,
     viewport: Viewport,
     context: &ViewContext<ConfigApp>,
 ) -> View {
@@ -119,7 +121,7 @@ pub fn overlay_view(
         OverlaySection::Layout => layout::layout_tab(overlay, editor_viewport, context),
         OverlaySection::Palette => palette::palette_tab(overlay, state.editing_palette, editor_viewport, context),
         OverlaySection::Groups => groups::groups_tab(overlay, editor_viewport, context),
-        OverlaySection::Tiles => tiles::tiles_tab(overlay, state.editing_tile, picker, editor_viewport, context),
+        OverlaySection::Tiles => tiles::tiles_tab(overlay, state.editing_tile, picker, icons, editor_viewport, context),
     };
 
     let editor = Stack::vertical(space::L)

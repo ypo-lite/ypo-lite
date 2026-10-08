@@ -10,6 +10,7 @@
 //! changed, fits the editor pane and reads like the popup it configures.
 
 use super::OVERLAY_ACTIONS;
+use crate::icon_picker::{IconPickerUi, icon_field, icon_picker};
 use crate::key_picker::{KeyPickerUi, key_picker};
 use crate::keys;
 use crate::ui::prelude::*;
@@ -34,6 +35,7 @@ pub fn tiles_tab(
     overlay: &Overlay,
     editing: Option<usize>,
     picker: &KeyPickerUi,
+    icons: &IconPickerUi,
     viewport: Viewport,
     context: &ViewContext<ConfigApp>,
 ) -> View {
@@ -41,8 +43,8 @@ pub fn tiles_tab(
     let detail_viewport = table.detail_viewport(viewport).inset(CARD_INSET);
 
     let rows = overlay.items.iter().enumerate().map(|(index, item)| {
-        let detail =
-            (editing == Some(index)).then(|| tile_editor(index, item, overlay, picker, detail_viewport, context));
+        let detail = (editing == Some(index))
+            .then(|| tile_editor(index, item, overlay, picker, icons, detail_viewport, context));
         Row::new(index.to_string(), cells(index, item, editing == Some(index), context)).detail(detail)
     });
 
@@ -93,6 +95,7 @@ fn tile_editor(
     item: &Item,
     overlay: &Overlay,
     picker: &KeyPickerUi,
+    icons: &IconPickerUi,
     viewport: Viewport,
     context: &ViewContext<ConfigApp>,
 ) -> View {
@@ -128,13 +131,11 @@ fn tile_editor(
         )
         .item(
             "icon",
-            field(
-                "Icon",
-                text_box(
-                    item.icon.clone().unwrap_or_default(),
-                    "A glyph or emoji",
-                    context.callback(move |t| Msg::OverlayItemIconChanged(index, t)),
-                ),
+            icon_field(
+                item.icon.as_deref(),
+                icons.open,
+                context.callback(move |t| Msg::OverlayItemIconChanged(index, t)),
+                context,
             ),
         )
         .item(
@@ -167,7 +168,13 @@ fn tile_editor(
 
     editor(
         format!("Tile — {}", item.label.as_deref().unwrap_or(item.action.name())),
-        Stack::vertical(space::XL).child("fields", fields.build(viewport)).child("key", key),
+        Stack::vertical(space::XL)
+            .child("fields", fields.build(viewport))
+            .maybe(
+                "icon-picker",
+                icons.open.then(|| icon_picker(item.icon.as_deref(), item.action, icons, viewport, context)),
+            )
+            .child("key", key),
         context.callback(|()| Msg::EditorClosed(EditorClose::Revert)),
         context.callback(|()| Msg::EditorClosed(EditorClose::Keep)),
     )

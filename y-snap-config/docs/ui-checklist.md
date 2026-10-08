@@ -54,6 +54,7 @@ Overlay `Split`, down to `shell::MIN_WINDOW` (560×440).
 | 3 | Swatches are equal width; the open one is marked | ✅ | `AutoGrid::new(96).max_columns(5)`; Accent style on the open swatch. |
 | 4 | Groups fit the pane | ✅ | `Table` → cards below its minimum. |
 | 5 | Tiles are scannable and fit the pane | ✅ | Compact list (key, icon, label + action, group) with the full editor per row. |
+| 5b | Tile icons are choosable without knowing Win + . | ✅ | Same shared `icon_picker` as the Minimize-button tiles (see there). |
 | 6 | The preview never overflows its pane | ✅ | Scales tiles, gaps and fonts by one factor, shown as "Live · 72%" when scaled. |
 | 7 | The preview matches the real popup | 👁 | Panel = `back` at `alpha` + `panel_border`; tiles on `back`, no stroke, radius `min(corner_radius, 6)` (as `ActionOverlay::paint`). No hover/active states. |
 | 8 | The ColorPicker fits the editor pane | 👁 | Palette tab minimum is 360px, assumed ≥ the picker's natural width. Confirm. |
@@ -67,6 +68,7 @@ Overlay `Split`, down to `shell::MIN_WINDOW` (560×440).
 | 3 | Opening the screen doesn't mark it dirty | 👁 | Delay and right-click handlers ignore a value equal to the current one, since WinUI reports a value on first render. Check "Unsaved changes" doesn't appear just from opening the screen. |
 | 4 | Only valid actions offered | ✅ | `y_snap::config::is_minbutton_action`, now public, the same rule the loader uses; test-pinned. |
 | 5 | Tiles listed and edited in place | ✅ | `Table` + per-row `editor`, as on the Overlay Tiles tab. |
+| 7 | Icons are choosable without knowing Win + . | 👁 | Shared `icon_picker`: suggestions for the action, keyword search, categories, Win + . hint. New tiles and action changes fill in a suggested icon unless one was picked by hand. Check that the emoji render in colour in the picker buttons. |
 | 6 | Preview matches the real popup | 👁 | One row of 72×40 tiles, 18px glyph (icon, else label, else "?"), overlay `back`+`alpha`, corner radius; centred under the minimize button (as `MinOverlay::show`), clamped to the stage. |
 
 ## Cross-cutting

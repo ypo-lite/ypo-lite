@@ -62,4 +62,5 @@ Each is also noted in the code where it happens.
 - **Not editable yet**: `label-on`, the icon font and its size, the label font
   size and `theme`. These round-trip through `Settings::save()` untouched. New
   groups get a `group-N` id that can't be renamed in the UI.
+- **Icons have a picker** (emoji only: suggestions per action, search, categories) beside the free-text field. Fluent icon glyphs aren't offered, because nothing here can render them (`TextBlock` has no font choice in this crate).
 - **Minimize-button preview** is a stub title bar with the popup under its minimize button, scaled to fit. The mock's slider gained a number box beside it for exact values.
