@@ -21,7 +21,7 @@ Save regenerates the whole file from `Settings` (`Settings::to_xml`). Anything
 
 | # | Item | Status | Notes |
 |---|---|---|---|
-| 2.1 | **Apply on save.** | ⬜ | `y-snap` doesn't watch the file; the user has to pick "Reload configuration" in the tray. Preferred: after a successful save, find `y-snap`'s window and post it the reload command (needs a small agreed message or class name in `y-snap`/`y-core`). Minimum: status says "Saved — reload y-snap to apply". |
+| 2.1 | **Apply on save.** | ✅ (verify live) | After a successful save the app checks whether y-snap is running (its single-instance mutex, `y_core::single_instance::is_running`) and, if so, broadcasts the registered `YpoLite.YSnap.Reload` message (`y_snap::ipc`); y-snap reloads on it. Status: "Saved and applied — y-snap is reloading it" or "Saved — y-snap isn't running; it'll use these settings when it starts". A broken file is still reported by y-snap's own notification. Not handled: a y-snap running elevated (UIPI blocks the message); it doesn't run elevated today. |
 | 2.2 | **Tray "Open configuration" launches this app.** | ⬜ | Today it `ShellExecute`s the XML into the default editor. Launch `y-snap-config.exe` from next to `y-snap.exe`, falling back to the XML when it's absent. |
 
 ## 3. Settings with no editor yet (round-trip untouched today)

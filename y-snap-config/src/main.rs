@@ -67,6 +67,9 @@ struct ConfigApp {
     /// Whether the user closed the load-warnings banner. Reset by Reload;
     /// the warnings themselves live in `Settings::warnings`.
     warnings_dismissed: bool,
+    /// After the last successful save: whether a running y-snap was asked to
+    /// reload it (`Some(true)`), or none was running (`Some(false)`).
+    applied: Option<bool>,
     /// The one open inline editor, if any, with its Cancel snapshot.
     editing: Option<Editing>,
     /// The key picker's own state (category tab, search text) — shared by
@@ -221,6 +224,7 @@ impl Component for ConfigApp {
             dirty: false,
             save_error: None,
             warnings_dismissed: false,
+            applied: None,
             editing: None,
             key_picker: KeyPickerUi::default(),
             icon_picker: IconPickerUi::default(),
@@ -245,6 +249,7 @@ impl Component for ConfigApp {
                 self.dirty = false;
                 self.save_error = None;
                 self.warnings_dismissed = false;
+                self.applied = None;
             }
             message => self.edit(message),
         }
@@ -363,7 +368,11 @@ impl Component for ConfigApp {
                 false,
             ),
             None if self.dirty => ("Unsaved changes".to_owned(), true),
-            None => (summary(settings), true),
+            None => match self.applied {
+                Some(true) => ("Saved and applied — y-snap is reloading it".to_owned(), true),
+                Some(false) => ("Saved — y-snap isn't running; it'll use these settings when it starts".to_owned(), true),
+                None => (summary(settings), true),
+            },
         };
         let bar = shell::action_bar(
             &status,
@@ -759,6 +768,9 @@ impl ConfigApp {
                     self.save_error = None;
                     // What they described is no longer in the file.
                     settings.warnings.clear();
+                    // No file watching in y-snap: tell it, so the change
+                    // applies now rather than at the next tray "Reload".
+                    self.applied = Some(y_snap::ipc::request_reload());
                 }
                 Err(error) => self.save_error = Some(error.to_string()),
             },

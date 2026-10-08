@@ -20,6 +20,7 @@ mod window;
 // instead, so `y-snap-config` can read and write `Settings` too — see there.
 use y_snap::action;
 use y_snap::config;
+use y_snap::ipc;
 
 use windows::Win32::UI::{
     Shell::ShellExecuteW,
@@ -42,7 +43,7 @@ use crate::action::Action;
 use crate::actions::Status;
 use crate::config::Settings;
 
-const APP: AppInfo = AppInfo::new("Y-Snap", "YpoLite.YSnap").single_instance();
+const APP: AppInfo = AppInfo::new("Y-Snap", ipc::CLASS).single_instance();
 
 const IDM_RELOAD: u32 = IDM_FIRST;
 const IDM_OPEN_CONFIG: u32 = IDM_FIRST + 1;
@@ -70,6 +71,9 @@ struct YSnap {
     /// Why there is no configuration, when there is none. Shown in the menu,
     /// because a balloon at start-up is gone by the time the user looks.
     problem: Option<String>,
+    /// [`ipc::reload_message`]'s id, looked up once: `y-snap-config` sends
+    /// it after saving, so a change applies without the tray menu.
+    reload_message: u32,
 }
 
 impl YSnap {
@@ -82,6 +86,7 @@ impl YSnap {
             action_overlay: None,
             settings: None,
             problem: None,
+            reload_message: ipc::reload_message(),
         }
     }
 
@@ -526,6 +531,12 @@ impl TrayApp for YSnap {
 
             overlay::WM_OVERLAY_HOVER => {
                 self.on_overlay_hover(wparam.0);
+                Some(LRESULT(0))
+            }
+            // Registered at run time, so a guard rather than a constant pattern;
+            // 0 means registration failed, and 0 is also `WM_NULL`.
+            msg if msg != 0 && msg == self.reload_message => {
+                self.load(hwnd);
                 Some(LRESULT(0))
             }
 

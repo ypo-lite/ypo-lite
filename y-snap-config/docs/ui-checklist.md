@@ -22,6 +22,7 @@ Overlay `Split`, down to `shell::MIN_WINDOW` (560×440).
 | 5 | Window can't be resized below what the layout supports | 👁 | `WindowConstraints` min 560×440. |
 | 6 | Save is the visually primary action | ✅ | Accent style, disabled when nothing changed. Tooltip says comments and formatting aren't kept. |
 | 7 | Parts of the file that failed to load are shown before a save can drop them | 👁 | `shell::warnings_banner` (an `InfoBar`) above every screen, closable; status turns red ("saving drops what couldn't be read") while there are unsaved changes. Check how a long list wraps. |
+| 8 | A save applies to the running y-snap | 👁 | `y_snap::ipc::request_reload` after save; status says whether y-snap was running. Check: edit a hotkey, Save, use it straight away without touching the tray. |
 
 ## Hotkeys (`hotkeys.rs`)
 

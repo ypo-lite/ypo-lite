@@ -7,7 +7,7 @@
 //! through.
 
 use windows::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, HANDLE, LPARAM, WPARAM};
-use windows::Win32::System::Threading::CreateMutexW;
+use windows::Win32::System::Threading::{CreateMutexW, OpenMutexW, SYNCHRONIZATION_SYNCHRONIZE};
 use windows::Win32::UI::WindowsAndMessaging::{HWND_BROADCAST, PostMessageW};
 use windows::core::{Error, HSTRING, PCWSTR, Result};
 
@@ -39,6 +39,24 @@ impl SingleInstance {
     }
 }
 
+/// Whether some process currently holds the single-instance mutex `name` —
+/// i.e. whether that application is running in this logon session. For a
+/// *different* program asking about it (a settings app checking for the
+/// tray app it configures); never claims the mutex itself.
+///
+/// Opening rather than creating, so asking can't accidentally become the
+/// instance. `SYNCHRONIZE` is the least access `OpenMutexW` accepts.
+pub fn is_running(name: &str) -> bool {
+    let name = HSTRING::from(format!("Local\\{name}"));
+    match unsafe { OpenMutexW(SYNCHRONIZATION_SYNCHRONIZE, false, PCWSTR(name.as_ptr())) } {
+        Ok(handle) => {
+            let _ = unsafe { CloseHandle(handle) };
+            true
+        }
+        Err(_) => false,
+    }
+}
+
 impl Drop for SingleInstance {
     fn drop(&mut self) {
         let _ = unsafe { CloseHandle(self.handle) };
@@ -64,5 +82,23 @@ pub fn broadcast_message(name: &str) -> u32 {
     let name = HSTRING::from(name);
     unsafe {
         windows::Win32::UI::WindowsAndMessaging::RegisterWindowMessageW(PCWSTR(name.as_ptr()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_running_follows_whoever_holds_the_mutex() {
+        // Unique per run, so a parallel test run can't hold it already.
+        let name = format!("YpoLite.Test.IsRunning.{}", std::process::id());
+        assert!(!is_running(&name));
+
+        let guard = SingleInstance::acquire(&name).expect("creates").expect("first holder");
+        assert!(is_running(&name));
+
+        drop(guard);
+        assert!(!is_running(&name));
     }
 }
