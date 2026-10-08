@@ -1,0 +1,1332 @@
+<title>y-pop Config</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+  /* Layout: same shell as y-snap-config's mock (nav rail + scrolling page + action bar);
+     the tray-menu screen is a tree | inspector split that stacks below ~860px of content. */
+  :root{
+    --paper:#F3F5F9; --surface:#FFFFFF; --surface-2:#EAEDF3; --ink:#191C22; --muted:#5B6270;
+    --line:#DCE0E9; --accent:#4C5FD5; --accent-ink:#FFFFFF; --accent-soft:#E9EBFB;
+    --ok:#1E8E5A; --ok-soft:#E4F5EC; --warn:#B7791F; --warn-soft:#FBF1DF; --danger:#C4433A; --danger-soft:#FBEAE8;
+    --focus:#4C5FD5; --stage-bg:#242833;
+    --shadow:0 1px 2px rgba(20,22,30,.06),0 8px 24px -12px rgba(20,22,30,.18);
+    --radius:10px; --radius-sm:6px;
+    --f-display:"Manrope","Segoe UI",system-ui,sans-serif;
+    --f-body:"Inter","Segoe UI",system-ui,sans-serif;
+    --f-mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --paper:#14161B; --surface:#1C1F27; --surface-2:#242833; --ink:#E8EAF0; --muted:#9199AC; --line:#2B2F3A;
+      --accent:#7B87F5; --accent-ink:#12131A; --accent-soft:#262A45; --ok:#4FCB8C; --ok-soft:#173327;
+      --warn:#E3AC53; --warn-soft:#3A2E15; --danger:#E8695F; --danger-soft:#3B1F1D; --stage-bg:#0E1015;
+      --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px -14px rgba(0,0,0,.6); color-scheme:dark;
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#14161B; --surface:#1C1F27; --surface-2:#242833; --ink:#E8EAF0; --muted:#9199AC; --line:#2B2F3A;
+    --accent:#7B87F5; --accent-ink:#12131A; --accent-soft:#262A45; --ok:#4FCB8C; --ok-soft:#173327;
+    --warn:#E3AC53; --warn-soft:#3A2E15; --danger:#E8695F; --danger-soft:#3B1F1D; --stage-bg:#0E1015;
+    --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px -14px rgba(0,0,0,.6); color-scheme:dark;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;}
+  body{background:var(--paper); color:var(--ink); font-family:var(--f-body); -webkit-font-smoothing:antialiased;}
+  h1,h2,h3,.nav-label,.brand,button{font-family:var(--f-display);}
+  code,.mono{font-family:var(--f-mono);}
+  h1,h2,h3{text-wrap:balance;}
+  button{font:inherit; cursor:pointer; color:inherit;}
+  button:focus-visible,input:focus-visible,select:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--focus); outline-offset:1px;}
+
+  /* ---------- stage (this mock's own chrome) ---------- */
+  .stage{min-height:100%; display:flex; flex-direction:column; align-items:center; padding-block:24px 40px; padding-inline:16px; gap:14px;}
+  .stage-head{width:100%; max-width:1240px; display:flex; align-items:flex-end; justify-content:space-between; gap:16px; flex-wrap:wrap;}
+  .stage-head h1{font-size:15px; font-weight:700; margin:0;}
+  .stage-head p{margin:3px 0 0; font-size:12.5px; color:var(--muted); max-width:70ch; line-height:1.5;}
+  .seg{display:inline-flex; gap:2px; padding:3px; background:var(--surface-2); border:1px solid var(--line); border-radius:999px;}
+  .seg button{border:0; background:transparent; color:var(--muted); font-size:11.5px; font-weight:600; padding:5px 12px; border-radius:999px;}
+  .seg button.is-active{background:var(--surface); color:var(--ink); box-shadow:var(--shadow);}
+  .seg button:disabled{opacity:.45; cursor:not-allowed;}
+
+  /* ---------- simulated window ---------- */
+  .window{width:100%; max-width:1240px; height:min(820px,88dvh); min-height:520px; background:var(--surface); border:1px solid var(--line);
+    border-radius:12px; box-shadow:var(--shadow); overflow:hidden; display:flex; flex-direction:column;}
+  .titlebar{height:40px; flex:0 0 auto; display:flex; align-items:center; justify-content:space-between; padding:0 8px 0 14px; border-bottom:1px solid var(--line);}
+  .brand{display:flex; align-items:center; gap:8px; font-size:12.5px; font-weight:700; color:var(--muted);}
+  .brand .glyph{width:16px; height:16px; border-radius:4px; background:var(--accent); display:grid; place-items:center; color:var(--accent-ink); font-size:10px; font-weight:800;}
+  .capbtns{display:flex; color:var(--muted);}
+  .capbtns span{width:28px; height:28px; display:grid; place-items:center;}
+  .capbtns svg{width:10px; height:10px;}
+  .body{flex:1 1 auto; display:flex; min-height:0;}
+
+  /* ---------- nav rail ---------- */
+  .rail{width:210px; flex:0 0 auto; background:var(--surface-2); border-right:1px solid var(--line); display:flex; flex-direction:column; padding:12px 10px; gap:2px; overflow-y:auto;}
+  .nav-label{font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); padding:10px 10px 5px;}
+  .rail button{all:unset; display:flex; align-items:center; gap:9px; padding:7px 10px; border-radius:var(--radius-sm); font-family:var(--f-display); font-size:13px; font-weight:600; cursor:pointer; min-width:0;}
+  .rail button .lbl{white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1; min-width:0;}
+  .rail button .sub{font-family:var(--f-mono); font-size:10px; color:var(--muted); font-weight:500;}
+  .rail button:hover{background:var(--surface);}
+  .rail button.is-active{background:var(--accent-soft); color:var(--accent);}
+  .rail button:focus-visible{outline:2px solid var(--focus);}
+  .rail .new{color:var(--accent);}
+  .rail .sym{width:18px; height:18px; flex:0 0 auto; display:grid; place-items:center; color:var(--muted);}
+  .rail button.is-active .sym{color:var(--accent);}
+  .rail .sym svg{width:15px; height:15px;}
+  .rail-foot{margin-top:auto; padding:10px; font-size:11px; color:var(--muted); line-height:1.5;}
+  .rail-foot .mono{display:block; font-size:10px; word-break:break-all; margin-top:3px;}
+  @media (max-width:760px){
+    .rail{width:52px; padding:10px 6px;}
+    .rail .lbl,.rail .sub,.rail .nav-label,.rail-foot{display:none;}
+    .rail button{justify-content:center; padding:8px 0;}
+  }
+
+  /* ---------- content ---------- */
+  .content{flex:1 1 auto; min-width:0; display:flex; flex-direction:column; min-height:0; container-type:inline-size;}
+  .page{flex:1 1 auto; min-height:0; overflow-y:auto; padding:20px 24px 24px;}
+  .page h2{font-size:17px; margin:0 0 3px; display:flex; align-items:center; gap:10px;}
+  .lede{font-size:12.5px; color:var(--muted); margin:0 0 16px; max-width:72ch; line-height:1.55;}
+  .section-title{font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.07em; color:var(--muted); margin:18px 0 8px; font-family:var(--f-display);}
+  .section-title:first-child{margin-top:0;}
+  .note{font-size:11.5px; color:var(--muted); line-height:1.55; background:var(--surface-2); border-radius:var(--radius-sm); padding:9px 11px; margin-top:10px;}
+  .note b{color:var(--ink);}
+  .banner{display:flex; gap:10px; align-items:flex-start; background:var(--warn-soft); color:var(--ink); border:1px solid color-mix(in srgb,var(--warn) 35%,transparent); border-radius:var(--radius-sm); padding:9px 12px; font-size:12px; margin-bottom:14px; line-height:1.5;}
+  .banner b{color:var(--warn);}
+
+  /* ---------- controls ---------- */
+  .btn{border-radius:var(--radius-sm); border:1px solid var(--line); background:var(--surface); padding:6px 12px; font-size:12.5px; font-weight:600; display:inline-flex; align-items:center; gap:6px; white-space:nowrap;}
+  .btn:hover{background:var(--surface-2);}
+  .btn.primary{background:var(--accent); border-color:var(--accent); color:var(--accent-ink);}
+  .btn.ghost{border-color:transparent; background:transparent;}
+  .btn.ghost:hover{background:var(--surface-2);}
+  .btn.sm{padding:4px 9px; font-size:11.5px;}
+  .btn svg{width:13px; height:13px;}
+  .btn:disabled{opacity:.4; cursor:not-allowed;}
+  .icon-btn{all:unset; width:26px; height:26px; display:grid; place-items:center; border-radius:6px; color:var(--muted); cursor:pointer; flex:0 0 auto;}
+  .icon-btn:hover{background:var(--surface-2); color:var(--ink);}
+  .icon-btn:disabled{opacity:.3; cursor:not-allowed;}
+  .icon-btn svg{width:14px; height:14px;}
+  .icon-btn:focus-visible{outline:2px solid var(--focus);}
+  input[type=text],input[type=number],select,.input{font:inherit; font-size:12.5px; border:1px solid var(--line); border-radius:var(--radius-sm); background:var(--surface); color:var(--ink); padding:5px 8px; width:100%; min-width:0;}
+  input.mono{font-size:11.5px;}
+  .field{display:flex; flex-direction:column; gap:4px; min-width:0;}
+  .field > label,.field > .lab{font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); font-family:var(--f-display);}
+  .field .hint{font-size:11px; color:var(--muted); line-height:1.45;}
+  .grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:10px 12px;}
+  .grid .span2{grid-column:span 2;}
+  .grid .full{grid-column:1/-1;}
+  @container (max-width:520px){ .grid .span2{grid-column:1/-1;} }
+  .with-btn{display:flex; gap:6px; min-width:0;}
+  .with-btn > input{flex:1;}
+  .resolved{font-family:var(--f-mono); font-size:10.5px; color:var(--muted); display:flex; gap:6px; align-items:center; word-break:break-all;}
+  .resolved .ok{color:var(--ok);} .resolved .bad{color:var(--danger);}
+  .switch-row{display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 0; border-bottom:1px solid var(--line); font-size:12.5px;}
+  .switch-row:last-child{border-bottom:0;}
+  .switch-row .t{display:flex; flex-direction:column; gap:2px; min-width:0;}
+  .switch-row .t small{color:var(--muted); font-size:11px; line-height:1.4;}
+  .switch{all:unset; width:34px; height:18px; border-radius:999px; background:var(--line); position:relative; flex:0 0 auto; cursor:pointer;}
+  .switch::after{content:""; position:absolute; top:3px; left:3px; width:12px; height:12px; border-radius:50%; background:var(--surface); transition:left .12s;}
+  .switch.on{background:var(--accent);}
+  .switch.on::after{left:19px;}
+  .switch:focus-visible{outline:2px solid var(--focus); outline-offset:2px;}
+  .tri{display:inline-flex; border:1px solid var(--line); border-radius:var(--radius-sm); overflow:hidden; flex:0 0 auto;}
+  .tri button{border:0; background:transparent; font-size:11px; font-weight:600; padding:4px 9px; color:var(--muted);}
+  .tri button + button{border-left:1px solid var(--line);}
+  .tri button.is-active{background:var(--accent-soft); color:var(--accent);}
+  .keycap{display:inline-flex; align-items:center; font-family:var(--f-mono); font-size:11px; font-weight:500; background:var(--surface-2); border:1px solid var(--line); border-bottom-width:2px; padding:1px 6px; border-radius:5px;}
+  .keys{display:inline-flex; gap:3px; align-items:center; color:var(--muted); font-size:11px;}
+  .chip{font-size:11px; font-weight:600; padding:3px 9px; border-radius:999px; border:1px solid var(--line); color:var(--muted); background:var(--surface); white-space:nowrap;}
+  .chip.on{background:var(--accent-soft); border-color:var(--accent); color:var(--accent);}
+  .chip:hover{border-color:var(--accent);}
+  .badge{font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; padding:2px 7px; border-radius:999px; background:var(--surface-2); color:var(--muted); font-family:var(--f-display);}
+  .badge.example{background:var(--warn-soft); color:var(--warn);}
+
+  /* ---------- fake app icons ---------- */
+  .ico{--h:210; width:18px; height:18px; border-radius:5px; flex:0 0 auto; display:inline-grid; place-items:center;
+    background:linear-gradient(160deg,hsl(var(--h) 70% 60%),hsl(var(--h) 65% 42%)); color:#fff; font-size:10px; font-weight:800; font-family:var(--f-display); line-height:1;}
+  .ico.lg{width:34px; height:34px; border-radius:8px; font-size:16px;}
+  .ico.folder{background:none; color:hsl(42 92% 52%);}
+  .ico.folder svg{width:100%; height:100%;}
+  .ico.sys{--h:220; background:linear-gradient(160deg,hsl(220 12% 62%),hsl(220 12% 45%));}
+
+  /* ---------- tray-menu screen: split ---------- */
+  .split{display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.08fr); gap:18px; align-items:start;}
+  @container (max-width:860px){ .split{grid-template-columns:minmax(0,1fr);} }
+  .pane{border:1px solid var(--line); border-radius:var(--radius); background:var(--surface); min-width:0;}
+  .pane-head{display:flex; align-items:center; gap:6px; padding:8px 8px 8px 12px; border-bottom:1px solid var(--line); flex-wrap:wrap;}
+  .pane-head .title{font-family:var(--f-display); font-weight:700; font-size:12.5px; margin-right:auto;}
+  .toolbar{display:flex; gap:4px; flex-wrap:wrap; padding:8px; border-bottom:1px solid var(--line); position:relative;}
+  .menu-pop{position:absolute; z-index:5; top:calc(100% + 4px); background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-sm); box-shadow:var(--shadow); padding:4px; display:flex; flex-direction:column; min-width:200px;}
+  .menu-pop button{all:unset; padding:6px 10px; border-radius:5px; font-size:12.5px; cursor:pointer; display:flex; gap:8px; align-items:center; font-family:var(--f-body);}
+  .menu-pop button small{color:var(--muted); margin-left:auto; font-size:11px;}
+  .menu-pop button:hover,.menu-pop button:focus-visible{background:var(--surface-2);}
+
+  /* tree */
+  .tree{padding:6px; display:flex; flex-direction:column;}
+  .row{display:flex; align-items:center; gap:7px; min-height:30px; padding:0 8px 0 calc(8px + var(--d) * 20px); border-radius:6px; cursor:pointer; font-size:12.5px; position:relative; border:1px solid transparent;}
+  .row:hover{background:var(--surface-2);}
+  .row.sel{background:var(--accent-soft); border-color:color-mix(in srgb,var(--accent) 40%,transparent);}
+  .row .chev{all:unset; width:16px; height:16px; display:grid; place-items:center; color:var(--muted); cursor:pointer; flex:0 0 auto; border-radius:4px;}
+  .row .chev svg{width:10px; height:10px; transition:transform .12s;}
+  .row .chev.open svg{transform:rotate(90deg);}
+  .row .chev:focus-visible{outline:2px solid var(--focus);}
+  .row .spacer{width:16px; flex:0 0 auto;}
+  .row .nm{flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .row .nm.dim{color:var(--muted); font-style:italic;}
+  .row.group > .nm{font-weight:600;}
+  .row .meta{display:flex; gap:5px; align-items:center; color:var(--muted); font-size:10.5px; flex:0 0 auto;}
+  .row .warn-dot{color:var(--warn); font-weight:700;}
+  .row.sep .rule{flex:1; height:1px; background:var(--line);}
+  .row.sep .septitle{font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.07em; color:var(--muted); font-family:var(--f-display);}
+  .row.brk .rule{flex:1; border-top:1.5px dashed var(--line);}
+  .row.brk .septitle{font-size:10.5px; color:var(--muted);}
+  .row.cmt{color:var(--muted); font-style:italic; font-size:12px; align-items:flex-start; padding-top:5px; padding-bottom:5px; min-height:26px;}
+  .row.cmt .nm{white-space:nowrap;}
+  .row.cmt .cglyph{font-family:var(--f-mono); font-style:normal; font-size:10.5px; font-weight:600; width:18px; flex:0 0 auto; text-align:center; color:var(--ok); padding-top:1px;}
+  .row.cmt.attached{border-left:2px solid color-mix(in srgb,var(--ok) 45%,transparent); border-radius:0 6px 6px 0; margin-bottom:-1px;}
+  .row.cmt.disabled-item .cglyph{color:var(--warn);}
+  .cmark{all:unset; display:inline-flex; align-items:center; gap:2px; font-size:10px; font-weight:600; color:var(--ok); cursor:pointer; padding:1px 4px; border-radius:4px; font-style:normal;}
+  .cmark:hover{background:var(--ok-soft);}
+  .cmark svg{width:11px; height:11px;}
+  .cmark:focus-visible{outline:2px solid var(--focus);}
+  .ctoggle svg{width:13px; height:13px;}
+  .ctoggle{display:inline-flex; align-items:center; gap:7px; font-size:11.5px; font-weight:600; color:var(--muted); margin-left:auto; padding:0 4px;}
+  textarea{font-family:var(--f-mono); font-size:11.5px; line-height:1.55; border:1px solid var(--line); border-radius:var(--radius-sm); background:var(--surface); color:var(--ink); padding:8px 10px; width:100%; min-width:0; resize:vertical;}
+  .filenote{border:1px solid var(--line); border-left:3px solid color-mix(in srgb,var(--ok) 55%,transparent); border-radius:var(--radius-sm); padding:8px 10px; margin-bottom:8px;}
+  .filenote textarea{border:0; padding:0; background:transparent; color:var(--muted);}
+  .row.drop-into{outline:2px dashed var(--accent); outline-offset:-2px; background:var(--accent-soft);}
+  .row.drop-after::after{content:""; position:absolute; left:calc(8px + var(--d) * 20px); right:8px; bottom:-2px; height:2px; background:var(--accent); border-radius:2px;}
+  .row.flash{animation:flash 1.2s ease-out;}
+  @keyframes flash{from{background:color-mix(in srgb,var(--ok) 30%,transparent);} to{background:transparent;}}
+  .insert{display:flex; align-items:center; gap:6px; height:16px; padding-left:calc(10px + var(--d) * 20px); color:var(--accent); font-size:10px; font-weight:700; font-family:var(--f-display); letter-spacing:.04em; text-transform:uppercase;}
+  .insert::before{content:""; width:7px; height:7px; border-radius:50%; border:2px solid var(--accent); flex:0 0 auto;}
+  .insert::after{content:""; flex:1; height:2px; background:var(--accent); border-radius:2px; opacity:.55;}
+  .dropzone{margin:4px 8px 10px; border:1.5px dashed var(--line); border-radius:var(--radius-sm); padding:12px; text-align:center; font-size:12px; color:var(--muted); line-height:1.5;}
+  .dropzone.hot{border-color:var(--accent); background:var(--accent-soft); color:var(--accent);}
+  .dropzone .samples{display:flex; gap:5px; justify-content:center; flex-wrap:wrap; margin-top:8px;}
+  @media (prefers-reduced-motion:reduce){ .row.flash{animation:none;} .switch::after,.row .chev svg{transition:none;} }
+
+  /* app picker */
+  .picker{border-bottom:1px solid var(--line); background:var(--surface-2); padding:10px;}
+  .picker .tabs{display:flex; gap:4px; flex-wrap:wrap; margin-bottom:8px; align-items:center;}
+  .picker .list{max-height:250px; overflow-y:auto; background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-sm);}
+  .pick-row{display:flex; align-items:center; gap:8px; padding:6px 9px; font-size:12.5px; border-bottom:1px solid var(--line); cursor:pointer;}
+  .pick-row:last-child{border-bottom:0;}
+  .pick-row:hover{background:var(--surface-2);}
+  .pick-row input{accent-color:var(--accent); margin:0;}
+  .pick-row .t{flex:1; min-width:0; display:flex; flex-direction:column;}
+  .pick-row .t small{font-family:var(--f-mono); font-size:10px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .pick-row .already{font-size:10px; color:var(--muted); font-weight:600;}
+  .picker .foot{display:flex; justify-content:space-between; align-items:center; gap:8px; margin-top:8px; font-size:11.5px; color:var(--muted); flex-wrap:wrap;}
+
+  /* inspector */
+  .insp-head{display:flex; align-items:center; gap:10px; padding:12px; border-bottom:1px solid var(--line); flex-wrap:wrap;}
+  .insp-head .who{display:flex; flex-direction:column; min-width:0; flex:1;}
+  .insp-head .who b{font-family:var(--f-display); font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .insp-head .who small{color:var(--muted); font-size:11px;}
+  .movebar{display:flex; gap:1px; align-items:center; flex-wrap:wrap;}
+  .movebar .sep{width:1px; height:18px; background:var(--line); margin:0 4px;}
+  .insp-body{padding:4px 14px 14px;}
+  .origin{display:flex; gap:10px; align-items:flex-start; margin:12px 14px 0; padding:9px 11px; border-radius:var(--radius-sm); background:var(--ok-soft); font-size:12px; line-height:1.5;}
+  .origin .what{flex:1; min-width:0;}
+  .origin .alts{display:flex; gap:5px; flex-wrap:wrap; margin-top:6px;}
+  .targets{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px;}
+  .target{all:unset; border:1px solid var(--line); border-radius:var(--radius-sm); padding:8px 10px; cursor:pointer; display:flex; flex-direction:column; gap:2px; font-size:12px; font-weight:600; font-family:var(--f-display);}
+  .target small{font-weight:400; color:var(--muted); font-size:10.5px; font-family:var(--f-body);}
+  .target.on{border-color:var(--accent); background:var(--accent-soft); color:var(--accent);}
+  .target:focus-visible{outline:2px solid var(--focus);}
+  @container (max-width:480px){ .targets{grid-template-columns:1fr;} }
+  .icon-field{display:flex; align-items:center; gap:10px; border:1px solid var(--line); border-radius:var(--radius-sm); padding:8px 10px;}
+  .icon-field .t{flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; font-size:12px;}
+  .icon-field .t code{font-size:10.5px; color:var(--muted); word-break:break-all;}
+  .iconpicker{margin-top:8px; border:1px solid var(--line); border-radius:var(--radius-sm); padding:10px; background:var(--surface-2);}
+  .iconpicker .srcs{display:flex; gap:5px; flex-wrap:wrap; margin-bottom:8px;}
+  .icongrid{display:grid; grid-template-columns:repeat(auto-fill,minmax(44px,1fr)); gap:4px; max-height:170px; overflow-y:auto; padding:2px;}
+  .icongrid button{all:unset; display:flex; flex-direction:column; align-items:center; gap:3px; padding:6px 0 4px; border-radius:6px; cursor:pointer; border:1px solid transparent;}
+  .icongrid button:hover{background:var(--surface);}
+  .icongrid button.on{border-color:var(--accent); background:var(--accent-soft);}
+  .icongrid button small{font-family:var(--f-mono); font-size:9px; color:var(--muted);}
+  .icongrid button .ico{width:24px; height:24px; font-size:12px;}
+  .hk-list{display:flex; flex-direction:column; gap:6px;}
+  .hk{display:flex; align-items:center; gap:10px; font-size:12px; flex-wrap:wrap;}
+  .hk .keys{flex:1;}
+  .hk label{display:flex; gap:6px; align-items:center; color:var(--muted); font-size:11.5px;}
+  pre.xml{margin:0; font-family:var(--f-mono); font-size:11px; line-height:1.55; background:var(--surface-2); border-radius:var(--radius-sm); padding:10px 12px; overflow-x:auto; color:var(--ink);}
+  pre.xml .a{color:var(--accent);} pre.xml .v{color:var(--ok);}
+  details > summary{cursor:pointer; list-style:none;}
+  details > summary::-webkit-details-marker{display:none;}
+  details > summary.section-title::before{content:"▸ ";}
+  details[open] > summary.section-title::before{content:"▾ ";}
+
+  /* ---------- skin ---------- */
+  .themes{display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:10px;}
+  .theme-card{all:unset; border:1px solid var(--line); border-radius:var(--radius); padding:10px; cursor:pointer; display:flex; flex-direction:column; gap:8px; background:var(--surface);}
+  .theme-card.on{border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-soft);}
+  .theme-card:focus-visible{outline:2px solid var(--focus);}
+  .theme-card .nm{font-family:var(--f-display); font-weight:700; font-size:12.5px; display:flex; justify-content:space-between;}
+  .theme-card .nm small{font-weight:500; color:var(--muted); font-family:var(--f-body); font-size:10.5px;}
+  .theme-card .mini{border-radius:6px; overflow:hidden; pointer-events:none; font-size:10px;}
+  .skin-split{display:grid; grid-template-columns:minmax(0,1.1fr) minmax(0,1fr); gap:20px; align-items:start;}
+  @container (max-width:860px){ .skin-split{grid-template-columns:minmax(0,1fr);} }
+  .swatches{display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:8px;}
+  .swatch{display:flex; align-items:center; gap:8px; border:1px solid var(--line); border-radius:var(--radius-sm); padding:6px 8px; font-size:11.5px; position:relative; min-width:0;}
+  .swatch .chipc{width:22px; height:22px; border-radius:5px; border:1px solid var(--line); flex:0 0 auto; position:relative; overflow:hidden;}
+  .swatch .chipc input{position:absolute; inset:-4px; width:calc(100% + 8px); height:calc(100% + 8px); opacity:0; cursor:pointer;}
+  .swatch .t{flex:1; min-width:0; display:flex; flex-direction:column;}
+  .swatch .t code{font-size:10px; color:var(--muted);}
+  .swatch.inherit .t code{font-style:italic;}
+  .composite{border:1px solid var(--line); border-radius:var(--radius-sm); padding:8px 10px; margin-top:8px;}
+  .composite .head{display:flex; justify-content:space-between; align-items:center; font-size:12.5px; font-weight:600; gap:10px;}
+  .composite .head small{display:block; font-weight:400; color:var(--muted); font-size:11px;}
+  .composite .grid{margin-top:8px; grid-template-columns:repeat(auto-fill,minmax(100px,1fr));}
+  .composite.off .grid{display:none;}
+  .preview-stage{background:var(--stage-bg); border-radius:var(--radius); padding:22px 18px 30px; position:relative; overflow:hidden; min-height:300px;}
+  .preview-stage .cap{position:absolute; left:12px; bottom:8px; font-size:10.5px; color:#9AA3B8; font-family:var(--f-mono);}
+  .pv{position:relative; display:inline-block;}
+  .pmenu{font-family:"Segoe UI",var(--f-body); font-size:12px; box-shadow:0 8px 28px rgba(0,0,0,.45); min-width:210px; user-select:none;}
+  .pmenu .prow{display:flex; align-items:center; position:relative; height:24px;}
+  .pmenu .picon{width:26px; display:grid; place-items:center; flex:0 0 auto; align-self:stretch;}
+  .pmenu .picon .ico{width:14px; height:14px; font-size:8px; border-radius:3px;}
+  .pmenu .ptext{flex:1; padding:0 8px; white-space:nowrap;}
+  .pmenu .psc{padding-right:8px; opacity:.6; font-size:11px;}
+  .pmenu .parr{width:16px; font-size:8px; opacity:.8;}
+  .pmenu .psep{height:9px; display:flex; align-items:center; padding:0 6px;}
+  .pmenu .psep i{flex:1; height:0; border-top:1px solid rgba(128,128,128,.45); border-bottom:1px solid rgba(255,255,255,.35);}
+  .pmenu .ptitle{height:20px; display:flex; align-items:center; gap:6px; padding:0 6px; font-size:10.5px; font-weight:700;}
+  .pmenu .ptitle i{flex:1; border-top:1px solid rgba(128,128,128,.45);}
+  .pmenu .pedge{position:absolute; left:26px; top:3px; bottom:3px; border-left:1px solid rgba(128,128,128,.5); border-right:1px solid rgba(255,255,255,.3);}
+  .pv .flyout{position:absolute; left:calc(100% - 4px);}
+
+  /* ---------- tables (variables) ---------- */
+  .tbl-wrap{overflow-x:auto; border:1px solid var(--line); border-radius:var(--radius);}
+  table{width:100%; border-collapse:collapse; font-size:12.5px;}
+  thead th{text-align:left; font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); padding:9px 10px; border-bottom:1px solid var(--line); font-family:var(--f-display); white-space:nowrap;}
+  tbody td{padding:7px 10px; border-bottom:1px solid var(--line); vertical-align:middle;}
+  tbody tr:last-child td{border-bottom:0;}
+  td.mono{font-size:11.5px; word-break:break-all;}
+  td .rowact{display:flex; gap:2px; justify-content:flex-end;}
+  .num{font-variant-numeric:tabular-nums;}
+
+  /* ---------- action bar ---------- */
+  .actionbar{flex:0 0 auto; display:flex; align-items:center; gap:10px; padding:9px 16px; border-top:1px solid var(--line); font-size:12px; flex-wrap:wrap;}
+  .actionbar .status{display:flex; align-items:center; gap:7px; color:var(--muted); min-width:0; flex:1;}
+  .actionbar .status span:last-child{overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .actionbar .dot{width:7px; height:7px; border-radius:50%; background:var(--ok); flex:0 0 auto;}
+  .actionbar .dot.dirty{background:var(--warn);}
+  .linkbtn{all:unset; color:var(--accent); font-weight:600; cursor:pointer;}
+</style>
+
+<div class="stage">
+  <div class="stage-head">
+    <div>
+      <h1>y-pop-config — layout mock</h1>
+      <p>A static mock, not the WinUI app. Data is the shipped <code>y-pop/rsc/y-pop.xml</code>, plus two marked examples. Click rows, add items, drag files from your desktop onto the tree, or try the sample drops. Comments from the file are rows too: use the Comments switch to show or hide them. Spec: <code>y-pop-config/docs/spec.md</code>.</p>
+    </div>
+    <div class="seg" role="group" aria-label="Mock theme">
+      <button type="button" data-theme-btn="system" class="is-active">System</button>
+      <button type="button" data-theme-btn="light">Light</button>
+      <button type="button" data-theme-btn="dark">Dark</button>
+    </div>
+  </div>
+
+  <div class="window">
+    <div class="titlebar">
+      <div class="brand"><span class="glyph">P</span>y-pop — Configuration</div>
+      <div class="capbtns" aria-hidden="true">
+        <span><svg viewBox="0 0 10 10"><rect x="0" y="4.5" width="10" height="1" fill="currentColor"/></svg></span>
+        <span><svg viewBox="0 0 10 10"><rect x=".5" y=".5" width="9" height="9" fill="none" stroke="currentColor"/></svg></span>
+        <span><svg viewBox="0 0 10 10"><path d="M0 0l10 10M10 0L0 10" stroke="currentColor" stroke-width="1.1"/></svg></span>
+      </div>
+    </div>
+    <div class="body">
+      <nav class="rail" id="rail" aria-label="Sections"></nav>
+      <div class="content">
+        <div class="page" id="page"></div>
+        <div class="actionbar">
+          <span class="status" id="status"></span>
+          <button class="btn" type="button" data-act="reload">Reload from disk</button>
+          <button class="btn primary" type="button" data-act="save" title="Writes y-pop.xml from these settings. Comments and blank lines are kept; indentation and attribute layout are regenerated.">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+'use strict';
+
+/* ================= data ================= */
+const BUILTINS = [
+  ['pop','C:\\Tools\\Ypo-Lite'],['config','C:\\Users\\jerome\\AppData\\Roaming\\Ypo-Lite\\y-pop.xml'],
+  ['win','C:\\Windows'],['system','C:\\Windows\\System32'],['system86','C:\\Windows\\SysWOW64'],
+  ['programfiles','C:\\Program Files'],['programfiles86','C:\\Program Files (x86)'],
+  ['mydocs','C:\\Users\\jerome\\Documents'],['mymusic','C:\\Users\\jerome\\Music'],['myvideo','C:\\Users\\jerome\\Videos'],
+  ['desktop','C:\\Users\\jerome\\Desktop'],['appdata','C:\\Users\\jerome\\AppData\\Local'],
+  ['appdata-r','C:\\Users\\jerome\\AppData\\Roaming'],['user','C:\\Users\\jerome']
+];
+const EXISTING = new Set(['C:\\Windows\\System32\\cmd.exe','C:\\Windows\\notepad.exe','C:\\Windows\\explorer.exe','C:\\Users\\jerome\\Documents',
+  'C:\\Windows\\System32\\Taskmgr.exe','C:\\Users\\jerome\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe','C:\\Program Files\\Notepad++\\notepad++.exe',
+  'C:\\Users\\jerome\\Documents\\Projects','C:\\Users\\jerome\\Documents\\Budget 2026.xlsx','C:\\Users\\jerome\\Documents\\projects']);
+
+let uid = 0;
+const N = (kind, o) => Object.assign({id: ++uid, kind, name:'', icon:null, tooltip:'', hotkeys:[], dflt:false, showSc:null,
+  exe:'', appId:'', param:'', path:'', shell:null, elevate:false, browse:false, filter:'', depth:0, openFolder:'max-depth',
+  events:{start:false, exit:false}, autoopen:false, popup:null, collapsed:false, children:[], lead:[], text:'', origin:null}, o||{});
+/* a comment: attached ones live in their item's `lead`, free ones are siblings in `children` */
+const C = (text, o) => N('comment', Object.assign({text}, o||{}));
+const CMT = {
+  header:'y-pop — application launcher, driven by hotkeys and popup menus.\n\nCopy this file next to y-pop.exe to keep it portable, or to\n%APPDATA%\\Ypo-Lite\\y-pop.xml. Either place is read on start-up and\nwhenever "Reload configuration" is chosen from the tray menu.\n\nSee docs/y-pop-plan.md for the design this schema follows; this file is\nthe default, not a full attribute reference yet.',
+  theme:'theme picks a base skin: "native" (the default if omitted) keeps plain,\nunthemed OS chrome; "default"/"flat"/"dark" are PortAL\'s own three\nbuilt-in skins, reproduced with PortAL\'s own colours/border/gradient\nvalues; "auto" resolves live, each time the menu opens, to "default" or\n"dark" to match Windows\' current light/dark setting.\n\nA <skin> child of <y-pop> overrides individual parts of whichever theme\nis active, e.g. <skin back-color="1a1a1a" hover-back-color="ff8800"/>.',
+  vars:'Variables usable as %name% anywhere below, expanded once at load\n(alongside the builtins: %win%, %system%, %programfiles%, %mydocs%,\n%desktop%, %appdata%, %user%, %pop%, %config%, …).\n\n%clipboard%/%clipboards% are deliberately never expanded here — they\nare resolved lazily, right before a node launches.',
+  roots:'Every direct child of <y-pop> becomes its own tray icon (a <group>)\nor launches immediately on tray click (an <app>).',
+  override:'override="true": only takes effect if Win+N is already claimed\nelsewhere and the normal registration fails — never tried\nproactively.',
+  icon:'"path,index" overrides the icon shown for an entry — a\npositive index picks the icon at that position within the\nfile; a negative one (Windows\' own convention, e.g. how a\n.lnk\'s own icon location works) picks it by resource id\ninstead, stable across a Windows version reordering the\nfile\'s icons. -41 is illustrative here, not verified against\nevery Windows version — if it doesn\'t resolve to the\nRecycle Bin icon on yours, the entry still works, just\nwithout a custom icon.'
+};
+
+const state = {
+  screen: 'menu:0',
+  general: {popup:'native', style:'list', shellExec:false, showSc:true},
+  skin: {theme:'auto', ov:{back:null,text:null,hback:null,htext:null,dis:null}, padding:null, margin:null, edge:null,
+         border:{on:false,size:1,round:8,color:'#3a3a3a'}, bg:{on:false,start:'#2b2b2b',end:'#1a1a1a',dir:'v'}, ig:{on:false,start:'#ffd996',end:'#000000',dir:'h'}},
+  vars: [{comment:CMT.vars}, {name:'docs', value:'%mydocs%'}, {name:'tools', value:'%user%\\Tools'}],
+  fileNotes: [CMT.header, CMT.theme],
+  showComments: true,
+  roots: [],
+  sel: {},          // per root id → selected node id
+  picker: null,     // 'app' when the app picker is open
+  pickerTab: 'start', pickerQuery:'', pickerChecked:new Set(),
+  addMenu: false, iconPicker: false, iconSrc: null,
+  dirty: false, undo: null, status: null, flash: new Set(), dropHint: null
+};
+
+state.roots = [
+  N('group',{name:'y-pop', lead:[C(CMT.roots)], hotkeys:[{key:'Win+Y', override:false}], children:[
+    N('separator',{name:'Tools'}),
+    N('app',{name:'Command line', exe:'%system%\\cmd.exe', path:'C:\\'}),
+    N('app',{name:'Notepad', lead:[C(CMT.override)], exe:'%win%\\notepad.exe', hotkeys:[{key:'Win+N', override:true}]}),
+    N('group',{name:'Explorers', children:[
+      N('app',{name:'File Explorer', exe:'%win%\\explorer.exe'}),
+      N('app',{name:'Recycle Bin', lead:[C(CMT.icon)], exe:'%win%\\explorer.exe', icon:'%win%\\explorer.exe,-41'})
+    ]}),
+    N('app',{name:'Recent documents', exe:'%docs%', browse:true, filter:'*.*'}),
+    N('separator',{name:''}),
+    N('about',{name:'About'}),
+    N('quit',{name:'Quit'})
+  ]}),
+  N('group',{name:'Dev', example:true, hotkeys:[{key:'Win+D', override:false}], children:[
+    N('separator',{name:'Editors'}),
+    N('app',{name:'Visual Studio Code', exe:'%appdata%\\Programs\\Microsoft VS Code\\Code.exe', hotkeys:[{key:'Ctrl+Alt+C', override:false}]}),
+    N('app',{name:'Terminal', appId:'Microsoft.WindowsTerminal_8wekyb3d8bbwe!App'}),
+    N('app',{name:'Scratch file', exe:'%win%\\notepad.exe', param:'%clipboard%', tooltip:'Opens Notepad with the clipboard as its argument'}),
+    C('<app name="Old build tool" exe="%tools%\\build-old.exe"/>', {disabled:N('app',{name:'Old build tool', exe:'%tools%\\build-old.exe'})}),
+    N('break'),
+    N('app',{name:'Projects', exe:'%mydocs%\\projects', browse:true, filter:'*.sln;*.csproj', depth:1, openFolder:'all'})
+  ]}),
+  N('app',{name:'Task Manager', example:true, exe:'%system%\\Taskmgr.exe'})
+];
+state.sel[state.roots[0].id] = state.roots[0].children[2].id;
+state.sel[state.roots[1].id] = state.roots[1].children[1].id;
+
+const START_MENU = [
+  ['7-Zip File Manager','C:\\Program Files\\7-Zip\\7zFM.exe'],
+  ['Blender 4.2','C:\\Program Files\\Blender Foundation\\Blender 4.2\\blender.exe'],
+  ['Character Map','C:\\Windows\\System32\\charmap.exe'],
+  ['Command Prompt','C:\\Windows\\System32\\cmd.exe'],
+  ['Firefox','C:\\Program Files\\Mozilla Firefox\\firefox.exe'],
+  ['GIMP 2.10','C:\\Program Files\\GIMP 2\\bin\\gimp-2.10.exe'],
+  ['Git Bash','C:\\Program Files\\Git\\git-bash.exe'],
+  ['Inkscape','C:\\Program Files\\Inkscape\\bin\\inkscape.exe'],
+  ['KeePassXC','C:\\Program Files\\KeePassXC\\KeePassXC.exe'],
+  ['Notepad','C:\\Windows\\notepad.exe'],
+  ['OBS Studio','C:\\Program Files\\obs-studio\\bin\\64bit\\obs64.exe'],
+  ['Registry Editor','C:\\Windows\\regedit.exe'],
+  ['Visual Studio Code','C:\\Users\\jerome\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe'],
+  ['VLC media player','C:\\Program Files\\VideoLAN\\VLC\\vlc.exe']
+];
+const STORE_APPS = [
+  ['Calculator','Microsoft.WindowsCalculator_8wekyb3d8bbwe!App'],
+  ['Clock','Microsoft.WindowsAlarms_8wekyb3d8bbwe!App'],
+  ['Paint','Microsoft.Paint_8wekyb3d8bbwe!App'],
+  ['Photos','Microsoft.Windows.Photos_8wekyb3d8bbwe!App'],
+  ['Snipping Tool','Microsoft.ScreenSketch_8wekyb3d8bbwe!App'],
+  ['Terminal','Microsoft.WindowsTerminal_8wekyb3d8bbwe!App']
+];
+const SAMPLE_DROPS = {
+  'Visual Studio Code.lnk': {kind:'lnk', lnk:'C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\Visual Studio Code\\Visual Studio Code.lnk',
+     target:'C:\\Users\\jerome\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe', name:'Visual Studio Code', wd:'', args:''},
+  'notepad++.exe': {kind:'exe', path:'C:\\Program Files\\Notepad++\\notepad++.exe', name:'Notepad++'},
+  'Projects': {kind:'folder', path:'C:\\Users\\jerome\\Documents\\Projects', name:'Projects'},
+  'Budget 2026.xlsx': {kind:'doc', path:'C:\\Users\\jerome\\Documents\\Budget 2026.xlsx', name:'Budget 2026'}
+};
+
+/* ================= helpers ================= */
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const hash = s => { let h = 7; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h; };
+const GLYPHS = '▣◆●▲★✚⌂✉♪⚙☰◐✎⚑☂✦⌘◈';
+function lookupVar(name){
+  const v = state.vars.find(x => x.name === name);
+  if (v) return expand(v.value, name);
+  const b = BUILTINS.find(x => x[0] === name);
+  return b ? b[1] : null;
+}
+function expand(s, guard){
+  return String(s || '').replace(/%([a-z0-9-]+)%/gi, (m, n) => {
+    if (n === guard || n === 'clipboard' || n === 'clipboards') return m;
+    const v = lookupVar(n); return v == null ? m : v;
+  });
+}
+function tokenize(abs){
+  const cands = [...state.vars.map(v => [v.name, expand(v.value, v.name)]), ...BUILTINS.filter(b => b[0] !== 'config')];
+  let best = null;
+  for (const [n, v] of cands){
+    if (!v || v.includes('%')) continue;
+    if (abs.toLowerCase() === v.toLowerCase() || abs.toLowerCase().startsWith(v.toLowerCase() + '\\'))
+      if (!best || v.length > best[1].length) best = [n, v];
+  }
+  return best ? '%' + best[0] + '%' + abs.slice(best[1].length) : abs;
+}
+function iconTile(key, letter, cls){
+  const h = hash(key);
+  return `<span class="ico ${cls||''}" style="--h:${h % 360}">${esc(letter || GLYPHS[h % GLYPHS.length])}</span>`;
+}
+const FOLDER_SVG = '<svg viewBox="0 0 20 20"><path d="M2 5.5A1.5 1.5 0 0 1 3.5 4h4l2 2h7A1.5 1.5 0 0 1 18 7.5v7a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 2 14.5z" fill="currentColor"/></svg>';
+function nodeIcon(n, big){
+  const cls = big ? 'lg' : '';
+  if (n.icon) return iconTile(n.icon, null, cls);
+  if (n.kind === 'group') return `<span class="ico folder ${cls}">${FOLDER_SVG}</span>`;
+  if (n.kind === 'app'){
+    if (n.browse) return `<span class="ico folder ${cls}">${FOLDER_SVG}</span>`;
+    const src = n.appId || n.exe || n.name;
+    return iconTile(src, (n.name || '?').trim().charAt(0).toUpperCase(), cls);
+  }
+  if (n.kind === 'about') return iconTile('about', 'i', 'sys ' + cls);
+  if (n.kind === 'quit') return iconTile('quit', '×', 'sys ' + cls);
+  return '';
+}
+function rootOf(screen){ const m = /^menu:(\d+)$/.exec(screen); return m ? state.roots[+m[1]] : null; }
+function find(id, list, parent){
+  list = list || state.roots;
+  for (let i = 0; i < list.length; i++){
+    const n = list[i];
+    if (n.id === id) return {node:n, parent:parent || null, list, index:i};
+    const li = n.lead.findIndex(c => c.id === id);
+    if (li >= 0) return {node:n.lead[li], parent:parent || null, list:n.lead, index:li, owner:n};
+    if (n.children.length){ const r = find(id, n.children, n); if (r) return r; }
+  }
+  return null;
+}
+function rootFor(id){ return state.roots.find(r => r.id === id || find(id, r.children)); }
+function countItems(n){ return n.children.reduce((a, c) => a + (c.kind === 'comment' ? 0 : 1) + countItems(c), 0); }
+function countComments(n){ return n.lead.length + n.children.reduce((a, c) => a + (c.kind === 'comment' ? 1 : 0) + countComments(c), 0); }
+const firstLine = t => (t || '').split('\n').find(l => l.trim()) || '(empty comment)';
+const lineCount = t => (t || '').split('\n').length;
+function groupsOf(n, path, out){
+  out = out || []; path = path ? path + ' › ' + n.name : n.name;
+  if (n.kind === 'group'){ out.push([n.id, path]); n.children.forEach(c => groupsOf(c, path, out)); }
+  return out;
+}
+const isGroup = n => n && n.kind === 'group';
+const kindLabel = n => ({comment:n.disabled ? 'Disabled item' : 'Comment', group:'Group', app:n && n.browse ? 'Folder (browse)' : n && n.appId ? 'Store app' : 'App', separator:'Separator', break:'Column break', about:'About', quit:'Quit'})[n.kind];
+function markDirty(msg){ state.dirty = true; if (msg) state.status = msg; }
+
+/* insertion point: after the selection, or inside it when it's an expanded group */
+function insertionPoint(root){
+  const selId = state.sel[root.id];
+  let f = selId ? find(selId) : null;
+  if (f && f.owner) f = find(f.owner.id);   // an attached comment stands for its item
+  if (!f || f.node === root) return {list:root.children, index:root.children.length, parent:root};
+  if (isGroup(f.node) && !f.node.collapsed) return {list:f.node.children, index:f.node.children.length, parent:f.node};
+  return {list:f.list, index:f.index + 1, parent:f.parent};
+}
+function insertNodes(root, nodes, at){
+  at = at || insertionPoint(root);
+  at.list.splice(at.index, 0, ...nodes);
+  if (at.parent) at.parent.collapsed = false;
+  state.sel[root.id] = nodes[nodes.length - 1].id;
+  nodes.forEach(n => state.flash.add(n.id));
+}
+
+/* ================= rail ================= */
+const SYM = {
+  general:'<svg viewBox="0 0 16 16"><path d="M8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM8 1v2M8 13v2M1 8h2M13 8h2M3 3l1.4 1.4M11.6 11.6 13 13M3 13l1.4-1.4M11.6 4.4 13 3" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>',
+  skin:'<svg viewBox="0 0 16 16"><rect x="2" y="2" width="12" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M2 6h12M6 6v8" stroke="currentColor" stroke-width="1.3"/></svg>',
+  vars:'<svg viewBox="0 0 16 16"><path d="M4 2C2.5 4 2.5 12 4 14M12 2c1.5 2 1.5 10 0 12M6 6l4 4M10 6l-4 4" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>',
+  plus:'<svg viewBox="0 0 16 16"><path d="M8 2v12M2 8h12" stroke="currentColor" stroke-width="1.5"/></svg>'
+};
+function renderRail(){
+  const nav = (key, label, sym, sub) =>
+    `<button type="button" data-nav="${key}" class="${state.screen === key ? 'is-active' : ''}" title="${esc(label)}"><span class="sym">${sym}</span><span class="lbl">${esc(label)}</span>${sub ? `<span class="sub">${esc(sub)}</span>` : ''}</button>`;
+  let h = '<div class="nav-label">Settings</div>';
+  h += nav('general','General',SYM.general) + nav('skin','Skin',SYM.skin) + nav('vars','Variables',SYM.vars, String(state.vars.filter(v => v.name != null).length));
+  h += '<div class="nav-label">Tray menus</div>';
+  state.roots.forEach((r, i) => {
+    const sub = r.hotkeys[0] ? r.hotkeys[0].key : (r.kind === 'app' ? 'click' : '');
+    h += nav('menu:' + i, r.name || '(unnamed)', nodeIcon(r), sub);
+  });
+  h += `<button type="button" class="new" data-act="new-root" title="New tray menu"><span class="sym" style="color:var(--accent)">${SYM.plus}</span><span class="lbl">New tray menu</span></button>`;
+  h += '<div class="rail-foot">Loaded from<span class="mono">%APPDATA%\\Ypo-Lite\\y-pop.xml</span></div>';
+  document.getElementById('rail').innerHTML = h;
+}
+
+/* ================= tray-menu screen ================= */
+const I = {
+  up:'<svg viewBox="0 0 14 14"><path d="M7 11V3M3.5 6.5 7 3l3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>',
+  down:'<svg viewBox="0 0 14 14"><path d="M7 3v8M3.5 7.5 7 11l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>',
+  out:'<svg viewBox="0 0 14 14"><path d="M11 7H3M6 3.5 2.5 7 6 10.5M12 2v10" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>',
+  into:'<svg viewBox="0 0 14 14"><path d="M3 7h8M8 3.5 11.5 7 8 10.5M2 2v10" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>',
+  dup:'<svg viewBox="0 0 14 14"><rect x="4.5" y="4.5" width="7.5" height="7.5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M9.5 2.5h-6a1 1 0 0 0-1 1v6" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>',
+  del:'<svg viewBox="0 0 14 14"><path d="M2.5 4h9M5.5 4V2.5h3V4M3.5 4l.6 8h5.8l.6-8" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>',
+  chev:'<svg viewBox="0 0 10 10"><path d="M3.5 1.5 7 5l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>',
+  plus:'<svg viewBox="0 0 14 14"><path d="M7 2v10M2 7h10" stroke="currentColor" stroke-width="1.5"/></svg>',
+  close:'<svg viewBox="0 0 14 14"><path d="M3 3l8 8M11 3l-8 8" stroke="currentColor" stroke-width="1.4"/></svg>',
+  run:'<svg viewBox="0 0 14 14"><path d="M4 2.5v9l7-4.5z" fill="currentColor"/></svg>',
+  cmt:'<svg viewBox="0 0 14 14"><path d="M2.5 3h9a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1H6l-3 2.5V10h-.5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>'
+};
+
+function treeRows(root){
+  const at = insertionPoint(root);
+  const selId = state.sel[root.id];
+  let h = '';
+  const marker = d => `<div class="insert" style="--d:${d}" aria-hidden="true">next item goes here</div>`;
+  const show = state.showComments;
+  let pending = 0;   // hidden free comments waiting for the next item's marker
+  const cmark = c => c ? `<button type="button" class="cmark" data-act="show-comments" title="${c} hidden comment${c > 1 ? 's' : ''}. Click to show comments.">${I.cmt}${c}</button>` : '';
+  const commentRow = (c, d, attached) => {
+    const sel = c.id === selId ? ' sel' : '';
+    const lines = lineCount(c.text);
+    h += `<div class="row cmt${attached ? ' attached' : ''}${c.disabled ? ' disabled-item' : ''}${sel}${state.flash.has(c.id) ? ' flash' : ''}" data-node="${c.id}" style="--d:${d}" tabindex="0" role="treeitem" aria-selected="${!!sel}">
+      <span class="spacer"></span><span class="cglyph">${c.disabled ? '⊘' : '//'}</span><span class="nm">${esc(c.disabled ? 'Disabled: ' + c.disabled.name : firstLine(c.text))}</span><span class="meta">${lines > 1 && !c.disabled ? `<span class="num">${lines} lines</span>` : ''}</span></div>`;
+  };
+  const walk = (n, d) => {
+    if (n.kind === 'comment'){ if (show) commentRow(n, d, false); else pending++; return; }
+    let hidden = pending; pending = 0;
+    if (show) n.lead.forEach(c => commentRow(c, d, true)); else hidden += n.lead.length;
+    const sel = n.id === selId ? ' sel' : '';
+    const fl = state.flash.has(n.id) ? ' flash' : '';
+    const dropCls = state.dropHint && state.dropHint.id === n.id ? (state.dropHint.into ? ' drop-into' : ' drop-after') : '';
+    const attrs = `data-node="${n.id}" style="--d:${d}" tabindex="0" role="treeitem" aria-selected="${!!sel}"`;
+    if (n.kind === 'separator'){
+      h += `<div class="row sep${sel}${fl}${dropCls}" ${attrs}><span class="spacer"></span>${n.name ? `<span class="septitle">${esc(n.name)}</span>` : ''}<span class="rule"></span>${cmark(hidden)}</div>`;
+    } else if (n.kind === 'break'){
+      h += `<div class="row brk${sel}${fl}${dropCls}" ${attrs}><span class="spacer"></span><span class="septitle">column break</span><span class="rule"></span>${cmark(hidden)}</div>`;
+    } else {
+      const group = isGroup(n);
+      const chev = group && d > 0 ? `<button type="button" class="chev ${n.collapsed ? '' : 'open'}" data-act="toggle" data-id="${n.id}" aria-label="${n.collapsed ? 'Expand' : 'Collapse'}">${I.chev}</button>` : '<span class="spacer"></span>';
+      const meta = [];
+      if (hidden) meta.push(cmark(hidden));
+      if (problem(n)) meta.push(`<span class="warn-dot" title="${esc(problem(n))}">!</span>`);
+      if (n.kind === 'app' && n.browse) meta.push('<span>browse</span>');
+      if (n.kind === 'app' && n.appId) meta.push('<span>store</span>');
+      if (group && n.collapsed) meta.push(`<span class="num">${countItems(n)}</span>`);
+      n.hotkeys.forEach(k => meta.push(`<span class="keycap">${esc(k.key)}</span>`));
+      h += `<div class="row ${group ? 'group' : ''}${sel}${fl}${dropCls}" ${attrs}>${chev}${nodeIcon(n)}<span class="nm ${n.name ? '' : 'dim'}">${esc(n.name || 'Untitled')}</span><span class="meta">${meta.join('')}</span></div>`;
+    }
+    if (isGroup(n) && (!n.collapsed || d === 0)){
+      n.children.forEach((c, i) => {
+        if (at.list === n.children && at.index === i) h += marker(d + 1);
+        walk(c, d + 1);
+      });
+      if (pending){ h += `<div class="row" style="--d:${d + 1}; min-height:22px"><span class="spacer"></span>${cmark(pending)}</div>`; pending = 0; }
+      if (at.list === n.children && at.index === n.children.length) h += marker(d + 1);
+    }
+  };
+  walk(root, 0);
+  return h;
+}
+function problem(n){
+  if (n.kind === 'app' && !n.appId){
+    if (!n.exe) return 'No target yet: set a program, file or folder.';
+    const p = expand(n.exe);
+    if (/^[A-Z]:\\/i.test(p) && !EXISTING.has(p) && p !== 'C:\\') return 'Target not found on this PC: ' + p;
+  }
+  if (n.kind === 'group' && !n.children.length) return 'Empty group: it will show nothing.';
+  return '';
+}
+
+function renderMenuScreen(root){
+  const isApp = root.kind === 'app';
+  let h = `<h2>${nodeIcon(root, true)}<span>${esc(root.name || 'Untitled')}</span>${root.example ? '<span class="badge example">example</span>' : ''}</h2>`;
+  if (isApp){
+    h += `<p class="lede">A tray icon that launches this app on click, with no menu. Turn it into a menu to hold more items.</p>`;
+    h += `<div class="pane" style="max-width:640px">${inspector(root, root)}</div>`;
+    return h;
+  }
+  const hk = root.hotkeys.map(k => `<span class="keycap">${esc(k.key)}</span>`).join(' ');
+  h += `<p class="lede">Its own tray icon${hk ? ', also opened with ' + hk : ''}. Select a row to edit it. New items go where the <b style="color:var(--accent)">insertion marker</b> is: after the selected row, or inside a selected open group.</p>`;
+  h += '<div class="split">';
+  /* tree pane */
+  h += '<div class="pane" id="tree-pane">';
+  h += `<div class="toolbar">
+      <button type="button" class="btn sm primary" data-act="open-picker">${I.plus}App…</button>
+      <button type="button" class="btn sm" data-act="add" data-kind="group">${I.plus}Group</button>
+      <button type="button" class="btn sm" data-act="add" data-kind="separator">${I.plus}Separator</button>
+      <span style="position:relative"><button type="button" class="btn sm ghost" data-act="add-menu" aria-expanded="${state.addMenu}">More ▾</button>
+      ${state.addMenu ? `<div class="menu-pop" role="menu" style="left:0">
+        <button type="button" data-act="add" data-kind="titled">Titled separator<small>section header</small></button>
+        <button type="button" data-act="add" data-kind="folder">Folder (browse)<small>lists a folder</small></button>
+        <button type="button" data-act="add" data-kind="break">Column break<small>new column</small></button>
+        <button type="button" data-act="add" data-kind="about">About</button>
+        <button type="button" data-act="add" data-kind="quit">Quit</button>
+        <button type="button" data-act="add" data-kind="comment">Comment<small>kept in the file</small></button>
+      </div>` : ''}</span>
+      <span class="ctoggle">${I.cmt}<span>Comments <span class="num">${countComments(root)}</span></span><button type="button" class="switch ${state.showComments ? 'on' : ''}" role="switch" aria-checked="${state.showComments}" aria-label="Show comments" data-act="toggle-comments"></button></span>
+    </div>`;
+  if (state.picker === 'app') h += appPicker(root);
+  h += `<div class="tree" role="tree" aria-label="${esc(root.name)} menu">${treeRows(root)}</div>`;
+  h += `<div class="dropzone ${state.dropHint && state.dropHint.zone ? 'hot' : ''}" data-dropzone="1">
+      Drop <b>.exe</b>, <b>.lnk</b>, files or folders here or on a row. On a group they go inside it, on any other row they go after it.
+      <div class="samples">Try: ${Object.keys(SAMPLE_DROPS).map(k => `<button type="button" class="chip" data-act="sample-drop" data-file="${esc(k)}">${esc(k)}</button>`).join('')}</div>
+    </div>`;
+  h += '</div>';
+  /* inspector */
+  const sf = state.sel[root.id] && find(state.sel[root.id]);
+  const sel = sf ? sf.node : root;
+  h += `<div class="pane" id="insp-pane">${inspector(sel, root)}</div>`;
+  h += '</div>';
+  return h;
+}
+
+/* ---------- app picker ---------- */
+function appPicker(root){
+  const tab = state.pickerTab;
+  const inMenu = new Set(); const walk = n => { if (n.exe) inMenu.add(expand(n.exe).toLowerCase()); if (n.appId) inMenu.add(n.appId.toLowerCase()); n.children.forEach(walk); }; walk(root);
+  const tabs = [['start','Start menu'],['store','Store apps'],['browse','Browse…'],['manual','Manual']];
+  let h = `<div class="picker" role="region" aria-label="Add apps"><div class="tabs">
+    <div class="seg">${tabs.map(([k, l]) => `<button type="button" data-act="picker-tab" data-tab="${k}" class="${tab === k ? 'is-active' : ''}">${l}</button>`).join('')}</div>
+    <span style="flex:1"></span><button type="button" class="icon-btn" data-act="close-picker" aria-label="Close">${I.close}</button></div>`;
+  if (tab === 'start' || tab === 'store'){
+    const src = tab === 'start' ? START_MENU : STORE_APPS;
+    const q = state.pickerQuery.toLowerCase();
+    const rows = src.filter(([n]) => !q || n.toLowerCase().includes(q));
+    h += `<input type="text" id="picker-q" placeholder="Search ${tab === 'start' ? 'Start menu shortcuts' : 'installed Store apps'}…" value="${esc(state.pickerQuery)}" style="margin-bottom:6px">`;
+    h += '<div class="list">' + rows.map(([n, t]) => {
+      const key = tab + '|' + n; const already = inMenu.has(t.toLowerCase());
+      const shown = tab === 'start' ? tokenize(t) : t;
+      return `<label class="pick-row"><input type="checkbox" data-pick="${esc(key)}" ${state.pickerChecked.has(key) ? 'checked' : ''}>${iconTile(t, n.charAt(0).toUpperCase())}<span class="t">${esc(n)}<small>${esc(shown)}</small></span>${already ? '<span class="already">in this menu</span>' : ''}</label>`;
+    }).join('') + (rows.length ? '' : '<div class="pick-row">Nothing matches.</div>') + '</div>';
+    const c = state.pickerChecked.size;
+    h += `<div class="foot"><span>${tab === 'start' ? 'Both Start menu folders, scanned when the picker opens.' : 'Launched by app id, through Windows.'}</span>
+      <button type="button" class="btn sm primary" data-act="picker-add" ${c ? '' : 'disabled'}>Add ${c || ''} app${c === 1 ? '' : 's'}</button></div>`;
+  } else if (tab === 'browse'){
+    h += `<div class="note" style="margin-top:0">Opens the Windows file dialog (several files at once; programs, shortcuts or any file). Each file is added the way a drop would add it.</div>
+      <div class="foot"><span>In this mock the dialog returns <code>notepad++.exe</code>.</span><button type="button" class="btn sm primary" data-act="sample-drop" data-file="notepad++.exe">Choose files…</button></div>`;
+  } else {
+    h += `<div class="note" style="margin-top:0">An empty app, with its <b>Target</b> field ready to fill in. Use this for a command line, a URL or a path with variables.</div>
+      <div class="foot"><span></span><button type="button" class="btn sm primary" data-act="add" data-kind="app">Add empty app</button></div>`;
+  }
+  return h + '</div>';
+}
+
+/* ---------- inspector ---------- */
+function commentXml(text, d){
+  const pad = '\t'.repeat(d || 0);
+  const safe = esc(text.replace(/--/g, '- -'));
+  return text.includes('\n') ? `${pad}&lt;!--\n${safe.split('\n').map(l => pad + '\t' + l).join('\n')}\n${pad}--&gt;` : `${pad}&lt;!-- ${safe} --&gt;`;
+}
+function commentInspector(n){
+  const f = find(n.id);
+  const next = !f.owner && f.list.slice(f.index + 1).find(x => x.kind !== 'comment');
+  const nextIsAdjacent = !f.owner && f.list[f.index + 1] && f.list[f.index + 1].kind !== 'comment';
+  const prevGroup = !f.owner && f.list.slice(0, f.index).reverse().find(isGroup);
+  const ownerName = f.owner ? (f.owner.name || kindLabel(f.owner)) : '';
+  let h = `<div class="insp-head"><span class="ico lg sys" style="--h:150; background:var(--ok-soft); color:var(--ok); font-family:var(--f-mono); font-size:13px">${n.disabled ? '⊘' : '//'}</span>
+    <div class="who"><b>${n.disabled ? esc(n.disabled.name) : 'Comment'}</b><small>${n.disabled ? 'Commented out · not in the menu' : f.owner ? 'Above ' + esc(ownerName) + ' · moves with it' : 'Free comment'}${f.parent ? ' · in ' + esc(f.parent.name) : ''}</small></div>
+    <div class="movebar" role="toolbar" aria-label="Move">${f.owner ? '' : `
+      <button type="button" class="icon-btn" data-act="move" data-dir="up" ${f.index > 0 ? '' : 'disabled'} aria-label="Move up" title="Move up">${I.up}</button>
+      <button type="button" class="icon-btn" data-act="move" data-dir="down" ${f.index < f.list.length - 1 ? '' : 'disabled'} aria-label="Move down" title="Move down">${I.down}</button>
+      <button type="button" class="icon-btn" data-act="move" data-dir="into" ${prevGroup ? '' : 'disabled'} aria-label="Into group above" title="Into group above">${I.into}</button>
+      <span class="sep"></span>`}
+      <button type="button" class="icon-btn" data-act="del" aria-label="Delete comment" title="Delete comment">${I.del}</button></div></div><div class="insp-body">`;
+  if (n.disabled){
+    h += `<div class="note">This item is commented out. It stays in <code>y-pop.xml</code> but doesn't show in the menu.</div>
+      <div style="margin-top:10px"><button type="button" class="btn sm primary" data-act="restore">Restore as item</button></div>`;
+  } else {
+    h += `<div class="section-title">Text</div><textarea id="f-text" data-f="text" rows="${Math.min(14, lineCount(n.text) + 1)}" aria-label="Comment text" spellcheck="false">${esc(n.text)}</textarea>`;
+    if (n.text.includes('--')) h += `<span class="hint" style="font-size:11px;color:var(--warn)">“--” isn't allowed inside an XML comment. It will be saved as “- -”.</span>`;
+    h += '<div class="section-title">Placement</div>';
+    if (f.owner) h += sw('attach', true, `Keep with ${esc(ownerName)}`, 'Moves, changes menu and is deleted together with the item below it.');
+    else if (nextIsAdjacent) h += sw('attach', false, `Keep with ${esc(next.name || kindLabel(next))}`, 'Attach it to the item just below, so they move together.');
+    else h += '<p class="hint" style="font-size:11.5px;color:var(--muted)">Free comment. Move it directly above an item to attach it.</p>';
+  }
+  h += `<details style="margin-top:6px" open><summary class="section-title">Written to y-pop.xml</summary><pre class="xml">${n.disabled ? '&lt;!-- ' + esc(n.text) + ' --&gt;' : commentXml(n.text)}</pre></details>`;
+  return h + '</div>';
+}
+function inspector(n, root){
+  if (n.kind === 'comment') return commentInspector(n);
+  const f = find(n.id); const isRoot = state.roots.includes(n);
+  const canUp = f.index > 0, canDown = f.index < f.list.length - 1;
+  const canOut = !isRoot && f.parent && f.parent !== root;
+  const prevGroup = !isRoot && f.list.slice(0, f.index).reverse().find(isGroup);
+  let h = `<div class="insp-head">${nodeIcon(n, true)}<div class="who"><b>${esc(n.name || kindLabel(n))}</b><small>${kindLabel(n)}${isRoot ? ' · tray icon' : f.parent ? ' · in ' + esc(f.parent.name) : ''}</small></div>
+    <div class="movebar" role="toolbar" aria-label="Move">
+      <button type="button" class="icon-btn" data-act="move" data-dir="up" ${canUp ? '' : 'disabled'} title="${isRoot ? 'Move tray icon earlier' : 'Move up'}" aria-label="Move up">${I.up}</button>
+      <button type="button" class="icon-btn" data-act="move" data-dir="down" ${canDown ? '' : 'disabled'} title="${isRoot ? 'Move tray icon later' : 'Move down'}" aria-label="Move down">${I.down}</button>
+      ${isRoot ? '' : `<button type="button" class="icon-btn" data-act="move" data-dir="out" ${canOut ? '' : 'disabled'} title="Out of group: place after ${esc(f.parent ? f.parent.name : '')}" aria-label="Out of group">${I.out}</button>
+      <button type="button" class="icon-btn" data-act="move" data-dir="into" ${prevGroup ? '' : 'disabled'} title="${prevGroup ? 'Into group: end of ' + esc(prevGroup.name) : 'No group above to move into'}" aria-label="Into group above">${I.into}</button>`}
+      <span class="sep"></span>
+      ${isRoot ? '' : `<button type="button" class="icon-btn" data-act="dup" title="Duplicate" aria-label="Duplicate">${I.dup}</button>`}
+      <button type="button" class="icon-btn" data-act="del" title="${isRoot ? 'Delete this tray menu' : 'Delete'}" aria-label="Delete">${I.del}</button>
+    </div></div>`;
+  if (!isRoot && n.kind !== 'break'){
+    const opts = state.roots.filter(r => r.kind === 'group').flatMap(r => groupsOf(r)).filter(([id]) => id !== n.id && !(isGroup(n) && find(id, n.children)));
+    h += `<div style="padding:8px 14px 0; display:flex; gap:8px; align-items:center; font-size:11.5px; color:var(--muted)"><span style="white-space:nowrap">Move to</span>
+      <select id="move-to" aria-label="Move to group"><option value="">Choose a group, in any tray menu…</option>${opts.map(([id, p]) => `<option value="${id}">${esc(p)}</option>`).join('')}</select></div>`;
+  }
+  if (n.origin) h += originStrip(n);
+  h += '<div class="insp-body">';
+  if (n.kind === 'app') h += appFields(n, isRoot);
+  else if (n.kind === 'group') h += groupFields(n, isRoot);
+  else if (n.kind === 'separator') h += `<div class="section-title">Separator</div><div class="grid"><div class="field span2"><label for="f-name">Title</label><input type="text" id="f-name" data-f="name" value="${esc(n.name)}" placeholder="Empty for a plain line"><span class="hint">With a title, the line becomes a section header.</span></div></div>`;
+  else if (n.kind === 'break') h += `<div class="note">Everything after this point starts a new column in the menu. There's nothing to set; move it to change where the column starts.</div>`;
+  else h += `<div class="section-title">Item</div><div class="grid"><div class="field"><label for="f-name">Name</label><input type="text" id="f-name" data-f="name" value="${esc(n.name)}"></div></div>${iconField(n)}`;
+  h += `<div class="section-title">Comments</div><div style="display:flex; gap:6px; flex-wrap:wrap">
+    <button type="button" class="btn sm" data-act="comment-above">${I.cmt}Add comment above</button>
+    ${isRoot ? '' : `<button type="button" class="btn sm" data-act="comment-out" title="Keeps it in y-pop.xml as a comment, out of the menu">Comment out</button>`}
+    ${n.lead.length ? `<span class="hint" style="font-size:11.5px;color:var(--muted);align-self:center">${n.lead.length} comment${n.lead.length > 1 ? 's' : ''} above${state.showComments ? '' : ' (hidden)'}</span>` : ''}</div>`;
+  h += `<details style="margin-top:6px"><summary class="section-title">Written to y-pop.xml</summary><pre class="xml">${n.lead.map(c => commentXml(c.text) + '\n').join('')}${xmlFor(n)}</pre></details>`;
+  return h + '</div>';
+}
+function originStrip(n){
+  const o = n.origin; let what = '', alts = [];
+  if (o.kind === 'lnk'){ what = `Created from <b>${esc(o.file)}</b>. The shortcut's target, arguments, folder and icon were copied.`; alts.push(o.keepLnk ? ['origin','uselnk','Use its target instead'] : ['origin','uselnk','Keep as shortcut instead']); }
+  if (o.kind === 'exe') what = `Created from <b>${esc(o.file)}</b>. The name comes from the program's description.`;
+  if (o.kind === 'folder'){ what = `Created from the folder <b>${esc(o.file)}</b>.`; alts.push(n.browse ? ['origin','browse','Open the folder instead'] : ['origin','browse','Show its files as a submenu']); }
+  if (o.kind === 'doc') what = `Created from <b>${esc(o.file)}</b>. It opens with its default app.`;
+  if (o.kind === 'start') what = `Added from the Start menu shortcut <b>${esc(o.file)}</b>.`;
+  if (o.kind === 'store') what = `Added from Store apps. It launches by app id.`;
+  if (o.abs){ alts.push(n.exe.includes('%') ? ['origin','abs','Use absolute path'] : ['origin','abs','Use variables']); }
+  return `<div class="origin" role="status"><div class="what">${what}${alts.length ? `<div class="alts">${alts.map(a => `<button type="button" class="btn sm" data-act="${a[0]}" data-alt="${a[1]}">${a[2]}</button>`).join('')}</div>` : ''}</div>
+    <button type="button" class="icon-btn" data-act="origin-dismiss" aria-label="Dismiss">${I.close}</button></div>`;
+}
+function tri(field, val, inheritLabel){
+  const b = (v, l) => `<button type="button" data-act="tri" data-f="${field}" data-v="${v}" class="${String(val) === v ? 'is-active' : ''}">${l}</button>`;
+  return `<span class="tri" role="group">${b('null', inheritLabel)}${b('true','On')}${b('false','Off')}</span>`;
+}
+function sw(field, on, label, small){
+  return `<div class="switch-row"><span class="t">${label}${small ? `<small>${small}</small>` : ''}</span><button type="button" class="switch ${on ? 'on' : ''}" role="switch" aria-checked="${!!on}" aria-label="${esc(label)}" data-act="sw" data-f="${field}"></button></div>`;
+}
+function resolvedLine(raw){
+  if (!raw) return '';
+  const p = expand(raw);
+  if (p === raw && !/%/.test(raw) && !/^[A-Z]:\\/i.test(raw)) return '';
+  const ok = EXISTING.has(p) || p === 'C:\\';
+  return `<span class="resolved">${raw !== p ? esc(p) : ''} ${/^[A-Z]:\\/i.test(p) ? (ok ? '<span class="ok">✓ found</span>' : '<span class="bad">✗ not found on this PC</span>') : ''}</span>`;
+}
+function suggestVar(raw){
+  if (!raw || raw.includes('%')) return '';
+  const t = tokenize(raw);
+  return t !== raw ? `<span class="hint">Could be written <code>${esc(t)}</code> · <button type="button" class="linkbtn" data-act="tokenize">Use it</button></span>` : '';
+}
+function hotkeyField(n){
+  const rows = n.hotkeys.map((k, i) => `<div class="hk"><span class="keys">${k.key.split('+').map(p => `<span class="keycap">${esc(p)}</span>`).join('+')}</span>
+    <label title="If Windows or another app already owns the combination, take it over with a keyboard hook.">Override <button type="button" class="switch ${k.override ? 'on' : ''}" role="switch" aria-checked="${k.override}" aria-label="Override" data-act="hk-ov" data-i="${i}"></button></label>
+    <button type="button" class="icon-btn" data-act="hk-del" data-i="${i}" aria-label="Remove hotkey">${I.close}</button></div>`).join('');
+  return `<div class="section-title">Hotkeys</div><div class="hk-list">${rows || '<span class="hint" style="font-size:11.5px;color:var(--muted)">None. The item is reached through its menu only.</span>'}</div>
+    <button type="button" class="btn sm ghost" style="margin-top:6px;color:var(--accent)" data-act="hk-add">${I.plus}Add hotkey</button>
+    <span class="hint" style="display:block;font-size:11px;color:var(--muted)">Opens the same key picker as y-snap-config.</span>`;
+}
+function iconField(n){
+  const src = n.icon ? n.icon.replace(/,-?\d+$/, '') : (n.kind === 'app' ? (n.exe || '') : '');
+  const def = n.kind === 'group' ? 'the folder icon' : n.kind === 'app' ? (n.appId ? "the app's own logo" : n.browse ? 'the folder icon' : "the program's own icon") : 'none';
+  let h = `<div class="section-title">Icon</div><div class="icon-field">${nodeIcon(n, true)}<span class="t"><b>${n.icon ? 'Custom icon' : 'From target'}</b><code>${n.icon ? esc(n.icon) : 'Uses ' + def}</code></span>
+    <button type="button" class="btn sm" data-act="icon-toggle" aria-expanded="${state.iconPicker}">${state.iconPicker ? 'Done' : 'Change…'}</button></div>`;
+  if (state.iconPicker){
+    const cur = state.iconSrc || src || '%system%\\shell32.dll';
+    const count = /shell32/i.test(cur) ? 48 : /imageres/i.test(cur) ? 40 : /explorer/i.test(cur) ? 18 : /ddores/i.test(cur) ? 24 : 6;
+    const srcs = [['%system%\\shell32.dll','shell32.dll'],['%system%\\imageres.dll','imageres.dll'],['%win%\\explorer.exe','explorer.exe'],['%system%\\ddores.dll','ddores.dll']];
+    if (n.kind === 'app' && n.exe && !n.browse) srcs.unshift([n.exe, 'Its own program']);
+    h += `<div class="iconpicker"><div class="srcs">
+      <button type="button" class="chip ${n.icon ? '' : 'on'}" data-act="icon-clear">From target</button>
+      ${srcs.map(([p, l]) => `<button type="button" class="chip ${cur === p ? 'on' : ''}" data-act="icon-src" data-src="${esc(p)}">${esc(l)}</button>`).join('')}
+      <button type="button" class="chip" data-act="icon-src" data-src="%mydocs%\\icons\\custom.ico">Other file…</button></div>
+      <div class="hint" style="font-size:11px;color:var(--muted);margin-bottom:6px"><code>${esc(cur)}</code> · ${count} icons</div>
+      <div class="icongrid">${Array.from({length:count}, (_, i) => `<button type="button" class="${n.icon === cur + ',' + i ? 'on' : ''}" data-act="icon-pick" data-v="${esc(cur + ',' + i)}" title="${esc(cur)},${i}">${iconTile(cur + ',' + i)}<small>${i}</small></button>`).join('')}</div></div>`;
+  }
+  return h;
+}
+function appFields(n, isRoot){
+  const mode = (n.appId || n._store) ? 'store' : n.browse ? 'folder' : 'exe';
+  let h = `<div class="section-title">Item</div><div class="grid">
+    <div class="field"><label for="f-name">Name</label><input type="text" id="f-name" data-f="name" value="${esc(n.name)}"></div>
+    <div class="field"><label for="f-tooltip">Tooltip</label><input type="text" id="f-tooltip" data-f="tooltip" value="${esc(n.tooltip)}" placeholder="Shown on hover"></div></div>`;
+  h += iconField(n);
+  h += `<div class="section-title">Opens</div><div class="targets" role="radiogroup">
+    <button type="button" role="radio" aria-checked="${mode === 'exe'}" class="target ${mode === 'exe' ? 'on' : ''}" data-act="mode" data-v="exe">Program or file<small>exe, document, URL</small></button>
+    <button type="button" role="radio" aria-checked="${mode === 'folder'}" class="target ${mode === 'folder' ? 'on' : ''}" data-act="mode" data-v="folder">Folder as submenu<small>lists its files</small></button>
+    <button type="button" role="radio" aria-checked="${mode === 'store'}" class="target ${mode === 'store' ? 'on' : ''}" data-act="mode" data-v="store">Store app<small>by app id</small></button></div>`;
+  h += '<div class="grid" style="margin-top:10px">';
+  if (mode === 'store'){
+    h += `<div class="field full"><label for="f-appId">App id</label><select id="f-appId" data-f="appId"><option value="">Choose an installed Store app…</option>${STORE_APPS.map(([nm, id]) => `<option value="${esc(id)}" ${n.appId === id ? 'selected' : ''}>${esc(nm)}</option>`).join('')}</select>${n.appId ? `<span class="resolved">${esc(n.appId)}</span>` : ''}</div>`;
+  } else {
+    h += `<div class="field full"><label for="f-exe">${mode === 'folder' ? 'Folder' : 'Target'}</label><div class="with-btn"><input type="text" class="mono" id="f-exe" data-f="exe" value="${esc(n.exe)}" placeholder="${mode === 'folder' ? '%mydocs%\\projects' : '%programfiles%\\App\\app.exe'}"><button type="button" class="btn sm" title="Insert a variable such as %programfiles%">%x%</button><button type="button" class="btn sm">Browse…</button></div>${resolvedLine(n.exe)}${suggestVar(n.exe)}</div>`;
+  }
+  if (mode === 'folder'){
+    const dtxt = n.depth == 0 ? 'files only, no subfolders' : n.depth == 1 ? 'subfolders one level deep' : `subfolders ${n.depth} levels deep`;
+    h += `<div class="field"><label for="f-filter">Show files matching</label><input type="text" class="mono" id="f-filter" data-f="filter" value="${esc(n.filter)}" placeholder="*.*"></div>
+      <div class="field"><label for="f-depth">Subfolder levels</label><input type="number" id="f-depth" data-f="depth" min="0" max="200" value="${n.depth}"><span class="hint" id="depth-hint">${dtxt}</span></div>
+      <div class="field"><label for="f-of">“Open this folder” entry</label><select id="f-of" data-f="openFolder">
+        ${[['max-depth','Only at the deepest level'],['all','In every submenu'],['never','Never']].map(([v, l]) => `<option value="${v}" ${n.openFolder === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>`;
+  }
+  if (mode === 'exe'){
+    h += `<div class="field span2"><label for="f-param">Arguments</label><div class="with-btn"><input type="text" class="mono" id="f-param" data-f="param" value="${esc(n.param)}"><button type="button" class="btn sm" data-act="ins-clip" title="Insert %clipboard%, read when the item launches">Clipboard</button></div>${/%clipboards?%/.test(n.param) ? '<span class="hint">%clipboard% is read when the item launches.</span>' : ''}</div>
+      <div class="field"><label for="f-path">Start in</label><input type="text" class="mono" id="f-path" data-f="path" value="${esc(n.path)}" placeholder="Program's folder"></div>`;
+  }
+  h += '</div>';
+  if (mode === 'exe'){
+    h += '<div class="section-title">Launch</div>';
+    h += sw('elevate', n.elevate, 'Run as administrator', 'Asks for UAC consent every time.');
+    h += `<div class="switch-row"><span class="t">Launch through the shell<small>Needed for documents, URLs and folders. Unset follows General (${state.general.shellExec ? 'on' : 'off'}).</small></span>${tri('shell', n.shell, 'Inherit')}</div>`;
+    h += sw('ev-start', n.events.start, 'Also run when y-pop starts') + sw('ev-exit', n.events.exit, 'Also run when y-pop exits');
+  }
+  h += hotkeyField(n);
+  h += '<div class="section-title">In the menu</div>';
+  h += sw('dflt', n.dflt, 'Default item', isRoot ? 'Shown in bold.' : 'Shown in bold; a double-click on the tray icon runs it.');
+  h += `<div class="switch-row"><span class="t">Show its hotkey<small>Unset follows General (${state.general.showSc ? 'on' : 'off'}).</small></span>${tri('showSc', n.showSc, 'Inherit')}</div>`;
+  h += `<div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap">${isRoot ? '<button type="button" class="btn sm" data-act="to-menu">Turn into a menu</button>' : ''}<button type="button" class="btn sm" data-act="run">${I.run}Run now</button></div>`;
+  return h;
+}
+function groupFields(n, isRoot){
+  let h = `<div class="section-title">${isRoot ? 'Tray icon' : 'Group'}</div><div class="grid">
+    <div class="field"><label for="f-name">Name</label><input type="text" id="f-name" data-f="name" value="${esc(n.name)}"><span class="hint">${isRoot ? 'Tray icon tooltip.' : 'Submenu label.'}</span></div>
+    <div class="field"><label for="f-tooltip">Tooltip</label><input type="text" id="f-tooltip" data-f="tooltip" value="${esc(n.tooltip)}"></div></div>`;
+  h += iconField(n);
+  h += hotkeyField(n);
+  h += '<div class="section-title">Behaviour</div>';
+  if (isRoot) h += sw('autoopen', n.autoopen, 'Open on hover', 'Shows the menu when the pointer rests on the tray icon, without a click.');
+  else h += sw('dflt', n.dflt, 'Default item', 'Shown in bold.');
+  h += `<div class="switch-row"><span class="t">Show hotkeys in this menu<small>Applies to everything inside, unless an item overrides it.</small></span>${tri('showSc', n.showSc, 'Inherit')}</div>`;
+  h += `<div class="switch-row"><span class="t">Menu style<small>Unset follows General.</small></span><select id="f-popup" data-f="popup" style="width:auto">
+    ${[['','Inherit'],['native','Native'],['overlay','Overlay list']].map(([v, l]) => `<option value="${v}" ${(n.popup || '') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>`;
+  h += `<p class="hint" style="font-size:11.5px;color:var(--muted);margin:10px 0 0">${countItems(n)} items inside${isRoot ? '' : ' · moving a group moves everything in it'}.</p>`;
+  return h;
+}
+function xmlFor(n){
+  const a = [];
+  const at = (k, v) => a.push(` <span class="a">${k}</span>=<span class="v">"${esc(v)}"</span>`);
+  if (n.kind !== 'break' && (n.name || n.kind === 'group' || n.kind === 'app')) at('name', n.name);
+  if (n.kind === 'app'){
+    if (n.appId) at('app-id', n.appId); else at('exe', n.exe);
+    if (n.param) at('param', n.param); if (n.path) at('path', n.path);
+    if (n.shell != null) at('shell', n.shell); if (n.elevate) at('elevate', 'true');
+    const ev = ['start','exit'].filter(e => n.events[e]); if (ev.length) at('events', ev.join(','));
+    if (n.browse){ at('browse','true'); if (n.filter) at('filter', n.filter); if (+n.depth) at('depth', n.depth); if (n.openFolder !== 'max-depth') at('open-folder', n.openFolder); }
+  }
+  if (n.icon) at('icon', n.icon); if (n.tooltip) at('tooltip', n.tooltip);
+  if (n.dflt) at('default','true'); if (n.autoopen) at('autoopen','true');
+  if (n.showSc != null) at('show-shortcuts', n.showSc); if (n.popup) at('popup', n.popup);
+  const tag = n.kind;
+  const inner = n.hotkeys.map(k => `\n  &lt;<span class="a">hotkey</span> key=<span class="v">"${esc(k.key)}"</span>${k.override ? ' override=<span class="v">"true"</span>' : ''}/&gt;`).join('');
+  const kids = isGroup(n) ? `\n  <span style="color:var(--muted)">… ${countItems(n)} items …</span>` : '';
+  return (inner || kids) ? `&lt;${tag}${a.join('')}&gt;${inner}${kids}\n&lt;/${tag}&gt;` : `&lt;${tag}${a.join('')}/&gt;`;
+}
+
+/* ================= general / skin / variables ================= */
+function renderGeneral(){
+  const g = state.general;
+  let h = `<h2>General</h2><p class="lede">Defaults for every tray menu. A menu or an item can override most of them.</p>`;
+  h += `<div class="section-title">Menu style</div><div class="seg" role="radiogroup">
+    <button type="button" class="${g.popup === 'native' ? 'is-active' : ''}" data-act="g-popup" data-v="native">Native menu</button>
+    <button type="button" class="${g.popup === 'overlay' ? 'is-active' : ''}" data-act="g-popup" data-v="overlay">Overlay</button></div>`;
+  if (g.popup === 'overlay') h += `<div style="margin-top:10px; display:flex; gap:6px; flex-wrap:wrap; align-items:center"><span class="hint" style="font-size:11.5px;color:var(--muted)">Overlay layout:</span>
+    <button type="button" class="chip on">List</button><button type="button" class="chip" disabled title="Not implemented yet">Runner · coming later</button><button type="button" class="chip" disabled title="Not implemented yet">Radial · coming later</button></div>`;
+  h += `<div class="note" style="max-width:72ch">The native menu is the Windows popup menu, themed by the <b>Skin</b>. Type to jump to an item's first letter. The overlay is drawn by y-pop and filters as you type.</div>`;
+  h += '<div class="section-title">Launching</div><div style="max-width:640px">';
+  h += sw('g-shell', g.shellExec, 'Launch through the shell by default', 'Lets plain entries open documents, folders and URLs with their default app. Each item can override it.');
+  h += sw('g-sc', g.showSc, 'Show hotkeys in menus', 'Right-aligned beside each item that has one.');
+  h += '</div><div class="section-title">Configuration file</div>';
+  h += `<div class="pane" style="padding:10px 12px; display:flex; gap:10px; align-items:center; flex-wrap:wrap; max-width:640px"><code style="flex:1; font-size:11.5px; min-width:0; word-break:break-all">C:\\Users\\jerome\\AppData\\Roaming\\Ypo-Lite\\y-pop.xml</code>
+    <button type="button" class="btn sm">Open folder</button><button type="button" class="btn sm">Edit XML…</button></div>
+    <p class="hint" style="font-size:11.5px;color:var(--muted);max-width:72ch">A <code>y-pop.xml</code> next to <code>y-pop.exe</code> takes priority (portable mode). Saving rewrites the file but keeps every comment where it was.</p>`;
+  const nN = state.fileNotes.length;
+  h += `<div style="display:flex; align-items:flex-end; gap:10px; max-width:720px"><div class="section-title">File notes</div><span class="ctoggle" style="margin-bottom:6px">${I.cmt}<span>Comments <span class="num">${nN}</span></span><button type="button" class="switch ${state.showComments ? 'on' : ''}" role="switch" aria-checked="${state.showComments}" aria-label="Show comments" data-act="toggle-comments"></button></span></div>`;
+  h += state.showComments
+    ? `<div style="max-width:720px">${state.fileNotes.map((t, i) => `<div class="filenote"><textarea id="fn-${i}" data-note="${i}" rows="${Math.min(12, lineCount(t) + 1)}" aria-label="File note ${i + 1}" spellcheck="false">${esc(t)}</textarea></div>`).join('')}
+       <p class="hint" style="font-size:11.5px;color:var(--muted)">Comments at the top of <code>y-pop.xml</code>, before any menu.</p></div>`
+    : `<p class="hint" style="font-size:11.5px;color:var(--muted)">${nN} comment${nN === 1 ? '' : 's'} at the top of the file, hidden. <button type="button" class="linkbtn" data-act="show-comments">Show</button></p>`;
+  return h;
+}
+
+const THEMES = {
+  default:{back:'#ffffff', text:'#000000', hback:'#0078d7', htext:'#ffffff', dis:'#6d6d6d', border:{size:1, round:10, color:'#96d9f9'}, fill:{start:'#ffffff', end:'#96d9f9', dir:'v'}, edge:'idle', ig:null},
+  flat:{back:'#ffffff', text:'#000000', hback:'#edf4fc', htext:'#000000', dis:'#6d6d6d', border:{size:1, round:0, color:'#a8d2fd'}, fill:null, edge:null, ig:null},
+  dark:{back:'#000000', text:'#ffffff', hback:'#0078d7', htext:'#ffffff', dis:'#6d6d6d', border:{size:0, round:0, color:'#000000'}, fill:{start:'#96d9f9', end:'#000000', dir:'h'}, edge:'always', ig:{start:'#96d9f9', end:'#000000', dir:'h'}},
+  native:{back:'#f9f9f9', text:'#1a1a1a', hback:'#e9e9e9', htext:'#1a1a1a', dis:'#8a8a8a', border:{size:0, round:4, color:'#e9e9e9'}, fill:null, edge:null, ig:null, native:true}
+};
+function mockIsDark(){
+  const t = document.documentElement.getAttribute('data-theme');
+  return t ? t === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+}
+function overrideCount(){
+  const s = state.skin; let c = Object.values(s.ov).filter(v => v).length;
+  if (s.padding != null) c++; if (s.margin != null) c++; if (s.edge) c++;
+  if (s.border.on) c++; if (s.bg.on) c++; if (s.ig.on) c++; return c;
+}
+function resolveDesign(theme, withOv){
+  const s = state.skin;
+  let eff = theme;
+  if (eff === 'native' && withOv && overrideCount()) eff = 'auto';
+  if (eff === 'auto') eff = mockIsDark() ? 'dark' : 'default';
+  const b = THEMES[eff];
+  const d = JSON.parse(JSON.stringify(b)); d.padding = 0; d.margin = 0; d.name = eff;
+  if (!withOv || eff === 'native') return d;
+  for (const k of Object.keys(s.ov)) if (s.ov[k]) d[k] = s.ov[k];
+  if (s.padding != null) d.padding = +s.padding; if (s.margin != null) d.margin = +s.margin;
+  if (s.edge) d.edge = s.edge;
+  if (s.border.on) d.border = {size:+s.border.size, round:+s.border.round, color:s.border.color};
+  if (s.bg.on) d.fill = {start:s.bg.start, end:s.bg.end, dir:s.bg.dir};
+  if (s.ig.on) d.ig = {start:s.ig.start, end:s.ig.end, dir:s.ig.dir};
+  return d;
+}
+const grad = g => `linear-gradient(${g.dir === 'v' ? '180deg' : '90deg'},${g.start},${g.end})`;
+function menuHTML(items, d, hoverIdx, compact){
+  const pad = d.padding, mar = d.margin;
+  let h = `<div class="pmenu" style="background:${d.back}; color:${d.text}; padding:${d.native ? 4 : 2}px; border-radius:${d.native ? 8 : 0}px; border:1px solid ${d.native ? 'rgba(0,0,0,.12)' : 'rgba(128,128,128,.5)'}; ${compact ? 'min-width:0; font-size:10px; box-shadow:none' : ''}">`;
+  items.forEach((n, i) => {
+    if (n.kind === 'break') return;
+    if (n.kind === 'separator'){
+      h += n.name ? `<div class="ptitle" style="color:${d.text}; opacity:.85">${esc(n.name)}<i></i></div>` : '<div class="psep"><i></i></div>';
+      return;
+    }
+    const hov = i === hoverIdx;
+    const sel = hov ? (d.fill ? grad(d.fill) : d.hback) : 'transparent';
+    const bd = hov && d.border.size ? `${d.border.size}px solid ${d.border.color}` : '1px solid transparent';
+    const icoBack = !hov && d.ig ? `background:${grad(d.ig)};` : '';
+    const edge = d.edge === 'always' || (d.edge === 'idle' && !hov) || (d.edge === 'hover' && hov);
+    const sc = n.hotkeys && n.hotkeys[0] && (n.showSc ?? state.general.showSc) ? n.hotkeys[0].key : '';
+    h += `<div class="prow" style="margin:${pad}px 0; padding:${mar}px; height:${(compact ? 19 : 24) + 2 * mar}px; background:${sel}; color:${hov ? d.htext : d.text}; border:${bd}; border-radius:${hov ? d.border.round : 0}px; ${n.dflt ? 'font-weight:700' : ''}">
+      <span class="picon" style="${icoBack}">${nodeIcon(n)}</span>${edge && !d.native ? '<span class="pedge"></span>' : ''}<span class="ptext">${esc(n.name)}</span>${sc ? `<span class="psc">${esc(sc)}</span>` : ''}${isGroup(n) || (n.kind === 'app' && n.browse) ? '<span class="parr">▶</span>' : ''}</div>`;
+  });
+  return h + '</div>';
+}
+function colorRow(key, label){
+  const s = state.skin; const base = resolveDesign(s.theme === 'native' ? 'auto' : s.theme, false);
+  const v = s.ov[key]; const shown = v || base[key];
+  return `<div class="swatch ${v ? '' : 'inherit'}"><span class="chipc" style="background:${shown}"><input type="color" value="${shown}" data-color="${key}" aria-label="${esc(label)}"></span>
+    <span class="t">${label}<code>${v ? v : 'theme: ' + shown}</code></span>${v ? `<button type="button" class="icon-btn" data-act="ov-reset" data-k="${key}" aria-label="Back to theme colour">${I.close}</button>` : ''}</div>`;
+}
+function renderSkin(){
+  const s = state.skin;
+  const sample = [N('app',{name:'Command line', exe:'cmd'}), N('app',{name:'Notepad', exe:'np', hotkeys:[{key:'Win+N'}]}), N('group',{name:'Explorers'})];
+  let h = `<h2>Skin</h2><p class="lede">How the native menu looks. Pick a base theme, then override parts of it. Anything not overridden keeps the theme's value.</p>`;
+  h += '<div class="section-title">Base theme</div><div class="themes" role="radiogroup">';
+  [['auto','Auto','follows Windows'],['default','Default','PortAL'],['flat','Flat','PortAL'],['dark','Dark','PortAL'],['native','Native','no theming']].forEach(([k, l, sub]) => {
+    h += `<button type="button" role="radio" aria-checked="${s.theme === k}" class="theme-card ${s.theme === k ? 'on' : ''}" data-act="theme" data-v="${k}"><span class="nm">${l}<small>${sub}</small></span><span class="mini">${menuHTML(sample, resolveDesign(k, false), 1, true)}</span></button>`;
+  });
+  h += '</div>';
+  const nOv = overrideCount();
+  const baseName = s.theme === 'auto' ? `Auto (${mockIsDark() ? 'Dark' : 'Default'} right now)` : s.theme[0].toUpperCase() + s.theme.slice(1);
+  h += `<div class="note" style="display:flex; gap:10px; align-items:center; flex-wrap:wrap"><span style="flex:1; min-width:0">${nOv ? `<b>${nOv} override${nOv > 1 ? 's' : ''}</b> on top of ${baseName}.` : `No overrides. The menu is ${baseName} as shipped.`}
+    ${s.theme === 'native' && nOv ? ' A native menu can\'t be themed, so with overrides y-pop uses Auto instead.' : ''}</span>${nOv ? '<button type="button" class="btn sm" data-act="ov-reset-all">Reset overrides</button>' : ''}</div>`;
+  h += '<div class="skin-split" style="margin-top:14px"><div>';
+  h += `<div class="section-title">Colours</div><div class="swatches">${colorRow('back','Background')}${colorRow('text','Text')}${colorRow('hback','Hover background')}${colorRow('htext','Hover text')}${colorRow('dis','Disabled text')}</div>`;
+  const numF = (k, label, hint) => `<div class="field"><label for="sk-${k}">${label}</label><input type="number" min="0" max="20" id="sk-${k}" data-skin="${k}" value="${s[k] ?? ''}" placeholder="theme: 0"><span class="hint">${hint}</span></div>`;
+  h += `<div class="section-title">Spacing and edge</div><div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(130px,1fr))">${numF('padding','Padding','Gap between rows, px')}${numF('margin','Margin','Inside each row, px')}
+    <div class="field"><label for="sk-edge">Icon edge</label><select id="sk-edge" data-skin="edge">${[['','Theme'],['idle','Idle rows'],['hover','Hovered row'],['always','Always']].map(([v, l]) => `<option value="${v}" ${(s.edge || '') === v ? 'selected' : ''}>${l}</option>`).join('')}</select><span class="hint">Line between icon and text</span></div></div>`;
+  const comp = (key, title, sub, fields) => `<div class="composite ${s[key].on ? '' : 'off'}"><div class="head"><span>${title}<small>${sub}</small></span><button type="button" class="switch ${s[key].on ? 'on' : ''}" role="switch" aria-checked="${s[key].on}" aria-label="${esc(title)}" data-act="comp" data-k="${key}"></button></div><div class="grid">${fields}</div></div>`;
+  const cF = (k, f, l) => `<div class="field"><label>${l}</label><input type="color" value="${s[k][f]}" data-comp="${k}.${f}" style="width:100%; height:28px; padding:2px; border:1px solid var(--line); border-radius:6px; background:var(--surface)"></div>`;
+  const dF = k => `<div class="field"><label>Direction</label><select data-comp="${k}.dir"><option value="h" ${s[k].dir === 'h' ? 'selected' : ''}>Horizontal</option><option value="v" ${s[k].dir === 'v' ? 'selected' : ''}>Vertical</option></select></div>`;
+  h += '<div class="section-title">Hovered row</div>';
+  h += comp('border','Border','Outline and rounding of the hovered row.', `<div class="field"><label>Size</label><input type="number" min="0" max="8" value="${s.border.size}" data-comp="border.size"></div><div class="field"><label>Round</label><input type="number" min="0" max="20" value="${s.border.round}" data-comp="border.round"></div>${cF('border','color','Colour')}`);
+  h += comp('bg','Gradient fill','Replaces the hover background with a gradient.', cF('bg','start','Start') + cF('bg','end','End') + dF('bg'));
+  h += comp('ig','Icon column gradient','Painted behind the icons of idle rows.', cF('ig','start','Start') + cF('ig','end','End') + dF('ig'));
+  h += '</div><div><div class="section-title">Preview</div>';
+  const root = state.roots.find(r => r.kind === 'group');
+  const items = root.children; const hoverIdx = items.findIndex(c => c.kind === 'app');
+  const subIdx = items.findIndex(isGroup);
+  const d = resolveDesign(s.theme, true);
+  h += `<div class="preview-stage"><div class="pv">${menuHTML(items, d, hoverIdx)}`;
+  if (subIdx >= 0){
+    const visible = items.slice(0, subIdx).filter(c => c.kind !== 'break');
+    const top = visible.reduce((a, c) => a + (c.kind === 'separator' ? (c.name ? 20 : 9) : 24 + 2 * d.padding + 2 * d.margin), 0);
+    h += `<div class="flyout" style="top:${top}px">${menuHTML(items[subIdx].children, d, -1)}</div>`;
+  }
+  h += `</div><span class="cap">${esc(root.name)} · ${d.name}${d.native ? ' (Windows draws it)' : ''}</span></div>
+    <p class="hint" style="font-size:11.5px;color:var(--muted)">Your first tray menu, with one row hovered and a submenu open.</p></div></div>`;
+  return h;
+}
+
+function usedBy(name){
+  let c = 0; const re = new RegExp('%' + name.replace(/[-]/g, '\\-') + '%', 'i');
+  const walk = n => { if ([n.exe, n.param, n.path, n.icon].some(v => v && re.test(v))) c++; n.children.forEach(walk); };
+  state.roots.forEach(walk);
+  state.vars.forEach(v => { if (v.name && v.name !== name && re.test(v.value)) c++; });
+  return c;
+}
+function renderVars(){
+  const nC = state.vars.filter(v => v.comment != null).length;
+  let h = `<h2>Variables</h2><p class="lede">Write <code>%name%</code> in any path, argument or icon. Order matters: a variable can only use the ones above it.</p>`;
+  h += `<div style="display:flex; align-items:flex-end; gap:10px"><div class="section-title">Yours</div><span class="ctoggle" style="margin-bottom:6px">${I.cmt}<span>Comments <span class="num">${nC}</span></span><button type="button" class="switch ${state.showComments ? 'on' : ''}" role="switch" aria-checked="${state.showComments}" aria-label="Show comments" data-act="toggle-comments"></button></span></div>`;
+  h += `<div class="tbl-wrap"><table><thead><tr><th style="width:22%">Name</th><th style="width:34%">Value</th><th>Resolves to</th><th class="num">Used</th><th></th></tr></thead><tbody>`;
+  let hiddenC = 0;
+  state.vars.forEach((v, i) => {
+    const acts = `<td><div class="rowact"><button type="button" class="icon-btn" data-act="var-move" data-i="${i}" data-dir="-1" ${i ? '' : 'disabled'} aria-label="Move up">${I.up}</button><button type="button" class="icon-btn" data-act="var-move" data-i="${i}" data-dir="1" ${i < state.vars.length - 1 ? '' : 'disabled'} aria-label="Move down">${I.down}</button><button type="button" class="icon-btn" data-act="var-del" data-i="${i}" aria-label="Delete">${I.del}</button></div></td>`;
+    if (v.comment != null){
+      if (!state.showComments){ hiddenC++; return; }
+      h += `<tr><td colspan="4"><div class="filenote" style="margin:0"><textarea id="vc-${i}" data-varc="${i}" rows="${Math.min(10, lineCount(v.comment) + 1)}" aria-label="Comment" spellcheck="false">${esc(v.comment)}</textarea></div></td>${acts}</tr>`;
+      return;
+    }
+    const mark = hiddenC ? `<button type="button" class="cmark" data-act="show-comments" title="${hiddenC} hidden comment. Click to show comments.">${I.cmt}${hiddenC}</button>` : ''; hiddenC = 0;
+    h += `<tr><td><div style="display:flex; gap:4px; align-items:center">${mark}<input type="text" class="mono" value="${esc(v.name)}" data-var="${i}.name" aria-label="Name"></div></td><td><input type="text" class="mono" value="${esc(v.value)}" data-var="${i}.value" aria-label="Value"></td>
+      <td class="mono" style="color:var(--muted)">${esc(expand(v.value, v.name))}</td><td class="num">${usedBy(v.name)}</td>
+      <td><div class="rowact"><button type="button" class="icon-btn" data-act="var-move" data-i="${i}" data-dir="-1" ${i ? '' : 'disabled'} aria-label="Move up">${I.up}</button><button type="button" class="icon-btn" data-act="var-move" data-i="${i}" data-dir="1" ${i < state.vars.length - 1 ? '' : 'disabled'} aria-label="Move down">${I.down}</button><button type="button" class="icon-btn" data-act="var-del" data-i="${i}" aria-label="Delete">${I.del}</button></div></td></tr>`;
+  });
+  h += `</tbody></table></div><button type="button" class="btn sm ghost" style="margin-top:6px;color:var(--accent)" data-act="var-add">${I.plus}Add variable</button><button type="button" class="btn sm ghost" style="margin-top:6px;color:var(--accent)" data-act="var-add-comment">${I.cmt}Add comment</button>
+    <div class="note">Renaming a variable rewrites every <code>%name%</code> that uses it.</div>`;
+  h += `<div class="section-title">Built in</div><div class="tbl-wrap"><table><thead><tr><th style="width:22%">Name</th><th>On this PC</th></tr></thead><tbody>
+    ${BUILTINS.map(([n, v]) => `<tr><td class="mono">%${n}%</td><td class="mono" style="color:var(--muted)">${esc(v)}</td></tr>`).join('')}
+    <tr><td class="mono">%clipboard%</td><td style="color:var(--muted)">The clipboard text, read when the item launches. <code>%clipboards%</code> is the same, in quotes.</td></tr></tbody></table></div>`;
+  return h;
+}
+
+/* ================= render ================= */
+function renderStatus(){
+  const total = state.roots.reduce((a, r) => a + 1 + countItems(r), 0);
+  const el = document.getElementById('status');
+  let msg = state.status || `Loaded — ${state.roots.length} tray menus, ${total} items`;
+  el.innerHTML = `<span class="dot ${state.dirty ? 'dirty' : ''}"></span><span>${esc(msg)}${state.dirty && !state.status ? ' · unsaved changes' : ''}</span>${state.undo ? ' <button type="button" class="linkbtn" data-act="undo">Undo</button>' : ''}`;
+}
+function render(keepFocus){
+  const active = keepFocus && document.activeElement && document.activeElement.id;
+  const pos = active && document.activeElement.selectionStart;
+  const page = document.getElementById('page'); const scroll = page.scrollTop;
+  renderRail();
+  let h = '';
+  if (state.screen === 'general') h = renderGeneral();
+  else if (state.screen === 'skin') h = renderSkin();
+  else if (state.screen === 'vars') h = renderVars();
+  else h = renderMenuScreen(rootOf(state.screen) || state.roots[0]);
+  page.innerHTML = '<div class="banner"><b>1 problem in y-pop.xml.</b> <span>line 42: &lt;app&gt; "Old tool" needs an exe or an app-id. It was skipped, and saving will drop it.</span></div>' + h;
+  page.scrollTop = scroll;
+  renderStatus();
+  if (active){ const el = document.getElementById(active); if (el){ el.focus(); try{ if (pos != null) el.setSelectionRange(pos, pos); }catch(e){} } }
+  state.flash.clear();
+}
+
+/* ================= actions ================= */
+function currentRoot(){ return rootOf(state.screen); }
+function selected(){ const r = currentRoot(); if (!r) return null; const f = state.sel[r.id] && find(state.sel[r.id]); return f ? f.node : r; }
+function snapshot(label){ state.undo = {label, roots:JSON.stringify(state.roots), sel:JSON.stringify(state.sel)}; }
+function revive(o){ if (o && typeof o === 'object' && o.id){ o.children = (o.children || []).map(revive); o.lead = (o.lead || []).map(revive); } return o; }
+
+function fromDrop(file){
+  const s = SAMPLE_DROPS[file];
+  const ext = (file.match(/\.([a-z0-9]+)$/i) || [,''])[1].toLowerCase();
+  const d = s || (ext === 'lnk' ? {kind:'lnk', lnk:'C:\\Users\\jerome\\Desktop\\' + file, target:'C:\\Program Files\\' + file.replace(/\.lnk$/i, '') + '\\' + file.replace(/\.lnk$/i, '') + '.exe', name:file.replace(/\.lnk$/i, '')}
+    : ext === 'exe' ? {kind:'exe', path:'C:\\Users\\jerome\\Downloads\\' + file, name:file.replace(/\.exe$/i, '')}
+    : !ext ? {kind:'folder', path:'C:\\Users\\jerome\\Desktop\\' + file, name:file}
+    : {kind:'doc', path:'C:\\Users\\jerome\\Desktop\\' + file, name:file.replace(/\.[^.]+$/, '')});
+  const abs = d.kind === 'lnk' ? d.target : d.path;
+  const tok = tokenize(abs);
+  const n = N('app', {name:d.name, exe:tok, param:d.args || '', path:d.wd || '', shell:d.kind === 'doc' ? true : null,
+    origin:{kind:d.kind, file, abs, lnk:d.lnk, keepLnk:false}});
+  if (d.kind === 'lnk') n.icon = null;
+  return n;
+}
+function dropFiles(root, files, at){
+  if (!files.length) return;
+  const nodes = files.map(fromDrop);
+  insertNodes(root, nodes, at);
+  state.iconPicker = false;
+  markDirty(nodes.length === 1 ? `Added ${nodes[0].name}` : `Added ${nodes.length} items`);
+  state.status = null; render();
+}
+
+document.addEventListener('click', e => {
+  const t = e.target.closest('[data-act],[data-nav],[data-node]');
+  if (!t) { if (state.addMenu){ state.addMenu = false; render(); } return; }
+  if (t.dataset.nav){ state.screen = t.dataset.nav; state.picker = null; state.addMenu = false; state.iconPicker = false; render(); return; }
+  const act = t.dataset.act;
+  const root = currentRoot();
+  if (!act && t.dataset.node){
+    if (e.target.closest('.chev')) return;
+    state.sel[root.id] = +t.dataset.node; state.iconPicker = false; state.iconSrc = null; state.addMenu = false; render();
+    return;
+  }
+  const sel = selected();
+  switch (act){
+    case 'toggle': { const n = find(+t.dataset.id).node; n.collapsed = !n.collapsed; render(); break; }
+    case 'add-menu': state.addMenu = !state.addMenu; render(); e.stopPropagation(); break;
+    case 'add': {
+      const k = t.dataset.kind; let n;
+      if (k === 'group') n = N('group', {name:'New group'});
+      else if (k === 'separator') n = N('separator');
+      else if (k === 'titled') n = N('separator', {name:'Section'});
+      else if (k === 'folder') n = N('app', {name:'New folder', browse:true, filter:'*.*'});
+      else if (k === 'app') n = N('app', {name:'New app'});
+      else if (k === 'comment'){ n = C(''); state.showComments = true; }
+      else n = N(k, {name:k === 'about' ? 'About' : k === 'quit' ? 'Quit' : ''});
+      insertNodes(root, [n]); state.addMenu = false; state.picker = null; state.iconPicker = false;
+      markDirty(); state.status = null; render();
+      const f = document.getElementById(k === 'comment' ? 'f-text' : k === 'app' || k === 'folder' ? 'f-exe' : 'f-name'); if (f){ f.focus(); f.select && f.select(); }
+      break;
+    }
+    case 'open-picker': state.picker = 'app'; state.pickerTab = t.dataset.tab || 'start'; state.pickerChecked.clear(); state.pickerQuery = ''; state.addMenu = false; render(); break;
+    case 'close-picker': state.picker = null; render(); break;
+    case 'picker-tab': state.pickerTab = t.dataset.tab; state.pickerChecked.clear(); state.pickerQuery = ''; render(); break;
+    case 'picker-add': {
+      const nodes = [...state.pickerChecked].map(key => {
+        const [tab, name] = key.split('|');
+        if (tab === 'store'){ const a = STORE_APPS.find(x => x[0] === name); return N('app', {name, appId:a[1], origin:{kind:'store', file:name}}); }
+        const a = START_MENU.find(x => x[0] === name); return N('app', {name, exe:tokenize(a[1]), origin:{kind:'start', file:name + '.lnk', abs:a[1]}});
+      });
+      insertNodes(root, nodes); state.picker = null; state.pickerChecked.clear();
+      markDirty(); state.status = `Added ${nodes.length} app${nodes.length > 1 ? 's' : ''}`; render(); break;
+    }
+    case 'sample-drop': dropFiles(root, [t.dataset.file]); state.picker = null; render(); break;
+    case 'move': {
+      snapshot('move'); const f = find(sel.id); const dir = t.dataset.dir;
+      if (dir === 'up' && f.index > 0){ f.list.splice(f.index, 1); f.list.splice(f.index - 1, 0, sel); }
+      else if (dir === 'down' && f.index < f.list.length - 1){ f.list.splice(f.index, 1); f.list.splice(f.index + 1, 0, sel); }
+      else if (dir === 'out'){ const pf = find(f.parent.id); f.list.splice(f.index, 1); pf.list.splice(pf.index + 1, 0, sel); }
+      else if (dir === 'into'){ const g = f.list.slice(0, f.index).reverse().find(isGroup); f.list.splice(f.index, 1); g.children.push(sel); g.collapsed = false; }
+      state.flash.add(sel.id); if (state.roots.includes(sel)) state.screen = 'menu:' + state.roots.indexOf(sel);
+      markDirty(); state.status = null; render(); break;
+    }
+    case 'dup': { const f = find(sel.id); const copy = revive(JSON.parse(JSON.stringify(sel)));
+      const reid = n => { n.id = ++uid; n.origin = null; n.children.forEach(reid); n.lead.forEach(reid); }; reid(copy); copy.lead = []; copy.name += ' (copy)';
+      f.list.splice(f.index + 1, 0, copy); state.sel[root.id] = copy.id; state.flash.add(copy.id); markDirty(); render(); break; }
+    case 'del': {
+      snapshot('delete'); const f = find(sel.id);
+      f.list.splice(f.index, 1);
+      if (state.roots.includes(sel)){ state.screen = state.roots.length ? 'menu:0' : 'general'; }
+      else if (f.owner) state.sel[root.id] = f.owner.id;
+      else { const nb = f.list[f.index - 1] || f.list[f.index] || f.parent; state.sel[root.id] = nb ? nb.id : root.id; }
+      const extra = [isGroup(sel) ? countItems(sel) + ' items inside' : '', sel.lead.length ? 'its comment' + (sel.lead.length > 1 ? 's' : '') : ''].filter(Boolean).join(' and ');
+      markDirty(); state.status = `Deleted ${sel.kind === 'comment' ? 'comment' : sel.name || kindLabel(sel)}${extra ? ' and ' + extra : ''}`; render(); break;
+    }
+    case 'undo': if (state.undo){ state.roots = revive(JSON.parse(state.undo.roots)).map(revive); state.sel = JSON.parse(state.undo.sel);
+      const maxId = n => Math.max(n.id, ...n.children.map(maxId), ...n.lead.map(maxId)); uid = Math.max(uid, ...state.roots.map(maxId));
+      state.undo = null; state.status = 'Undone'; if (!rootOf(state.screen)) state.screen = 'menu:0'; render(); } break;
+    case 'new-root': { const n = N('group', {name:'New menu'}); state.roots.push(n); state.screen = 'menu:' + (state.roots.length - 1); state.sel[n.id] = n.id; markDirty(); render();
+      const f = document.getElementById('f-name'); if (f){ f.focus(); f.select(); } break; }
+    case 'to-menu': { const i = state.roots.indexOf(sel); const g = N('group', {name:sel.name, children:[sel]}); state.roots[i] = g; state.sel[g.id] = sel.id; markDirty(); render(); break; }
+    case 'tri': { const v = t.dataset.v; sel[t.dataset.f] = v === 'null' ? null : v === 'true'; markDirty(); render(); break; }
+    case 'toggle-comments': case 'show-comments': {
+      state.showComments = act === 'show-comments' ? true : !state.showComments;
+      try{ localStorage.setItem('y-pop-config-mock-comments', state.showComments ? '1' : '0'); }catch(err){}
+      if (!state.showComments && sel && sel.kind === 'comment'){ const f = find(sel.id); const next = f.owner || f.list.slice(f.index + 1).find(x => x.kind !== 'comment') || f.parent || root; state.sel[root.id] = next.id; }
+      render(); break; }
+    case 'comment-above': { const c = C(''); sel.lead.push(c); state.showComments = true; state.sel[root.id] = c.id; markDirty(); render(); const ta = document.getElementById('f-text'); if (ta) ta.focus(); break; }
+    case 'comment-out': { snapshot('comment out'); const f = find(sel.id);
+      const text = xmlFor(sel).replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/\n\s*… \d+ items …/, '');
+      const c = C(text, {disabled:sel}); f.list.splice(f.index, 1, c); state.showComments = true; state.sel[root.id] = c.id; state.flash.add(c.id);
+      markDirty(); state.status = `${sel.name} is commented out: kept in the file, gone from the menu`; render(); break; }
+    case 'restore': { const f = find(sel.id); const n = sel.disabled; f.list.splice(f.index, 1, n); state.sel[root.id] = n.id; state.flash.add(n.id); markDirty(); state.status = `${n.name} is back in the menu`; render(); break; }
+    case 'sw': { const f = t.dataset.f;
+      if (f === 'attach'){ const fc = find(sel.id);
+        if (fc.owner){ fc.list.splice(fc.index, 1); const fo = find(fc.owner.id); fo.list.splice(fo.index, 0, sel); }
+        else { const next = fc.list[fc.index + 1]; fc.list.splice(fc.index, 1); next.lead.unshift(sel); }
+        markDirty(); render(); break; }
+      if (f === 'ev-start') sel.events.start = !sel.events.start; else if (f === 'ev-exit') sel.events.exit = !sel.events.exit;
+      else if (f === 'g-shell') state.general.shellExec = !state.general.shellExec; else if (f === 'g-sc') state.general.showSc = !state.general.showSc;
+      else sel[f] = !sel[f]; markDirty(); render(); break; }
+    case 'mode': { const v = t.dataset.v;
+      if (v === 'store'){ if (!sel._store && !sel.appId){ sel._exe = sel.exe; sel.exe = ''; sel.browse = false; sel.appId = sel._appId || ''; sel._store = true; } }
+      else { if (sel._store || sel.appId){ sel._appId = sel.appId; sel.appId = ''; sel.exe = sel._exe || sel.exe; sel._store = false; } sel.browse = v === 'folder'; if (sel.browse && !sel.filter) sel.filter = '*.*'; }
+      markDirty(); render(); break; }
+    case 'tokenize': sel.exe = tokenize(sel.exe); markDirty(); render(); break;
+    case 'ins-clip': sel.param = (sel.param ? sel.param + ' ' : '') + '%clipboard%'; markDirty(); render(); break;
+    case 'origin': { const o = sel.origin; const alt = t.dataset.alt;
+      if (alt === 'uselnk'){ o.keepLnk = !o.keepLnk; sel.exe = tokenize(o.keepLnk ? o.lnk : o.abs); }
+      if (alt === 'browse'){ sel.browse = !sel.browse; if (sel.browse && !sel.filter) sel.filter = '*.*'; }
+      if (alt === 'abs'){ sel.exe = sel.exe.includes('%') ? expand(sel.exe) : tokenize(sel.exe); }
+      markDirty(); render(); break; }
+    case 'origin-dismiss': sel.origin = null; render(); break;
+    case 'icon-toggle': state.iconPicker = !state.iconPicker; state.iconSrc = null; render(); break;
+    case 'icon-clear': sel.icon = null; markDirty(); render(); break;
+    case 'icon-src': state.iconSrc = t.dataset.src; render(); break;
+    case 'icon-pick': sel.icon = t.dataset.v; markDirty(); render(); break;
+    case 'hk-add': { const guesses = ['Win+Alt+1','Win+Alt+2','Win+Alt+3','Ctrl+Alt+P']; sel.hotkeys.push({key:guesses[sel.hotkeys.length % 4], override:false}); markDirty('Key picker would open here; filled in a sample combo'); render(); break; }
+    case 'hk-del': sel.hotkeys.splice(+t.dataset.i, 1); markDirty(); render(); break;
+    case 'hk-ov': { const k = sel.hotkeys[+t.dataset.i]; k.override = !k.override; markDirty(); render(); break; }
+    case 'run': state.status = `Launched ${sel.name}: ${sel.appId || expand(sel.exe)}`; renderStatus(); break;
+    case 'g-popup': state.general.popup = t.dataset.v; markDirty(); render(); break;
+    case 'theme': state.skin.theme = t.dataset.v; markDirty(); render(); break;
+    case 'ov-reset': state.skin.ov[t.dataset.k] = null; markDirty(); render(); break;
+    case 'ov-reset-all': { const s = state.skin; Object.keys(s.ov).forEach(k => s.ov[k] = null); s.padding = s.margin = s.edge = null; s.border.on = s.bg.on = s.ig.on = false; markDirty(); render(); break; }
+    case 'comp': state.skin[t.dataset.k].on = !state.skin[t.dataset.k].on; markDirty(); render(); break;
+    case 'var-add': state.vars.push({name:'new', value:''}); markDirty(); render(); break;
+    case 'var-add-comment': state.vars.push({comment:''}); state.showComments = true; markDirty(); render(); { const ta = document.getElementById('vc-' + (state.vars.length - 1)); if (ta) ta.focus(); } break;
+    case 'var-del': { const v = state.vars[+t.dataset.i]; const u = v.comment != null ? 0 : usedBy(v.name); state.vars.splice(+t.dataset.i, 1); markDirty(u ? `Deleted %${v.name}% — ${u} place${u > 1 ? 's' : ''} still use it` : null); render(); break; }
+    case 'var-move': { const i = +t.dataset.i, j = i + +t.dataset.dir; [state.vars[i], state.vars[j]] = [state.vars[j], state.vars[i]]; markDirty(); render(); break; }
+    case 'save': state.dirty = false; state.undo = null; state.status = 'Saved and applied — y-pop is reloading it'; renderStatus(); break;
+    case 'reload': state.status = 'Reload would re-read y-pop.xml and drop unsaved changes'; renderStatus(); break;
+  }
+});
+document.addEventListener('keydown', e => {
+  const row = e.target.closest && e.target.closest('[data-node]');
+  if (row && (e.key === 'Enter' || e.key === ' ')){ e.preventDefault(); row.click(); }
+});
+document.addEventListener('input', e => {
+  const t = e.target; const sel = selected();
+  if (t.id === 'picker-q'){ state.pickerQuery = t.value; render(true); return; }
+  if (t.dataset.f && sel && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')){
+    let v = t.value; if (t.dataset.f === 'depth') v = Math.max(0, Math.min(200, +v || 0));
+    sel[t.dataset.f] = v; markDirty();
+    render(true); return;
+  }
+  if (t.dataset.var){ const [i, k] = t.dataset.var.split('.'); const v = state.vars[+i];
+    if (k === 'name'){ const old = v.name, nw = t.value.replace(/[^a-z0-9-]/gi, '');
+      const re = new RegExp('%' + old + '%', 'gi'); const walk = n => { ['exe','param','path','icon'].forEach(f => { if (n[f]) n[f] = n[f].replace(re, '%' + nw + '%'); }); n.children.forEach(walk); };
+      if (old) { state.roots.forEach(walk); state.vars.forEach(x => { if (x.value) x.value = x.value.replace(re, '%' + nw + '%'); }); }
+      v.name = nw; } else v.value = t.value;
+    markDirty(); render(true); return; }
+  if (t.dataset.varc){ state.vars[+t.dataset.varc].comment = t.value; markDirty(); render(true); return; }
+  if (t.dataset.note){ state.fileNotes[+t.dataset.note] = t.value; markDirty(); render(true); return; }
+  if (t.dataset.color){ state.skin.ov[t.dataset.color] = t.value; markDirty(); render(true); return; }
+  if (t.dataset.skin && t.tagName === 'INPUT'){ state.skin[t.dataset.skin] = t.value === '' ? null : +t.value; markDirty(); render(true); return; }
+  if (t.dataset.comp && t.tagName === 'INPUT'){ const [k, f] = t.dataset.comp.split('.'); state.skin[k][f] = t.value; markDirty(); render(true); return; }
+});
+document.addEventListener('change', e => {
+  const t = e.target; const sel = selected();
+  if (t.id === 'move-to' && t.value){ snapshot('move'); const g = find(+t.value).node; const f = find(sel.id); f.list.splice(f.index, 1); g.children.push(sel); g.collapsed = false;
+    const r = rootFor(g.id); state.screen = 'menu:' + state.roots.indexOf(r); state.sel[r.id] = sel.id; state.flash.add(sel.id); markDirty(); state.status = `Moved ${sel.name} to ${g.name}`; render(); return; }
+  if (t.tagName === 'SELECT' && t.dataset.f && sel){
+    if (t.dataset.f === 'appId'){ sel.appId = t.value; const a = STORE_APPS.find(x => x[1] === t.value); if (a && (!sel.name || sel.name === 'New app')) sel.name = a[0]; }
+    else if (t.dataset.f === 'openFolder') sel.openFolder = t.value; else sel[t.dataset.f] = t.value || null;
+    markDirty(); render(); return; }
+  if (t.dataset.pick){ t.checked ? state.pickerChecked.add(t.dataset.pick) : state.pickerChecked.delete(t.dataset.pick); render(true); return; }
+  if (t.tagName === 'SELECT' && t.dataset.skin){ state.skin[t.dataset.skin] = t.value || null; markDirty(); render(); return; }
+  if (t.tagName === 'SELECT' && t.dataset.comp){ const [k, f] = t.dataset.comp.split('.'); state.skin[k][f] = t.value; markDirty(); render(); return; }
+});
+
+/* real drag and drop from the desktop (names only: a browser can't see full paths) */
+const hasFiles = e => e.dataTransfer && [...e.dataTransfer.types].includes('Files');
+function dropTarget(e){
+  const row = e.target.closest('[data-node]'); if (row){ const n = find(+row.dataset.node).node; return {id:n.id, into:isGroup(n)}; }
+  if (e.target.closest('[data-dropzone],#tree-pane')) return {zone:true};
+  return null;
+}
+document.addEventListener('dragover', e => {
+  if (!hasFiles(e) || !currentRoot()) return;
+  const t = dropTarget(e); if (!t) return;
+  e.preventDefault(); e.dataTransfer.dropEffect = 'copy';
+  const k = JSON.stringify(t); if (k !== JSON.stringify(state.dropHint)){ state.dropHint = t; render(); }
+});
+document.addEventListener('dragleave', e => { if (!e.relatedTarget && state.dropHint){ state.dropHint = null; render(); } });
+document.addEventListener('drop', e => {
+  if (!hasFiles(e)) return; e.preventDefault();
+  const t = dropTarget(e); const root = currentRoot(); state.dropHint = null;
+  if (!t || !root){ render(); return; }
+  const names = [...e.dataTransfer.files].map(f => f.name);
+  let at;
+  if (t.id){ let f = find(t.id); if (f.owner) f = find(f.owner.id); at = t.into ? {list:f.node.children, index:f.node.children.length, parent:f.node} : {list:f.list, index:f.index + 1, parent:f.parent}; }
+  dropFiles(root, names, at);
+});
+
+/* theme toggle */
+const themeButtons = document.querySelectorAll('[data-theme-btn]');
+function applyTheme(mode){
+  if (mode === 'system') document.documentElement.removeAttribute('data-theme'); else document.documentElement.setAttribute('data-theme', mode);
+  themeButtons.forEach(b => b.classList.toggle('is-active', b.dataset.themeBtn === mode));
+  try{ localStorage.setItem('y-pop-config-mock-theme', mode); }catch(e){}
+  render();
+}
+themeButtons.forEach(b => b.addEventListener('click', () => applyTheme(b.dataset.themeBtn)));
+try{ const c = localStorage.getItem('y-pop-config-mock-comments'); if (c) state.showComments = c === '1'; }catch(e){}
+let savedTheme = null; try{ savedTheme = localStorage.getItem('y-pop-config-mock-theme'); }catch(e){}
+if (savedTheme === 'light' || savedTheme === 'dark'){ document.documentElement.setAttribute('data-theme', savedTheme); themeButtons.forEach(b => b.classList.toggle('is-active', b.dataset.themeBtn === savedTheme)); }
+try{ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => render()); }catch(e){}
+
+render();
+})();
+</script>
