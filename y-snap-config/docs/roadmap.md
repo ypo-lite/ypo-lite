@@ -22,7 +22,7 @@ Save regenerates the whole file from `Settings` (`Settings::to_xml`). Anything
 | # | Item | Status | Notes |
 |---|---|---|---|
 | 2.1 | **Apply on save.** | ✅ (verify live) | After a successful save the app checks whether y-snap is running (its single-instance mutex, `y_core::single_instance::is_running`) and, if so, broadcasts the registered `YpoLite.YSnap.Reload` message (`y_snap::ipc`); y-snap reloads on it. Status: "Saved and applied — y-snap is reloading it" or "Saved — y-snap isn't running; it'll use these settings when it starts". A broken file is still reported by y-snap's own notification. Not handled: a y-snap running elevated (UIPI blocks the message); it doesn't run elevated today. |
-| 2.2 | **Tray "Open configuration" launches this app.** | ⬜ | Today it `ShellExecute`s the XML into the default editor. Launch `y-snap-config.exe` from next to `y-snap.exe`, falling back to the XML when it's absent. |
+| 2.2 | **The tray opens this app.** | ✅ (verify live) | Tray menu: "Settings…" launches `y-snap-config.exe` from next to `y-snap.exe` (falling back to the XML, with a notification saying why); "Edit y-snap.xml" keeps direct file access; double-clicking the icon opens Settings. The app is now single-instance (`YpoLite.YSnapConfig` mutex): a second launch brings the open window forward (`y_core::single_instance::bring_to_front`, found by title), so two editors can't overwrite each other's saves. |
 
 ## 3. Settings with no editor yet (round-trip untouched today)
 
@@ -36,7 +36,7 @@ Save regenerates the whole file from `Settings` (`Settings::to_xml`). Anything
 
 | # | Item | Status | Notes |
 |---|---|---|---|
-| 4.1 | Reorder hotkeys, overlay tiles, popup tiles | ⬜ | Tile order is display order in both popups. Move up/down icon buttons in the actions column; close the editor first, like delete does. |
+| 4.1 | Reorder hotkeys, overlay groups and tiles, popup tiles | ✅ (verify live) | A "Reorder" toggle beside each list's add button (shown once there are 2+ rows) swaps each row's actions for ↑/↓ (`reorder.rs`), at the same width, so the tables don't reflow when the mode switches. Reordering and editing are separate modes: entering either leaves the other, so an editor never points at a moved row. Hotkeys and Groups actions columns widened to two buttons to fit ↑/↓ (their card-layout thresholds moved up ~48px). |
 | 4.2 | Conflict warnings | ⬜ | Same combo bound twice; two overlay tiles on one key. Inline on the row (a warning icon with a tooltip), not blocking. |
 
 ## Not planned

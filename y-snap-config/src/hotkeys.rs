@@ -3,8 +3,9 @@
 //! that row ([`Row::detail`]).
 
 use crate::key_picker::{KeyPickerUi, combo_labels, key_picker};
+use crate::reorder::{list_footer, row_actions};
 use crate::ui::prelude::*;
-use crate::{ConfigApp, EditorClose, Msg};
+use crate::{ConfigApp, EditorClose, ListKind, Msg};
 use windows_reactor::*;
 use y_snap::action::{Action, Target};
 use y_snap::config::Binding;
@@ -42,12 +43,14 @@ const COLUMNS: [Column; 6] = [
     Column::flex("Target", 100.0),
     Column::fixed("Desktop", 96.0),
     Column::fixed("Steal from shell", 72.0),
-    Column::actions(size::ICON_BUTTON),
+    // Room for the ↑/↓ pair while reordering; one delete button otherwise.
+    Column::actions(TWO_ICON_BUTTONS),
 ];
 
 pub fn hotkeys_view(
     hotkeys: &[Binding],
     editing: Option<usize>,
+    reordering: bool,
     picker: &KeyPickerUi,
     viewport: Viewport,
     context: &ViewContext<ConfigApp>,
@@ -70,7 +73,7 @@ pub fn hotkeys_view(
                 context.callback(|()| Msg::EditorClosed(EditorClose::Keep)),
             )
         });
-        Row::new(index.to_string(), cells(index, binding, context)).detail(detail)
+        Row::new(index.to_string(), cells(index, binding, hotkeys.len(), reordering, context)).detail(detail)
     });
 
     page(
@@ -79,7 +82,16 @@ pub fn hotkeys_view(
          window or whatever the pointer is over.",
         Stack::vertical(space::L)
             .child("table", table.rows(rows).build(viewport))
-            .child("add", add_button("Add hotkey", context.callback(|()| Msg::HotkeyAdded)))
+            .child(
+                "add",
+                list_footer(
+                    ListKind::Hotkeys,
+                    add_button("Add hotkey", context.callback(|()| Msg::HotkeyAdded)),
+                    hotkeys.len(),
+                    reordering,
+                    context,
+                ),
+            )
             .child(
                 "note",
                 note(
@@ -91,7 +103,13 @@ pub fn hotkeys_view(
     )
 }
 
-fn cells(index: usize, binding: &Binding, context: &ViewContext<ConfigApp>) -> Vec<View> {
+fn cells(
+    index: usize,
+    binding: &Binding,
+    count: usize,
+    reordering: bool,
+    context: &ViewContext<ConfigApp>,
+) -> Vec<View> {
     let action = ACTIONS.iter().position(|a| *a == binding.action);
     let target = TARGETS.iter().position(|t| *t == binding.target);
 
@@ -120,6 +138,13 @@ fn cells(index: usize, binding: &Binding, context: &ViewContext<ConfigApp>) -> V
         combo(TARGETS.map(Target::name), target, context.callback(move |c| Msg::HotkeyTargetChanged(index, c))).into(),
         desktop,
         switch(binding.steal, context.callback(move |on| Msg::HotkeyStealToggled(index, on))),
-        icon_button(Symbol::Delete, "Delete hotkey", context.callback(move |()| Msg::HotkeyDeleted(index))),
+        row_actions(
+            ListKind::Hotkeys,
+            index,
+            count,
+            reordering,
+            || icon_button(Symbol::Delete, "Delete hotkey", context.callback(move |()| Msg::HotkeyDeleted(index))),
+            context,
+        ),
     ]
 }

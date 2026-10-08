@@ -14,9 +14,10 @@
 use crate::icon_picker::{IconPickerUi, icon_field, icon_picker};
 use crate::overlay::OVERLAY_ACTIONS;
 use crate::overlay::palette::to_ui_color;
+use crate::reorder::{list_footer, row_actions};
 use crate::ui::prelude::*;
 use crate::ui::tokens::font;
-use crate::{ConfigApp, EditorClose, Msg};
+use crate::{ConfigApp, EditorClose, ListKind, Msg};
 use windows_reactor::*;
 use y_snap::action::Action;
 use y_snap::config::{MinButton, Overlay, QuickAction, is_minbutton_action};
@@ -33,7 +34,7 @@ const DELAY_MAX_MS: f64 = 2000.0;
 const DELAY_STEP_MS: f64 = 50.0;
 
 const COLUMNS: [Column; 3] =
-    [Column::fixed("Icon", 48.0), Column::flex("Tile", 160.0), Column::actions(2.0 * size::ICON_BUTTON + space::XS)];
+    [Column::fixed("Icon", 48.0), Column::flex("Tile", 160.0), Column::actions(TWO_ICON_BUTTONS)];
 
 /// Smallest the preview gets beside the settings before moving below them.
 const PREVIEW_MIN_WIDTH: f64 = 300.0;
@@ -43,12 +44,13 @@ pub fn min_button_view(
     min_button: &MinButton,
     overlay: &Overlay,
     editing: Option<usize>,
+    reordering: bool,
     icons: &IconPickerUi,
     viewport: Viewport,
     context: &ViewContext<ConfigApp>,
 ) -> View {
     let split = Split::new(viewport).min_widths(SETTINGS_MIN_WIDTH, PREVIEW_MIN_WIDTH).weights(1.2, 1.0);
-    let settings = settings(min_button, editing, icons, split.primary(), context);
+    let settings = settings(min_button, editing, reordering, icons, split.primary(), context);
     let preview = preview(min_button, overlay, split.secondary());
 
     page(
@@ -62,6 +64,7 @@ pub fn min_button_view(
 fn settings(
     min_button: &MinButton,
     editing: Option<usize>,
+    reordering: bool,
     icons: &IconPickerUi,
     viewport: Viewport,
     context: &ViewContext<ConfigApp>,
@@ -104,7 +107,8 @@ fn settings(
     let rows = min_button.items.iter().enumerate().map(|(index, item)| {
         let open = editing == Some(index);
         let detail = open.then(|| tile_editor(index, item, &actions, icons, detail_viewport, context));
-        Row::new(index.to_string(), cells(index, item, open, context)).detail(detail)
+        Row::new(index.to_string(), cells(index, item, open, min_button.items.len(), reordering, context))
+            .detail(detail)
     });
 
     Stack::vertical(space::XL)
@@ -113,15 +117,29 @@ fn settings(
             "tiles",
             section(
                 format!("Popup tiles — {}", min_button.items.len()),
-                Stack::vertical(space::L)
-                    .child("table", table.rows(rows).build(viewport))
-                    .child("add", add_button("Add tile", context.callback(|()| Msg::QuickActionAdded))),
+                Stack::vertical(space::L).child("table", table.rows(rows).build(viewport)).child(
+                    "add",
+                    list_footer(
+                        ListKind::PopupTiles,
+                        add_button("Add tile", context.callback(|()| Msg::QuickActionAdded)),
+                        min_button.items.len(),
+                        reordering,
+                        context,
+                    ),
+                ),
             ),
         )
         .into()
 }
 
-fn cells(index: usize, item: &QuickAction, open: bool, context: &ViewContext<ConfigApp>) -> Vec<View> {
+fn cells(
+    index: usize,
+    item: &QuickAction,
+    open: bool,
+    count: usize,
+    reordering: bool,
+    context: &ViewContext<ConfigApp>,
+) -> Vec<View> {
     let icon: View = match &item.icon {
         Some(icon) => text::body(icon.clone()).into(),
         None => text::placeholder().into(),
@@ -130,20 +148,33 @@ fn cells(index: usize, item: &QuickAction, open: bool, context: &ViewContext<Con
         .child("label", text::single_line(item.label.clone().unwrap_or_else(|| "(no label)".to_owned())))
         .child("action", text::caption(item.action.name()))
         .into();
-    let actions: View = Stack::horizontal(space::XS)
-        .child(
-            "edit",
-            icon_button(
-                if open { Symbol::Accept } else { Symbol::Edit },
-                if open { "Close editor" } else { "Edit tile" },
-                context.callback(move |()| Msg::EditQuickAction(index)),
-            ),
-        )
-        .child(
-            "delete",
-            icon_button(Symbol::Delete, "Delete tile", context.callback(move |()| Msg::QuickActionDeleted(index))),
-        )
-        .into();
+    let actions = row_actions(
+        ListKind::PopupTiles,
+        index,
+        count,
+        reordering,
+        || {
+            Stack::horizontal(space::XS)
+                .child(
+                    "edit",
+                    icon_button(
+                        if open { Symbol::Accept } else { Symbol::Edit },
+                        if open { "Close editor" } else { "Edit tile" },
+                        context.callback(move |()| Msg::EditQuickAction(index)),
+                    ),
+                )
+                .child(
+                    "delete",
+                    icon_button(
+                        Symbol::Delete,
+                        "Delete tile",
+                        context.callback(move |()| Msg::QuickActionDeleted(index)),
+                    ),
+                )
+                .into()
+        },
+        context,
+    );
     vec![icon, tile, actions]
 }
 

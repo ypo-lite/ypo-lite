@@ -8,7 +8,9 @@
 
 use windows::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, HANDLE, LPARAM, WPARAM};
 use windows::Win32::System::Threading::{CreateMutexW, OpenMutexW, SYNCHRONIZATION_SYNCHRONIZE};
-use windows::Win32::UI::WindowsAndMessaging::{HWND_BROADCAST, PostMessageW};
+use windows::Win32::UI::WindowsAndMessaging::{
+    FindWindowW, HWND_BROADCAST, IsIconic, PostMessageW, SW_RESTORE, SetForegroundWindow, ShowWindow,
+};
 use windows::core::{Error, HSTRING, PCWSTR, Result};
 
 /// Holds the named mutex for as long as this process is the running instance.
@@ -55,6 +57,31 @@ pub fn is_running(name: &str) -> bool {
         }
         Err(_) => false,
     }
+}
+
+/// Brings the running instance's window titled `title` to the front,
+/// restoring it if minimized — for an application with a visible window
+/// whose second launch should hand over to the first rather than open
+/// another. (A tray app has nothing to bring forward and uses
+/// [`notify_running_instance`] instead.) Returns whether such a window was
+/// found.
+///
+/// By title rather than class: a framework-created window (WinUI) has the
+/// framework's class name, shared by every app built on it. Windows may
+/// refuse the foreground switch if this process wasn't started by the
+/// user's last input; the window then flashes in the taskbar instead.
+pub fn bring_to_front(title: &str) -> bool {
+    let title = HSTRING::from(title);
+    let Ok(hwnd) = (unsafe { FindWindowW(PCWSTR::null(), PCWSTR(title.as_ptr())) }) else {
+        return false;
+    };
+    unsafe {
+        if IsIconic(hwnd).as_bool() {
+            let _ = ShowWindow(hwnd, SW_RESTORE);
+        }
+        let _ = SetForegroundWindow(hwnd);
+    }
+    true
 }
 
 impl Drop for SingleInstance {

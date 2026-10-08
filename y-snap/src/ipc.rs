@@ -20,6 +20,17 @@ use y_core::single_instance;
 /// (`AppInfo::single_instance` derives one from the other).
 pub const CLASS: &str = "YpoLite.YSnap";
 
+/// The settings app's executable, looked for next to `y-snap.exe` by the
+/// tray's "Settings…" item.
+pub const CONFIG_EXE: &str = "y-snap-config.exe";
+
+/// The settings app's single-instance mutex name.
+pub const CONFIG_INSTANCE: &str = "YpoLite.YSnapConfig";
+
+/// The settings app's window title — what a second launch finds the open
+/// one by (a WinUI window's class name is the framework's, not ours).
+pub const CONFIG_TITLE: &str = "y-snap — Configuration";
+
 /// The registered message that asks a running y-snap to reload its
 /// configuration. Same id in every process that asks for it.
 pub fn reload_message() -> u32 {

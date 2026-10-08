@@ -100,6 +100,8 @@ pub struct OverlayState {
     pub section: OverlaySection,
     pub editing_tile: Option<usize>,
     pub editing_palette: Option<PaletteField>,
+    pub reordering_groups: bool,
+    pub reordering_tiles: bool,
 }
 
 /// Smallest the preview gets beside the editor before it moves below it —
@@ -120,8 +122,16 @@ pub fn overlay_view(
     let tab = match state.section {
         OverlaySection::Layout => layout::layout_tab(overlay, editor_viewport, context),
         OverlaySection::Palette => palette::palette_tab(overlay, state.editing_palette, editor_viewport, context),
-        OverlaySection::Groups => groups::groups_tab(overlay, editor_viewport, context),
-        OverlaySection::Tiles => tiles::tiles_tab(overlay, state.editing_tile, picker, icons, editor_viewport, context),
+        OverlaySection::Groups => groups::groups_tab(overlay, state.reordering_groups, editor_viewport, context),
+        OverlaySection::Tiles => tiles::tiles_tab(
+            overlay,
+            state.editing_tile,
+            state.reordering_tiles,
+            picker,
+            icons,
+            editor_viewport,
+            context,
+        ),
     };
 
     let editor = Stack::vertical(space::L)

@@ -122,16 +122,61 @@ pub fn chip(label: &str, checked: bool, enabled: bool, on_toggle: Callback<bool>
 /// cropped it. Sized by its content instead, it comes out about
 /// [`size::ICON_BUTTON`] wide; columns holding one reserve that much.
 pub fn icon_button(symbol: Symbol, tooltip: &str, on_click: Callback<()>) -> View {
+    subtle_icon_button(SymbolIcon::new().symbol(symbol).into(), tooltip, true, on_click)
+}
+
+/// [`icon_button`]'s body, for any icon view and with an enabled state.
+fn subtle_icon_button(icon: View, tooltip: &str, enabled: bool, on_click: Callback<()>) -> View {
     Button::new()
         .style(ButtonStyle::Subtle)
+        .is_enabled(enabled)
         .min_width(0.0)
         .horizontal_content_alignment(HorizontalAlignment::Center)
         .vertical_content_alignment(VerticalAlignment::Center)
         .horizontal_alignment(HorizontalAlignment::Center)
         .vertical_alignment(VerticalAlignment::Center)
         .on_click(on_click)
-        .content(SymbolIcon::new().symbol(symbol))
+        .content(icon)
         .tooltip(tooltip)
+}
+
+/// Segoe Fluent Icons / MDL2 arrow glyphs. `Symbol` has `Up` but no
+/// matching `Down`, so both come from the font for a matched pair.
+const GLYPH_UP: &str = "\u{E74A}";
+const GLYPH_DOWN: &str = "\u{E74B}";
+
+/// The ↑/↓ pair that replaces a row's actions while its list is being
+/// reordered — the same width as two [`icon_button`]s, so the actions
+/// column doesn't change size between modes. The first row can't go up
+/// and the last can't go down; those buttons are disabled, not hidden, so
+/// the pair stays aligned down the column.
+pub fn move_buttons(index: usize, count: usize, on_up: Callback<()>, on_down: Callback<()>) -> View {
+    Stack::horizontal(space::XS)
+        .child("up", subtle_icon_button(FontIcon::new().glyph(GLYPH_UP).into(), "Move up", index > 0, on_up))
+        .child(
+            "down",
+            subtle_icon_button(FontIcon::new().glyph(GLYPH_DOWN).into(), "Move down", index + 1 < count, on_down),
+        )
+        .into()
+}
+
+/// Width an actions column reserves for [`move_buttons`] (or any two
+/// [`icon_button`]s side by side).
+pub const TWO_ICON_BUTTONS: f64 = 2.0 * size::ICON_BUTTON + space::XS;
+
+/// The "Reorder" toggle beside a list's add button. While on, rows show
+/// [`move_buttons`] instead of their usual actions; Accent marks the mode,
+/// and the label says how to leave it.
+pub fn reorder_toggle(on: bool, on_toggle: Callback<()>) -> View {
+    Button::new()
+        .style(if on { ButtonStyle::Accent } else { ButtonStyle::Default })
+        .horizontal_alignment(HorizontalAlignment::Left)
+        .on_click(on_toggle)
+        .content(
+            Stack::horizontal(space::S)
+                .child("icon", SymbolIcon::new().symbol(Symbol::Sort))
+                .child("label", text::body(if on { "Done reordering" } else { "Reorder" })),
+        )
 }
 
 /// "+ Add hotkey" — the add-a-row action under a list.

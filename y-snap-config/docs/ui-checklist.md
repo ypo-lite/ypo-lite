@@ -78,6 +78,7 @@ Overlay `Split`, down to `shell::MIN_WINDOW` (560×440).
 
 | # | Requirement | Status | Notes |
 |---|---|---|---|
+| 0 | Every ordered list can be reordered without the table reflowing | 👁 | Hotkeys, overlay groups, overlay tiles, popup tiles: Reorder toggle → ↑/↓ in the actions column (ends disabled). Check the order shows up in both popups after Save. |
 | 1 | No literal sizes in screen modules | ✅ | Only domain values: field ranges, column/grid minimums, and the popup's own pixel geometry in `preview.rs` (named constants). |
 | 2 | No screen reads the window size | ✅ | Only `main.rs` → `shell::layout`. |
 | 3 | `ui/` is app-agnostic | ✅ | No `crate::Msg`/`ConfigApp` imports under `src/ui/`. |

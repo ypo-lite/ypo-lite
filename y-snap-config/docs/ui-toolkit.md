@@ -91,6 +91,7 @@ such as page padding. A component that knows its own minimum width should use
 | Rows of records | `Table::new(&COLUMNS).rows(…).build(viewport)` | `Column::flex(header, min)`, `fixed`, `actions`. Becomes cards below `min_width()`. |
 | Edit one row in place | `Row::new(key, cells).detail(Some(editor(…)))` | The editor spans the row, directly under it. |
 | Cancel/Done editor | `editor(title, body, on_cancel, on_done)` | A `panel` with the actions in its header. |
+| Let a list be reordered | `reorder::list_footer` + `reorder::row_actions` (app side), built on `reorder_toggle` + `move_buttons` (toolkit) | Size the actions column `TWO_ICON_BUTTONS` so ↑/↓ fits where the row actions were. |
 | Labelled field | `field("Label", control)` | Caption above the control. |
 | Inputs | `combo`, `number_box`, `text_box`, `switch`, `labeled_switch`, `chip`, `button`, `icon_button`, `add_button` | All pre-filled; `icon_button` always has a tooltip. |
 | A bounded number to set by feel *and* exactly | `range_input(value, min, max, step, on_slide, on_type)` | Slider + number box; map both callbacks to one message that ignores unchanged values. |

@@ -35,6 +35,7 @@ mod keys;
 mod min_button;
 mod mouse;
 mod overlay;
+mod reorder;
 mod shell;
 mod ui;
 
@@ -42,8 +43,10 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{HOT_KEY_MODIFIERS, VIRTUAL_KEY
 use windows_reactor::*;
 use y_core::hotkey::Hotkey;
 use y_core::overlay::Color as CoreColor;
+use y_core::single_instance;
 use y_snap::action::{Action, Target};
 use y_snap::config::{Binding, Button as MouseButton, Gesture, Group, Item, LoadError, QuickAction, Settings, Theme};
+use y_snap::ipc;
 
 use icon_picker::IconPickerUi;
 use icons::IconCategory;
@@ -55,6 +58,19 @@ use overlay::palette::PaletteField;
 use ui::prelude::*;
 
 fn main() {
+    // One editor at a time: two windows over one file would overwrite each
+    // other's saves. A second launch (the tray's "Settings…" clicked again)
+    // brings the open one forward instead. Held until the process exits.
+    let _instance = match single_instance::SingleInstance::acquire(ipc::CONFIG_INSTANCE) {
+        Ok(Some(guard)) => Some(guard),
+        Ok(None) => {
+            single_instance::bring_to_front(ipc::CONFIG_TITLE);
+            return;
+        }
+        // Couldn't even create the mutex: open anyway — losing the
+        // one-window guarantee beats not opening at all.
+        Err(_) => None,
+    };
     App::run_component::<ConfigApp>(()).unwrap();
 }
 
@@ -70,6 +86,8 @@ struct ConfigApp {
     /// After the last successful save: whether a running y-snap was asked to
     /// reload it (`Some(true)`), or none was running (`Some(false)`).
     applied: Option<bool>,
+    /// The list whose rows currently show ↑/↓ instead of their actions.
+    reordering: Option<ListKind>,
     /// The one open inline editor, if any, with its Cancel snapshot.
     editing: Option<Editing>,
     /// The key picker's own state (category tab, search text) — shared by
@@ -91,6 +109,18 @@ enum Editing {
     Tile { index: usize, original: Item },
     QuickAction { index: usize, original: QuickAction },
     Palette { field: PaletteField, original: CoreColor },
+}
+
+/// A reorderable list — what [`Msg::ReorderToggled`] and [`Msg::Moved`] are
+/// about. Order is meaningful in all four: tiles and groups are laid out in
+/// file order in their popups; hotkeys only for reading the file, but
+/// that's still the user's to arrange.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ListKind {
+    Hotkeys,
+    OverlayGroups,
+    OverlayTiles,
+    PopupTiles,
 }
 
 /// One entry in the navigation pane, in the order shown.
@@ -152,6 +182,13 @@ enum Msg {
     OverlaySectionSelected(OverlaySection),
     Save,
     WarningsDismissed,
+    ReorderToggled(ListKind),
+    /// Swap row `index` with its neighbour above (`up`) or below.
+    Moved {
+        list: ListKind,
+        index: usize,
+        up: bool,
+    },
     Reload,
 
     // The inline editor and the key picker inside it.
@@ -225,6 +262,7 @@ impl Component for ConfigApp {
             save_error: None,
             warnings_dismissed: false,
             applied: None,
+            reordering: None,
             editing: None,
             key_picker: KeyPickerUi::default(),
             icon_picker: IconPickerUi::default(),
@@ -250,13 +288,14 @@ impl Component for ConfigApp {
                 self.save_error = None;
                 self.warnings_dismissed = false;
                 self.applied = None;
+                self.reordering = None;
             }
             message => self.edit(message),
         }
     }
 
     fn view(&self, _input: &(), context: &mut ViewContext<Self>) -> View {
-        context.window_title("y-snap — Configuration");
+        context.window_title(ipc::CONFIG_TITLE);
         let (width, height) = shell::INITIAL_WINDOW;
         let (min_width, min_height) = shell::MIN_WINDOW;
         context.window_visuals(
@@ -282,7 +321,8 @@ impl Component for ConfigApp {
                     Some(Editing::Hotkey { index, .. }) => Some(index),
                     _ => None,
                 };
-                hotkeys::hotkeys_view(&settings.hotkeys, editing, &self.key_picker, viewport, context)
+                let reordering = self.reordering == Some(ListKind::Hotkeys);
+                hotkeys::hotkeys_view(&settings.hotkeys, editing, reordering, &self.key_picker, viewport, context)
             }
             Section::Mouse => mouse::mouse_view(&settings.mouse, viewport, context),
             Section::Overlay => {
@@ -297,6 +337,8 @@ impl Component for ConfigApp {
                         section: self.overlay_section,
                         editing_tile: tile,
                         editing_palette: palette,
+                        reordering_groups: self.reordering == Some(ListKind::OverlayGroups),
+                        reordering_tiles: self.reordering == Some(ListKind::OverlayTiles),
                     },
                     &self.key_picker,
                     &self.icon_picker,
@@ -313,6 +355,7 @@ impl Component for ConfigApp {
                     &settings.min_button,
                     &settings.overlay,
                     editing,
+                    self.reordering == Some(ListKind::PopupTiles),
                     &self.icon_picker,
                     viewport,
                     context,
@@ -370,7 +413,9 @@ impl Component for ConfigApp {
             None if self.dirty => ("Unsaved changes".to_owned(), true),
             None => match self.applied {
                 Some(true) => ("Saved and applied — y-snap is reloading it".to_owned(), true),
-                Some(false) => ("Saved — y-snap isn't running; it'll use these settings when it starts".to_owned(), true),
+                Some(false) => {
+                    ("Saved — y-snap isn't running; it'll use these settings when it starts".to_owned(), true)
+                }
                 None => (summary(settings), true),
             },
         };
@@ -414,6 +459,7 @@ impl ConfigApp {
             | Msg::Reload => unreachable!("settled by Component::update"),
 
             Msg::EditHotkey(index) => {
+                self.reordering = None;
                 let reopen = !matches!(self.editing, Some(Editing::Hotkey { index: open, .. }) if open == index);
                 self.editing = None;
                 if reopen {
@@ -423,6 +469,7 @@ impl ConfigApp {
                 }
             }
             Msg::EditTile(index) => {
+                self.reordering = None;
                 let reopen = !matches!(self.editing, Some(Editing::Tile { index: open, .. }) if open == index);
                 self.editing = None;
                 if reopen {
@@ -433,6 +480,7 @@ impl ConfigApp {
                 }
             }
             Msg::EditPalette(field) => {
+                self.reordering = None;
                 let reopen = !matches!(self.editing, Some(Editing::Palette { field: open, .. }) if open == field);
                 self.editing = None;
                 if reopen {
@@ -498,6 +546,7 @@ impl ConfigApp {
                 self.dirty = true;
             }
             Msg::HotkeyAdded => {
+                self.reordering = None;
                 // A harmless, unlikely-to-collide starting point, opened
                 // straight into the key picker — picking the real combo is
                 // the first thing anyone adding a hotkey does.
@@ -594,6 +643,7 @@ impl ConfigApp {
                 }
             }
             Msg::OverlayGroupAdded => {
+                self.reordering = None;
                 settings.overlay.groups.push(Group {
                     id: overlay::groups::next_group_id(&settings.overlay.groups),
                     columns: None,
@@ -664,6 +714,7 @@ impl ConfigApp {
                 self.dirty = true;
             }
             Msg::OverlayItemAdded => {
+                self.reordering = None;
                 settings.overlay.items.push(Item {
                     key: None,
                     action: Action::Minimize,
@@ -722,6 +773,7 @@ impl ConfigApp {
                 }
             }
             Msg::EditQuickAction(index) => {
+                self.reordering = None;
                 let reopen = !matches!(self.editing, Some(Editing::QuickAction { index: open, .. }) if open == index);
                 self.editing = None;
                 if reopen {
@@ -751,6 +803,7 @@ impl ConfigApp {
                 self.dirty = true;
             }
             Msg::QuickActionAdded => {
+                self.reordering = None;
                 settings.min_button.items.push(QuickAction {
                     action: Action::Minimize,
                     label: Some("New tile".to_owned()),
@@ -762,6 +815,24 @@ impl ConfigApp {
                 self.edit(Msg::EditQuickAction(index));
             }
 
+            Msg::ReorderToggled(list) => {
+                // An editor's index would go stale as rows move; reordering
+                // and editing are separate modes.
+                self.editing = None;
+                self.reordering = if self.reordering == Some(list) { None } else { Some(list) };
+            }
+            Msg::Moved { list, index, up } => {
+                let swapped = match list {
+                    ListKind::Hotkeys => swap_neighbour(&mut settings.hotkeys, index, up),
+                    ListKind::OverlayGroups => swap_neighbour(&mut settings.overlay.groups, index, up),
+                    ListKind::OverlayTiles => swap_neighbour(&mut settings.overlay.items, index, up),
+                    ListKind::PopupTiles => swap_neighbour(&mut settings.min_button.items, index, up),
+                };
+                if swapped {
+                    self.dirty = true;
+                }
+            }
+
             Msg::Save => match settings.save() {
                 Ok(()) => {
                     self.dirty = false;
@@ -770,7 +841,7 @@ impl ConfigApp {
                     settings.warnings.clear();
                     // No file watching in y-snap: tell it, so the change
                     // applies now rather than at the next tray "Reload".
-                    self.applied = Some(y_snap::ipc::request_reload());
+                    self.applied = Some(ipc::request_reload());
                 }
                 Err(error) => self.save_error = Some(error.to_string()),
             },
@@ -795,5 +866,37 @@ impl ConfigApp {
             | Msg::QuickActionActionChanged(_, None)
             | Msg::OverlayThemeChanged(None) => {}
         }
+    }
+}
+
+/// Swaps `items[index]` with the item above (`up`) or below it. `false`,
+/// and nothing changes, when there's no neighbour that way — a stale click
+/// on a button that should already have been disabled.
+fn swap_neighbour<T>(items: &mut [T], index: usize, up: bool) -> bool {
+    let other = if up { index.checked_sub(1) } else { index.checked_add(1) };
+    match other {
+        Some(other) if index < items.len() && other < items.len() => {
+            items.swap(index, other);
+            true
+        }
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::swap_neighbour;
+
+    #[test]
+    fn swap_neighbour_moves_one_step_and_refuses_the_ends() {
+        let mut items = vec!['a', 'b', 'c'];
+        assert!(swap_neighbour(&mut items, 1, true));
+        assert_eq!(items, ['b', 'a', 'c']);
+        assert!(swap_neighbour(&mut items, 1, false));
+        assert_eq!(items, ['b', 'c', 'a']);
+        assert!(!swap_neighbour(&mut items, 0, true));
+        assert!(!swap_neighbour(&mut items, 2, false));
+        assert!(!swap_neighbour(&mut items, 7, true));
+        assert_eq!(items, ['b', 'c', 'a']);
     }
 }

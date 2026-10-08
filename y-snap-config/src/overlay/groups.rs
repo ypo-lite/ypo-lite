@@ -1,8 +1,9 @@
 //! The Overlay screen's Groups tab: per-group grid overrides (a group can
 //! override the overlay's columns and tile size for its own tiles).
 
+use crate::reorder::{list_footer, row_actions};
 use crate::ui::prelude::*;
-use crate::{ConfigApp, Msg};
+use crate::{ConfigApp, ListKind, Msg};
 use windows_reactor::*;
 use y_snap::config::{Group, Overlay};
 
@@ -11,19 +12,17 @@ const COLUMNS: [Column; 5] = [
     Column::flex("Columns", 90.0),
     Column::flex("Tile width", 90.0),
     Column::flex("Tile height", 90.0),
-    Column::actions(size::ICON_BUTTON),
+    Column::actions(TWO_ICON_BUTTONS),
 ];
 
 pub fn min_width() -> f64 {
     Table::new(&COLUMNS).min_width()
 }
 
-pub fn groups_tab(overlay: &Overlay, viewport: Viewport, context: &ViewContext<ConfigApp>) -> View {
-    let rows = overlay
-        .groups
-        .iter()
-        .enumerate()
-        .map(|(index, group)| Row::new(group.id.clone(), cells(index, group, context)));
+pub fn groups_tab(overlay: &Overlay, reordering: bool, viewport: Viewport, context: &ViewContext<ConfigApp>) -> View {
+    let rows = overlay.groups.iter().enumerate().map(|(index, group)| {
+        Row::new(group.id.clone(), cells(index, group, overlay.groups.len(), reordering, context))
+    });
 
     Stack::vertical(space::L)
         .child(
@@ -33,7 +32,16 @@ pub fn groups_tab(overlay: &Overlay, viewport: Viewport, context: &ViewContext<C
                 .rows(rows)
                 .build(viewport),
         )
-        .child("add", add_button("Add group", context.callback(|()| Msg::OverlayGroupAdded)))
+        .child(
+            "add",
+            list_footer(
+                ListKind::OverlayGroups,
+                add_button("Add group", context.callback(|()| Msg::OverlayGroupAdded)),
+                overlay.groups.len(),
+                reordering,
+                context,
+            ),
+        )
         .child(
             "note",
             note(
@@ -44,7 +52,7 @@ pub fn groups_tab(overlay: &Overlay, viewport: Viewport, context: &ViewContext<C
         .into()
 }
 
-fn cells(index: usize, group: &Group, context: &ViewContext<ConfigApp>) -> Vec<View> {
+fn cells(index: usize, group: &Group, count: usize, reordering: bool, context: &ViewContext<ConfigApp>) -> Vec<View> {
     let number = |value: Option<u32>, maximum: f64, message: fn(usize, Option<f64>) -> Msg| -> View {
         number_box(value.map(f64::from), 1.0, maximum, context.callback(move |v| message(index, v))).into()
     };
@@ -53,7 +61,14 @@ fn cells(index: usize, group: &Group, context: &ViewContext<ConfigApp>) -> Vec<V
         number(group.columns, 20.0, Msg::OverlayGroupColumnsChanged),
         number(group.tile_width, 400.0, Msg::OverlayGroupTileWidthChanged),
         number(group.tile_height, 400.0, Msg::OverlayGroupTileHeightChanged),
-        icon_button(Symbol::Delete, "Delete group", context.callback(move |()| Msg::OverlayGroupDeleted(index))),
+        row_actions(
+            ListKind::OverlayGroups,
+            index,
+            count,
+            reordering,
+            || icon_button(Symbol::Delete, "Delete group", context.callback(move |()| Msg::OverlayGroupDeleted(index))),
+            context,
+        ),
     ]
 }
 

@@ -48,6 +48,7 @@ const APP: AppInfo = AppInfo::new("Y-Snap", ipc::CLASS).single_instance();
 const IDM_RELOAD: u32 = IDM_FIRST;
 const IDM_OPEN_CONFIG: u32 = IDM_FIRST + 1;
 const IDM_EXIT: u32 = IDM_FIRST + 2;
+const IDM_SETTINGS: u32 = IDM_FIRST + 3;
 
 /// How many warnings a balloon shows before giving up and pointing at the
 /// file. A notification the user cannot read is a notification wasted.
@@ -391,12 +392,14 @@ impl YSnap {
             (None, None) => {}
         }
 
+        let _ = menu.add_item(IDM_SETTINGS, "Settings…");
+        let _ = menu.add_item(IDM_OPEN_CONFIG, "Edit y-snap.xml");
         let _ = menu.add_item(IDM_RELOAD, "Reload configuration");
-        let _ = menu.add_item(IDM_OPEN_CONFIG, "Open configuration");
         let _ = menu.add_separator();
         let _ = menu.add_item(IDM_EXIT, "Exit");
 
         match menu.track(hwnd, position) {
+            Some(IDM_SETTINGS) => self.open_settings(),
             Some(IDM_RELOAD) => self.load(hwnd),
             Some(IDM_OPEN_CONFIG) => self.open_config(),
             Some(IDM_EXIT) => message_loop::quit(0),
@@ -406,8 +409,28 @@ impl YSnap {
         let _ = memory::trim_working_set();
     }
 
-    /// Opens the configuration in whatever the user has associated with
-    /// `.xml`, which is the closest thing y-snap has to a settings dialog.
+    /// Opens the settings app (`y-snap-config.exe`, expected next to this
+    /// executable — the two ship together). Without it, falls back to the
+    /// file itself, saying why, so "Settings…" never silently does nothing.
+    /// The settings app is single-instance: a second click brings the open
+    /// window forward rather than opening another.
+    fn open_settings(&mut self) {
+        let app = std::env::current_exe()
+            .ok()
+            .map(|exe| exe.with_file_name(ipc::CONFIG_EXE));
+        let Some(app) = app.filter(|app| app.is_file()) else {
+            let message = format!(
+                "{} isn't installed next to y-snap — opening the file instead.",
+                ipc::CONFIG_EXE
+            );
+            self.notify("Settings", &message, Notify::Info);
+            self.open_config();
+            return;
+        };
+        shell_open(&app);
+    }
+
+    /// Opens `y-snap.xml` in whatever edits `.xml` files.
     fn open_config(&mut self) {
         let path = self
             .settings
@@ -420,18 +443,24 @@ impl YSnap {
             return;
         }
 
-        let file = HSTRING::from(path.as_os_str());
-        unsafe {
-            ShellExecuteW(
-                None,
-                windows::core::w!("open"),
-                &file,
-                None,
-                None,
-                SW_SHOWNORMAL,
-            )
-        };
+        shell_open(&path);
     }
+}
+
+/// `ShellExecute`'s "open" on `path` — runs an executable, or opens a file
+/// with its associated application.
+fn shell_open(path: &std::path::Path) {
+    let file = HSTRING::from(path.as_os_str());
+    unsafe {
+        ShellExecuteW(
+            None,
+            windows::core::w!("open"),
+            &file,
+            None,
+            None,
+            SW_SHOWNORMAL,
+        )
+    };
 }
 
 impl TrayApp for YSnap {
@@ -480,8 +509,11 @@ impl TrayApp for YSnap {
 
             WM_TRAY_CALLBACK => {
                 let (event, position) = TrayEvent::decode(wparam, lparam);
-                if event == TrayEvent::ContextMenu {
-                    self.show_menu(hwnd, position);
+                match event {
+                    TrayEvent::ContextMenu => self.show_menu(hwnd, position),
+                    // The conventional default action of a tray icon.
+                    TrayEvent::DoubleClick => self.open_settings(),
+                    _ => {}
                 }
                 Some(LRESULT(0))
             }

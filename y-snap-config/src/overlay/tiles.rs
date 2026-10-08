@@ -13,8 +13,9 @@ use super::OVERLAY_ACTIONS;
 use crate::icon_picker::{IconPickerUi, icon_field, icon_picker};
 use crate::key_picker::{KeyPickerUi, key_picker};
 use crate::keys;
+use crate::reorder::{list_footer, row_actions};
 use crate::ui::prelude::*;
-use crate::{ConfigApp, EditorClose, Msg};
+use crate::{ConfigApp, EditorClose, ListKind, Msg};
 use windows_reactor::*;
 use y_snap::action::Action;
 use y_snap::config::{Item, Overlay};
@@ -24,7 +25,7 @@ const COLUMNS: [Column; 5] = [
     Column::fixed("Icon", 40.0),
     Column::flex("Tile", 140.0),
     Column::flex("Group", 80.0),
-    Column::actions(2.0 * size::ICON_BUTTON + space::XS),
+    Column::actions(TWO_ICON_BUTTONS),
 ];
 
 pub fn min_width() -> f64 {
@@ -34,6 +35,7 @@ pub fn min_width() -> f64 {
 pub fn tiles_tab(
     overlay: &Overlay,
     editing: Option<usize>,
+    reordering: bool,
     picker: &KeyPickerUi,
     icons: &IconPickerUi,
     viewport: Viewport,
@@ -45,17 +47,37 @@ pub fn tiles_tab(
     let rows = overlay.items.iter().enumerate().map(|(index, item)| {
         let detail = (editing == Some(index))
             .then(|| tile_editor(index, item, overlay, picker, icons, detail_viewport, context));
-        Row::new(index.to_string(), cells(index, item, editing == Some(index), context)).detail(detail)
+        Row::new(
+            index.to_string(),
+            cells(index, item, editing == Some(index), overlay.items.len(), reordering, context),
+        )
+        .detail(detail)
     });
 
     Stack::vertical(space::L)
         .child("count", text::section_title(format!("{} tiles", overlay.items.len())))
         .child("table", table.rows(rows).build(viewport))
-        .child("add", add_button("Add tile", context.callback(|()| Msg::OverlayItemAdded)))
+        .child(
+            "add",
+            list_footer(
+                ListKind::OverlayTiles,
+                add_button("Add tile", context.callback(|()| Msg::OverlayItemAdded)),
+                overlay.items.len(),
+                reordering,
+                context,
+            ),
+        )
         .into()
 }
 
-fn cells(index: usize, item: &Item, open: bool, context: &ViewContext<ConfigApp>) -> Vec<View> {
+fn cells(
+    index: usize,
+    item: &Item,
+    open: bool,
+    count: usize,
+    reordering: bool,
+    context: &ViewContext<ConfigApp>,
+) -> Vec<View> {
     let key: View = match item.key {
         Some(key) => keycaps(&[keys::label(key)], false),
         None => text::placeholder().into(),
@@ -72,20 +94,33 @@ fn cells(index: usize, item: &Item, open: bool, context: &ViewContext<ConfigApp>
         Some(group) => text::caption(group.clone()).into(),
         None => text::placeholder().into(),
     };
-    let actions: View = Stack::horizontal(space::XS)
-        .child(
-            "edit",
-            icon_button(
-                if open { Symbol::Accept } else { Symbol::Edit },
-                if open { "Close editor" } else { "Edit tile" },
-                context.callback(move |()| Msg::EditTile(index)),
-            ),
-        )
-        .child(
-            "delete",
-            icon_button(Symbol::Delete, "Delete tile", context.callback(move |()| Msg::OverlayItemDeleted(index))),
-        )
-        .into();
+    let actions = row_actions(
+        ListKind::OverlayTiles,
+        index,
+        count,
+        reordering,
+        || {
+            Stack::horizontal(space::XS)
+                .child(
+                    "edit",
+                    icon_button(
+                        if open { Symbol::Accept } else { Symbol::Edit },
+                        if open { "Close editor" } else { "Edit tile" },
+                        context.callback(move |()| Msg::EditTile(index)),
+                    ),
+                )
+                .child(
+                    "delete",
+                    icon_button(
+                        Symbol::Delete,
+                        "Delete tile",
+                        context.callback(move |()| Msg::OverlayItemDeleted(index)),
+                    ),
+                )
+                .into()
+        },
+        context,
+    );
 
     vec![key, icon, tile, group, actions]
 }
