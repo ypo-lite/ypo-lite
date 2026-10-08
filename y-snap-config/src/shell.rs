@@ -86,7 +86,16 @@ pub fn action_bar(
         .keyed_children([
             ("status", Border::new().vertical_alignment(VerticalAlignment::Center).grid_column(0).content(status)),
             ("reload", cell(button("Reload from disk", false, true, on_reload), 0, 1)),
-            ("save", cell(button("Save", true, dirty, on_save), 0, 2)),
+            (
+                "save",
+                cell(
+                    button("Save", true, dirty, on_save).tooltip(
+                        "Rewrites y-snap.xml from these settings. Comments and hand formatting in the file aren't kept.",
+                    ),
+                    0,
+                    2,
+                ),
+            ),
         ]);
 
     Border::new()
@@ -95,6 +104,38 @@ pub fn action_bar(
         .border_brush(ThemeBrush::CardStroke)
         .grid_row(1)
         .content(row)
+}
+
+/// The problems `Settings::load` skipped past, above whichever screen is
+/// showing. Each was recorded instead of stopping the load — the rest of
+/// the file loaded fine — but whatever it describes isn't in `Settings`,
+/// so a save leaves it out of the file. Saying so before the first save
+/// is the whole point.
+pub fn warnings_banner(warnings: &[String], on_close: Callback<()>) -> View {
+    const SHOWN: usize = 6;
+    let mut lines: Vec<&str> = warnings.iter().take(SHOWN).map(String::as_str).collect();
+    let more = warnings.len().saturating_sub(SHOWN);
+    let more_line = format!("…and {more} more.");
+    if more > 0 {
+        lines.push(&more_line);
+    }
+
+    InfoBar::new()
+        .severity(InfoBarSeverity::Warning)
+        .is_open(true)
+        .is_closable(true)
+        .on_closed(on_close)
+        .title(format!(
+            "{} part{} of y-snap.xml couldn't be read",
+            warnings.len(),
+            if warnings.len() == 1 { "" } else { "s" }
+        ))
+        .message(format!(
+            "They were skipped, and saving will leave them out of the file — fix them in the file first if you need \
+             them, then Reload.\n{}",
+            lines.join("\n")
+        ))
+        .into()
 }
 
 #[cfg(test)]

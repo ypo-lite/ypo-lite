@@ -20,7 +20,8 @@ Overlay `Split`, down to `shell::MIN_WINDOW` (560×440).
 | 3 | Page scrolls vertically only; nothing scrolls sideways | ✅ | `page_frame` → `scroll_y`. No other `ScrollViewer` in the app. |
 | 4 | Status bar never pushes its buttons off-window | ✅ | `Grid [Star, Auto, Auto]`; status trims with an ellipsis, full text and file path in the tooltip. |
 | 5 | Window can't be resized below what the layout supports | 👁 | `WindowConstraints` min 560×440. |
-| 6 | Save is the visually primary action | ✅ | Accent style, disabled when nothing changed. |
+| 6 | Save is the visually primary action | ✅ | Accent style, disabled when nothing changed. Tooltip says comments and formatting aren't kept. |
+| 7 | Parts of the file that failed to load are shown before a save can drop them | 👁 | `shell::warnings_banner` (an `InfoBar`) above every screen, closable; status turns red ("saving drops what couldn't be read") while there are unsaved changes. Check how a long list wraps. |
 
 ## Hotkeys (`hotkeys.rs`)
 
@@ -51,6 +52,7 @@ Overlay `Split`, down to `shell::MIN_WINDOW` (560×440).
 |---|---|---|---|
 | 1 | Editor and preview sit side by side only when both fit | ✅ | `Split` with the active tab's own minimum and a 300px preview minimum. |
 | 2 | Layout fields are equal width whatever their labels | ✅ | `AutoGrid::new(110).max_columns(3)`. |
+| 3a | Theme is kept across saves | ✅ | Theme dropdown (switching resets the colours), "N of 10 colours differ" + Reset. `y-snap` saves `theme` plus only the differing colours (tested there). |
 | 3 | Swatches are equal width; the open one is marked | ✅ | `AutoGrid::new(96).max_columns(5)`; Accent style on the open swatch. |
 | 4 | Groups fit the pane | ✅ | `Table` → cards below its minimum. |
 | 5 | Tiles are scannable and fit the pane | ✅ | Compact list (key, icon, label + action, group) with the full editor per row. |

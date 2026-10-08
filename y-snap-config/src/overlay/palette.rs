@@ -5,7 +5,7 @@ use crate::ui::prelude::*;
 use crate::{ConfigApp, EditorClose, Msg};
 use windows_reactor::*;
 use y_core::overlay::Color as CoreColor;
-use y_snap::config::{Overlay, Palette};
+use y_snap::config::{Overlay, Palette, Theme};
 
 /// [`CoreColor`] (straight, as `y-snap.xml` writes it) as [`Color`]
 /// (`windows_reactor`'s, for [`ColorPicker`] and brushes) — same four
@@ -123,7 +123,56 @@ pub fn palette_tab(
         )
     });
 
-    Stack::vertical(space::L).child("swatches", swatches.build(viewport)).maybe("editor", editor).into()
+    Stack::vertical(space::L)
+        .child("theme", theme_row(overlay, viewport, context))
+        .child("swatches", swatches.build(viewport))
+        .maybe("editor", editor)
+        .into()
+}
+
+/// How each [`Theme`] reads in the dropdown, in [`Theme::ALL`] order.
+fn theme_title(theme: Theme) -> &'static str {
+    match theme {
+        Theme::Auto => "Auto — follows Windows light/dark",
+        Theme::Light => "Light",
+        Theme::Dark => "Dark",
+    }
+}
+
+/// The theme the colours start from, and how many of them differ from it.
+/// Only the differing colours are written to `y-snap.xml`; the theme
+/// supplies the rest each time y-snap loads — which is what keeps `auto`
+/// following the system.
+fn theme_row(overlay: &Overlay, viewport: Viewport, context: &ViewContext<ConfigApp>) -> View {
+    let selected = Theme::ALL.iter().position(|&theme| theme == overlay.theme);
+    let theme = field(
+        "Theme — switching resets the colours to it",
+        combo(Theme::ALL.map(theme_title), selected, context.callback(Msg::OverlayThemeChanged)),
+    );
+
+    let customised = customised(overlay);
+    let status: View = if customised == 0 {
+        text::caption(format!("All colours come from the {} theme.", overlay.theme.name())).into()
+    } else {
+        Stack::vertical(space::XS)
+            .child(
+                "count",
+                text::caption(format!(
+                    "{customised} of {} colours differ from the {} theme.",
+                    PaletteField::ALL.len(),
+                    overlay.theme.name()
+                )),
+            )
+            .child("reset", button("Reset to theme", false, true, context.callback(|()| Msg::OverlayPaletteReset)))
+            .into()
+    };
+
+    AutoGrid::new(240.0).max_columns(2).item("theme", theme).item("status", status).build(viewport)
+}
+
+/// How many palette colours differ from what the theme gives.
+fn customised(overlay: &Overlay) -> usize {
+    PaletteField::ALL.iter().filter(|field| field.get(&overlay.palette) != field.get(&overlay.theme_palette)).count()
 }
 
 /// One swatch: title, colour chip, hex — a button that opens the editor.

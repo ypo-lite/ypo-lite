@@ -43,7 +43,7 @@ use windows_reactor::*;
 use y_core::hotkey::Hotkey;
 use y_core::overlay::Color as CoreColor;
 use y_snap::action::{Action, Target};
-use y_snap::config::{Binding, Button as MouseButton, Gesture, Group, Item, LoadError, QuickAction, Settings};
+use y_snap::config::{Binding, Button as MouseButton, Gesture, Group, Item, LoadError, QuickAction, Settings, Theme};
 
 use icon_picker::IconPickerUi;
 use icons::IconCategory;
@@ -64,6 +64,9 @@ struct ConfigApp {
     /// Whether anything has changed since the last load or save.
     dirty: bool,
     save_error: Option<String>,
+    /// Whether the user closed the load-warnings banner. Reset by Reload;
+    /// the warnings themselves live in `Settings::warnings`.
+    warnings_dismissed: bool,
     /// The one open inline editor, if any, with its Cancel snapshot.
     editing: Option<Editing>,
     /// The key picker's own state (category tab, search text) — shared by
@@ -145,6 +148,7 @@ enum Msg {
     WindowResized(WindowSize),
     OverlaySectionSelected(OverlaySection),
     Save,
+    WarningsDismissed,
     Reload,
 
     // The inline editor and the key picker inside it.
@@ -181,6 +185,8 @@ enum Msg {
     OverlayAlphaChanged(Option<f64>),
     OverlayFocusBorderToggled(bool),
     OverlayPaletteColorChanged(Color),
+    OverlayThemeChanged(Option<usize>),
+    OverlayPaletteReset,
     OverlayGroupAdded,
     OverlayGroupDeleted(usize),
     OverlayGroupColumnsChanged(usize, Option<f64>),
@@ -214,6 +220,7 @@ impl Component for ConfigApp {
             section: Section::Hotkeys,
             dirty: false,
             save_error: None,
+            warnings_dismissed: false,
             editing: None,
             key_picker: KeyPickerUi::default(),
             icon_picker: IconPickerUi::default(),
@@ -231,11 +238,13 @@ impl Component for ConfigApp {
             Msg::KeySearchChanged(text) => self.key_picker.search = text,
             Msg::IconCategorySelected(category) => self.icon_picker.category = category,
             Msg::IconSearchChanged(text) => self.icon_picker.search = text,
+            Msg::WarningsDismissed => self.warnings_dismissed = true,
             Msg::Reload => {
                 self.editing = None;
                 self.settings = Settings::load();
                 self.dirty = false;
                 self.save_error = None;
+                self.warnings_dismissed = false;
             }
             message => self.edit(message),
         }
@@ -305,6 +314,11 @@ impl Component for ConfigApp {
                 )
             }
         };
+        // Above every screen, not just one: what was skipped can be in any
+        // section, and Save drops it whichever screen it's pressed from.
+        let banner = (!settings.warnings.is_empty() && !self.warnings_dismissed)
+            .then(|| shell::warnings_banner(&settings.warnings, context.callback(|()| Msg::WarningsDismissed)));
+        let screen: View = Stack::vertical(space::L).maybe("warnings", banner).child("screen", screen).into();
 
         let current = self.section;
         let items = Section::ALL.map(|section| {
@@ -338,8 +352,16 @@ impl Component for ConfigApp {
             .grid_row(0)
             .slots(slots);
 
+        let dropped = settings.warnings.len();
         let (status, healthy) = match &self.save_error {
             Some(error) => (format!("Save failed: {error}"), false),
+            None if self.dirty && dropped > 0 => (
+                format!(
+                    "Unsaved changes — saving drops what couldn't be read ({dropped} problem{})",
+                    if dropped == 1 { "" } else { "s" }
+                ),
+                false,
+            ),
             None if self.dirty => ("Unsaved changes".to_owned(), true),
             None => (summary(settings), true),
         };
@@ -379,6 +401,7 @@ impl ConfigApp {
             | Msg::KeySearchChanged(_)
             | Msg::IconCategorySelected(_)
             | Msg::IconSearchChanged(_)
+            | Msg::WarningsDismissed
             | Msg::Reload => unreachable!("settled by Component::update"),
 
             Msg::EditHotkey(index) => {
@@ -529,6 +552,30 @@ impl ConfigApp {
             }
             Msg::OverlayFocusBorderToggled(on) => {
                 settings.overlay.focus_border = on;
+                self.dirty = true;
+            }
+            Msg::OverlayThemeChanged(Some(choice)) => {
+                let theme = Theme::ALL[choice];
+                // Also fires on first render; only an actual switch resets
+                // the colours.
+                if theme != settings.overlay.theme {
+                    // A colour editor's snapshot would restore a colour of
+                    // the old theme — close it rather than let Cancel do that.
+                    if matches!(self.editing, Some(Editing::Palette { .. })) {
+                        self.editing = None;
+                    }
+                    let overlay = &mut settings.overlay;
+                    overlay.theme = theme;
+                    overlay.theme_palette = theme.palette();
+                    overlay.palette = overlay.theme_palette;
+                    self.dirty = true;
+                }
+            }
+            Msg::OverlayPaletteReset => {
+                if matches!(self.editing, Some(Editing::Palette { .. })) {
+                    self.editing = None;
+                }
+                settings.overlay.palette = settings.overlay.theme_palette;
                 self.dirty = true;
             }
             Msg::OverlayPaletteColorChanged(color) => {
@@ -710,6 +757,8 @@ impl ConfigApp {
                 Ok(()) => {
                     self.dirty = false;
                     self.save_error = None;
+                    // What they described is no longer in the file.
+                    settings.warnings.clear();
                 }
                 Err(error) => self.save_error = Some(error.to_string()),
             },
@@ -731,7 +780,8 @@ impl ConfigApp {
             | Msg::OverlayItemDesktopChanged(_, None)
             | Msg::MinButtonDelayChanged(None)
             | Msg::MinButtonRightClickChanged(None)
-            | Msg::QuickActionActionChanged(_, None) => {}
+            | Msg::QuickActionActionChanged(_, None)
+            | Msg::OverlayThemeChanged(None) => {}
         }
     }
 }

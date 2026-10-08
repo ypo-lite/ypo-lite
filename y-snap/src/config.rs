@@ -153,6 +153,16 @@ pub struct Overlay {
     pub label_font_size: u32,
     pub icon_font: String,
     pub icon_font_size: u32,
+    /// The `theme` the colours start from. Kept, rather than only applied
+    /// at load, so a save writes `theme="auto"` back instead of freezing
+    /// the colours `auto` happened to resolve to that day.
+    pub theme: Theme,
+    /// The palette `theme` produced when it was applied (at load, or when
+    /// a settings app switched themes): what [`Overlay::palette`] is
+    /// compared against on save, so only colours someone actually changed
+    /// are written. Stored rather than recomputed because `auto` resolves
+    /// differently once the system theme changes.
+    pub theme_palette: Palette,
     pub palette: Palette,
     pub groups: Vec<Group>,
     pub items: Vec<Item>,
@@ -173,6 +183,8 @@ impl Default for Overlay {
             // font costs a placeholder glyph, not a failure.
             icon_font: "Segoe Fluent Icons".to_owned(),
             icon_font_size: 22,
+            theme: Theme::Auto,
+            theme_palette: Palette::LIGHT,
             palette: Palette::LIGHT,
             groups: Vec::new(),
             items: Vec::new(),
@@ -182,7 +194,7 @@ impl Default for Overlay {
 
 /// Tile colours: normal, hovered, active (the toggle this tile drives is
 /// currently on) and disabled.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Palette {
     pub back: Color,
     pub text: Color,
@@ -224,14 +236,41 @@ impl Palette {
         panel_border: Color::rgba(160, 160, 160, 140),
         ..Self::LIGHT
     };
+}
 
-    fn for_theme(name: &str) -> Option<Self> {
-        match name.trim() {
-            "light" => Some(Self::LIGHT),
-            "dark" => Some(Self::DARK),
-            "auto" if theme::is_dark() => Some(Self::DARK),
-            "auto" => Some(Self::LIGHT),
-            _ => None,
+/// The `<overlay theme="…">` a palette starts from.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Theme {
+    /// Follows Windows' app light/dark setting — as of when it's applied.
+    #[default]
+    Auto,
+    Light,
+    Dark,
+}
+
+impl Theme {
+    pub const ALL: [Self; 3] = [Self::Auto, Self::Light, Self::Dark];
+
+    /// As written in the file.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Light => "light",
+            Self::Dark => "dark",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|theme| theme.name() == name.trim())
+    }
+
+    /// The palette this theme stands for right now.
+    pub fn palette(self) -> Palette {
+        match self {
+            Self::Light => Palette::LIGHT,
+            Self::Dark => Palette::DARK,
+            Self::Auto if theme::is_dark() => Palette::DARK,
+            Self::Auto => Palette::LIGHT,
         }
     }
 }
@@ -325,15 +364,15 @@ impl Settings {
     /// [`Settings::load_from`] reads back — what a settings app calls before
     /// [`Settings::save`].
     ///
-    /// Two things a hand-edited file can have are not preserved: comments and
-    /// layout (this is a generator, not an editor of the text), and the
-    /// `theme` attribute — [`Overlay::palette`] no longer remembers which
-    /// theme (if any) produced it once the file has been read, so it is
-    /// always written back as its ten colour attributes instead. A freshly
-    /// loaded `theme="auto"` file therefore has its colours fixed to whatever
-    /// was active at load time the first time a settings app saves it. Noted
-    /// here rather than silently, per the project's convention on
-    /// simplifications made while porting.
+    /// Comments and layout of a hand-edited file are not preserved: this is a
+    /// generator, not an editor of the text. Noted here rather than
+    /// silently, per the project's convention on simplifications made while
+    /// porting.
+    ///
+    /// The overlay's `theme` *is* preserved: it is written back as itself,
+    /// plus only the colours that differ from what it gave at load
+    /// ([`Overlay::theme_palette`]) — so `theme="auto"` keeps following the
+    /// system after a save instead of being frozen into ten fixed colours.
     pub fn to_xml(&self) -> String {
         let mut out = String::new();
         out.push_str("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<y-snap>\n");
@@ -440,20 +479,28 @@ fn write_overlay(out: &mut String, overlay: &Overlay) {
         defaults.icon_font_size,
     );
 
-    let palette = &overlay.palette;
-    for (name, color) in [
-        ("back-color", palette.back),
-        ("text-color", palette.text),
-        ("hover-back-color", palette.hover_back),
-        ("hover-text-color", palette.hover_text),
-        ("active-back-color", palette.active_back),
-        ("active-text-color", palette.active_text),
-        ("disabled-back-color", palette.disabled_back),
-        ("disabled-text-color", palette.disabled_text),
-        ("border-color", palette.border),
-        ("panel-border-color", palette.panel_border),
+    if overlay.theme != defaults.theme {
+        let _ = write!(out, " theme=\"{}\"", overlay.theme.name());
+    }
+    // Only colours that differ from what the theme gives — the rest come
+    // back from the theme on the next load, which is what keeps `auto`
+    // following the system.
+    let (palette, base) = (&overlay.palette, &overlay.theme_palette);
+    for (name, color, from_theme) in [
+        ("back-color", palette.back, base.back),
+        ("text-color", palette.text, base.text),
+        ("hover-back-color", palette.hover_back, base.hover_back),
+        ("hover-text-color", palette.hover_text, base.hover_text),
+        ("active-back-color", palette.active_back, base.active_back),
+        ("active-text-color", palette.active_text, base.active_text),
+        ("disabled-back-color", palette.disabled_back, base.disabled_back),
+        ("disabled-text-color", palette.disabled_text, base.disabled_text),
+        ("border-color", palette.border, base.border),
+        ("panel-border-color", palette.panel_border, base.panel_border),
     ] {
-        let _ = write!(out, " {name}=\"{}\"", color_hex(color));
+        if color != from_theme {
+            let _ = write!(out, " {name}=\"{}\"", color_hex(color));
+        }
     }
     out.push_str(">\n");
 
@@ -916,10 +963,12 @@ impl Reader {
         // explicit colour attribute still wins, and a file can pick a theme
         // and change one colour instead of listing all nine.
         let theme = section.attr("theme").unwrap_or("auto");
-        overlay.palette = Palette::for_theme(theme).unwrap_or_else(|| {
+        overlay.theme = Theme::from_name(theme).unwrap_or_else(|| {
             self.warn(section, format!("unknown theme {theme:?}"));
-            Palette::LIGHT
+            Theme::Light
         });
+        overlay.theme_palette = overlay.theme.palette();
+        overlay.palette = overlay.theme_palette;
 
         let palette = &mut overlay.palette;
         for (name, slot) in [
@@ -1353,6 +1402,35 @@ mod tests {
             reloaded.min_button.right_click_action,
             original.min_button.right_click_action
         );
+    }
+
+    #[test]
+    fn saving_keeps_the_theme_and_writes_only_changed_colours() {
+        let settings = load(
+            "theme-dark",
+            r##"<y-snap><overlay theme="dark" back-color="#101010"/></y-snap>"##,
+        );
+        assert_eq!(settings.overlay.theme, Theme::Dark);
+
+        let xml = settings.to_xml();
+        assert!(xml.contains(r#"theme="dark""#), "{xml}");
+        assert!(xml.contains("back-color="), "{xml}");
+        assert!(!xml.contains("text-color="), "{xml}");
+
+        let reloaded = load("theme-dark-reloaded", &xml);
+        assert_eq!(reloaded.overlay.theme, Theme::Dark);
+        assert_eq!(reloaded.overlay.palette.back, Color::rgb(0x10, 0x10, 0x10));
+        assert_eq!(reloaded.overlay.palette.text, Palette::DARK.text);
+    }
+
+    #[test]
+    fn an_auto_theme_is_not_frozen_into_colours_on_save() {
+        let settings = load("theme-auto", r#"<y-snap><overlay columns="5"/></y-snap>"#);
+        assert_eq!(settings.overlay.theme, Theme::Auto);
+
+        let xml = settings.to_xml();
+        assert!(!xml.contains("theme="), "{xml}");
+        assert!(!xml.contains("-color="), "{xml}");
     }
 
     #[test]
