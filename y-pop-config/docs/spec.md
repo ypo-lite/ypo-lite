@@ -1,7 +1,7 @@
 # y-pop-config — specification
 
 A WinUI 3 settings app for `y-pop.xml`, built the way `y-snap-config` is:
-`windows-reactor` plus the `ui/` toolkit (`y-snap-config/docs/ui-toolkit.md`).
+`windows-reactor` plus the `ui/` toolkit (`ui-kit/docs/ui-toolkit.md`).
 This document has three parts: a review of what `y-pop.xml` can hold today,
 the requirements for the editor, and the decisions behind the first mockup
 (`mockup.html`, next to this file).
@@ -315,14 +315,26 @@ inspector screen with no tree.
 | `y-core` | Icon → PNG bytes (WIC); `.lnk` resolution (`IShellLinkW` + `IPersistFile`); exe `FileDescription` (`GetFileVersionInfoW`); `IFileOpenDialog` wrapper; Start-menu / AppsFolder enumeration (maybe `y-pop-config`-local). |
 | `y-snap-config/src/ui` | Promote `ui/` to a shared crate or path-include it, since two apps now need it. Rule 6 (`ui/` never imports `crate::Msg`) already makes this mechanical. Same for `key_picker`/`keys`. |
 
-## 5. Open questions
+## 5. Decisions on the open questions
 
-1. Should the Start-menu picker also offer **running apps** (exe paths of
-   open windows)? It's cheap with the window enumeration `y-snap` already
-   has.
-2. Store apps: is `app-id` alone enough, or should the picker also store the
-   app's own logo as `icon`? y-pop can't load a packaged-app logo today.
-3. Should `y-pop` gain **Start with Windows** (`y_core` startup
-   registration) as a General setting, even though it isn't in `y-pop.xml`
-   today?
-4. Shared `ui/` crate now, or copy and diverge until a third app needs it?
+Closed in phase 0.1.
+
+1. **Running apps in the picker: yes, later.** A fifth source (exe paths of
+   open windows, using `y-snap`'s window enumeration with a banished-class
+   filter), added after phase 8. It changes neither the model nor the picker's
+   shape. Tracked as plan item 8.7.
+2. **Store apps: `app-id`, and the icon follows `icon`.** No PNG, and no stored
+   path into the package folder (it holds the version and goes stale). The
+   `icon` attribute decides:
+   - **empty**: the generic icon (A);
+   - **a reserved value** (to decide, e.g. `icon="@app"`): y-pop resolves the
+     app's own logo from its `app-id` at load time through the shell (C).
+   It stays a single attribute and the schema gains no new one. C is a y-pop
+   feature (reader, `Settings`, icon cache) and comes after the picker; until
+   then the picker writes no `icon` for a Store app.
+3. **Start with Windows: not in the config app.** Not an attribute, not a
+   General switch. The user's startup is handled outside the editor for now.
+4. **Shared UI: done, and wider than the toolkit.** Anything common to our
+   graphical apps lives in `ui-kit`, the way `y-core` holds the Win32 plumbing
+   but for a more specialised purpose. `ui-kit` exists (plan 0.2) and the key
+   picker moves into it (plan 6.6).

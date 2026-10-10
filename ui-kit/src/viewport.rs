@@ -10,10 +10,10 @@
 //! page margins and a 55/45 split, had a third of that to work with.
 //!
 //! So: the shell turns the window width into the width the page content
-//! actually gets ([`crate::shell::content_viewport`]), and every container
+//! actually gets (`shell::content_viewport` in the app), and every container
 //! that divides space hands each child *its* share — [`Viewport::inset`]
 //! for padding, [`Viewport::column`] for a grid cell,
-//! [`crate::ui::layout::Split`] for a two-pane layout. A component deciding
+//! [`crate::layout::Split`] for a two-pane layout. A component deciding
 //! "how many columns", "table or cards", "side by side or stacked" asks the
 //! `Viewport` it was given, and gets an answer about its own box.
 //!

@@ -13,8 +13,8 @@
 //! Everything here is app-agnostic: no `Msg`, no `ConfigApp`. Callers pass
 //! finished `View`s and a [`Viewport`].
 
-use crate::ui::tokens::space;
-use crate::ui::viewport::Viewport;
+use crate::tokens::space;
+use crate::viewport::Viewport;
 use windows_reactor::*;
 
 /// Pre-alignment for a control that sits in a cell (table, form grid,
@@ -22,7 +22,7 @@ use windows_reactor::*;
 /// `TextBox`/`NumberBox` stretch, `ComboBox`/`Button`/`ToggleButton`/
 /// `ToggleSwitch` hug their content at the left — so a row mixing them is
 /// ragged unless every control is told the same thing. Every control
-/// constructor in [`crate::ui::controls`] already calls this; call it
+/// constructor in [`crate::controls`] already calls this; call it
 /// yourself only on a raw `windows-reactor` control.
 pub trait Fill: LayoutControl + Sized {
     /// Fill the cell's width; centre in its height.
@@ -37,7 +37,7 @@ impl<T: LayoutControl> Fill for T {}
 /// in a transparent `Border` — the "wrap a composed child in a native
 /// control" fix `docs/windows-reactor.md` §2 describes. The `Border`
 /// stretches to the whole cell; `view` fills it if `view` itself stretches
-/// (anything from [`crate::ui::controls`] does).
+/// (anything from [`crate::controls`] does).
 pub fn cell(view: impl Into<View>, row: usize, column: usize) -> View {
     Border::new().grid_row(row as i32).grid_column(column as i32).content(view)
 }
@@ -273,7 +273,7 @@ impl Split {
 /// makes the content's width finite — the precondition for text wrapping,
 /// `Star` columns and `Stretch` meaning anything inside it. Content that
 /// can't fit that width must reflow (an [`AutoGrid`], a
-/// [`crate::ui::table::Table`]'s card mode), never rely on being cut off.
+/// [`crate::table::Table`]'s card mode), never rely on being cut off.
 pub fn scroll_y(content: impl Into<View>) -> View {
     ScrollViewer::new()
         .horizontal_scroll_bar_visibility(ScrollBarVisibility::Disabled)

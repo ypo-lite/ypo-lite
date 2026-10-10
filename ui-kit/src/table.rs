@@ -13,18 +13,18 @@
 //! - **Cells line up.** Every cell is wrapped in a vertically centred
 //!   `Border` spanning its column, so a 32px `ComboBox`, a 20px
 //!   `ToggleSwitch` and a line of text sit on one centre line, and controls
-//!   from [`crate::ui::controls`] fill their column.
+//!   from [`crate::controls`] fill their column.
 //! - **Rows can open in place.** [`Row::detail`] spans the whole row
 //!   beneath it — where an editor for that row goes, instead of at the top
 //!   of the page far from the row it edits.
 //! - **Keys are the table's job.** Cells are keyed `"{row}/{column}"` from
 //!   the row's own key; no `row * 8 + column` arithmetic per screen.
 
-use crate::ui::layout::{Stack, cell_span};
-use crate::ui::surfaces::{CARD_INSET, card};
-use crate::ui::text;
-use crate::ui::tokens::{size, space};
-use crate::ui::viewport::Viewport;
+use crate::layout::{Stack, cell_span};
+use crate::surfaces::{CARD_INSET, card};
+use crate::text;
+use crate::tokens::{size, space};
+use crate::viewport::Viewport;
 use windows_reactor::*;
 
 /// How a column sizes.

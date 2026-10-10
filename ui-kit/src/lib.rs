@@ -1,8 +1,8 @@
-//! The UI toolkit every screen is built from — see
-//! `y-snap-config/docs/ui-toolkit.md` for the guide (principles, recipes,
-//! WinUI traps). Nothing under `ui` knows about this app's `Msg` or
-//! `Settings`: it takes `View`s, `Callback`s and a [`viewport::Viewport`],
-//! so it can move to a shared crate once a second WinUI app needs it.
+//! The UI toolkit every WinUI screen in the workspace is built from — see
+//! `ui-kit/docs/ui-toolkit.md` for the guide (principles, recipes, WinUI
+//! traps). Nothing here knows an app's `Msg` or settings: it takes `View`s,
+//! `Callback`s and a [`viewport::Viewport`], which is what let it move out of
+//! `y-snap-config` for `y-pop-config` to share.
 //!
 //! | Module | What's in it |
 //! | --- | --- |
@@ -14,9 +14,11 @@
 //! | [`surfaces`] | Page, section, card, panel, note. |
 //! | [`table`] | Flexing table that turns into cards when it can't fit. |
 //! | [`editor`] | The inline Cancel/Done editor shell. |
+//! | [`keys`] | The key catalog behind the key picker. |
 
 pub mod controls;
 pub mod editor;
+pub mod keys;
 pub mod layout;
 pub mod surfaces;
 pub mod table;

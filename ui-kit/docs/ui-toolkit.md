@@ -2,7 +2,7 @@
 
 How to build screens in `y-snap-config` (and later any WinUI 3 app in this repo)
 so they match the mock, line up, and fit any window size. The code lives in
-`src/ui/`; the screens built on it (`hotkeys.rs`, `mouse.rs`, `overlay/`) are the
+`ui-kit/src/`; the screens built on it in `y-snap-config` (`hotkeys.rs`, `mouse.rs`, `overlay/`) are the
 worked examples. For how `windows-reactor` itself works, see
 [`docs/windows-reactor.md`](../../docs/windows-reactor.md); this guide is about
 what we build on top of it.

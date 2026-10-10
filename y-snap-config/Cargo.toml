@@ -7,4 +7,5 @@ edition.workspace = true
 windows = { workspace = true }
 windows-reactor = { workspace = true }
 y-core = { workspace = true }
+ui-kit = { workspace = true }
 y-snap = { path = "../y-snap" }

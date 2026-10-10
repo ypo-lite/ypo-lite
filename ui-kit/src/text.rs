@@ -1,10 +1,10 @@
-//! Text styles — the type ramp from [`crate::ui::tokens`] as named roles,
+//! Text styles — the type ramp from [`crate::tokens`] as named roles,
 //! so no screen picks a font size, weight or opacity itself.
 //!
 //! Each returns the concrete [`TextBlock`] builder, not a `View`, so a
 //! caller can still chain `.grid_row()`, `.margin()`, `.foreground()`…
 
-use crate::ui::tokens::{emphasis, font};
+use crate::tokens::{emphasis, font};
 use windows_reactor::*;
 
 /// A page title.

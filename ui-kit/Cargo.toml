@@ -1,0 +1,13 @@
+[package]
+name = "ui-kit"
+version.workspace = true
+edition.workspace = true
+
+# The toolkit's crate name is what screens write in `use`.
+[lib]
+name = "ypo_ui"
+
+[dependencies]
+windows = { workspace = true }
+windows-reactor = { workspace = true }
+y-core = { workspace = true }

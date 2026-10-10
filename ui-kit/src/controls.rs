@@ -12,9 +12,9 @@
 //!   Those take what a caller would have chained (`enabled`, `accent`) as
 //!   parameters instead.
 
-use crate::ui::layout::{Fill, Stack, cell};
-use crate::ui::text;
-use crate::ui::tokens::{font, radius, size, space};
+use crate::layout::{Fill, Stack, cell};
+use crate::text;
+use crate::tokens::{font, radius, size, space};
 use windows_reactor::*;
 
 /// A dropdown over plain strings, reporting the chosen index.
@@ -100,7 +100,7 @@ pub fn labeled_switch(label: &str, is_on: bool, on_toggle: Callback<bool>) -> Vi
 }
 
 /// A two-state chip (a modifier: Win/Ctrl/Alt/Shift; a key on the key
-/// picker). Fills its cell, so chips in an [`crate::ui::layout::AutoGrid`]
+/// picker). Fills its cell, so chips in an [`crate::layout::AutoGrid`]
 /// are all one width.
 pub fn chip(label: &str, checked: bool, enabled: bool, on_toggle: Callback<bool>) -> View {
     ToggleButton::new()

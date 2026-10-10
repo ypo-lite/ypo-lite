@@ -3,7 +3,7 @@
 //! popup, and what a plain right-click on the button does instead.
 //!
 //! Same shape as the Overlay screen — settings beside a live preview, as a
-//! [`Split`] — built entirely from the toolkit (`docs/ui-toolkit.md`).
+//! [`Split`] — built entirely from the toolkit (`ui-kit/docs/ui-toolkit.md`).
 //! The tile list is its own rather than shared with Overlay's Tiles tab:
 //! a popup tile has no key, group or desktop, so the shared part would be
 //! little more than the toolkit's own `Table` + `editor` already are.

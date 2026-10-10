@@ -34,6 +34,14 @@
 //! * Nesting is capped at [`MAX_DEPTH`]; a file crafted to recurse deeper is
 //!   rejected rather than allowed to overflow the stack.
 //! * Text is decoded but not normalised: whitespace is returned as written.
+//!
+//! # Comments
+//!
+//! Comments are parsed and kept, but stay out of the way: [`Element::children`]
+//! returns elements only, so a reader that does not care never sees them. An
+//! editor that must write a file back reads them with
+//! [`Element::children_with_comments`] and [`Document::prolog_comments`], and
+//! writes them again with [`Writer`].
 
 use std::fmt;
 
@@ -67,8 +75,14 @@ impl std::error::Error for Error {}
 #[derive(Debug)]
 pub struct Document {
     nodes: Vec<NodeData>,
+    root: usize,
+    /// Comments before and after the root element, in document order.
+    prolog: Vec<usize>,
+    epilog: Vec<usize>,
 }
 
+/// An element or a comment. For a comment, `text` is the comment's text and
+/// the other fields are empty.
 #[derive(Debug)]
 struct NodeData {
     name: String,
@@ -76,6 +90,23 @@ struct NodeData {
     children: Vec<usize>,
     text: String,
     line: u32,
+    comment: bool,
+    /// An empty line separates this node from the sibling before it.
+    blank_before: bool,
+}
+
+impl NodeData {
+    fn element(name: String, line: u32) -> Self {
+        Self {
+            name,
+            attributes: Vec::new(),
+            children: Vec::new(),
+            text: String::new(),
+            line,
+            comment: false,
+            blank_before: false,
+        }
+    }
 }
 
 impl Document {
@@ -89,8 +120,62 @@ impl Document {
     pub fn root(&self) -> Element<'_> {
         Element {
             document: self,
-            index: 0,
+            index: self.root,
         }
+    }
+
+    /// The comments before the root element, in order.
+    pub fn prolog_comments(&self) -> impl Iterator<Item = Comment<'_>> {
+        self.comments(&self.prolog)
+    }
+
+    /// The comments after the root element, in order.
+    pub fn epilog_comments(&self) -> impl Iterator<Item = Comment<'_>> {
+        self.comments(&self.epilog)
+    }
+
+    fn comments<'a>(&'a self, indices: &'a [usize]) -> impl Iterator<Item = Comment<'a>> {
+        indices.iter().map(move |&index| Comment {
+            document: self,
+            index,
+        })
+    }
+}
+
+/// One child of an element, as [`Element::children_with_comments`] yields it.
+#[derive(Clone, Copy)]
+pub enum Node<'a> {
+    Element(Element<'a>),
+    Comment(Comment<'a>),
+}
+
+/// A comment, cheap to copy.
+#[derive(Clone, Copy)]
+pub struct Comment<'a> {
+    document: &'a Document,
+    index: usize,
+}
+
+impl<'a> Comment<'a> {
+    fn data(&self) -> &'a NodeData {
+        &self.document.nodes[self.index]
+    }
+
+    /// The comment's text without its delimiters. Surrounding blank space is
+    /// trimmed, and the indentation shared by the lines after the first is
+    /// removed, so the text reads the same wherever the comment was nested.
+    pub fn text(&self) -> &'a str {
+        &self.data().text
+    }
+
+    /// The line the comment opened on.
+    pub fn line(&self) -> u32 {
+        self.data().line
+    }
+
+    /// Whether an empty line separates it from the node before it.
+    pub fn blank_before(&self) -> bool {
+        self.data().blank_before
     }
 }
 
@@ -128,7 +213,26 @@ impl<'a> Element<'a> {
         self.data()
             .children
             .iter()
+            .filter(move |&&index| !document.nodes[index].comment)
             .map(move |&index| Element { document, index })
+    }
+
+    /// Every child, elements and comments alike, in document order.
+    pub fn children_with_comments(&self) -> impl Iterator<Item = Node<'a>> {
+        let document = self.document;
+        self.data().children.iter().map(move |&index| {
+            if document.nodes[index].comment {
+                Node::Comment(Comment { document, index })
+            } else {
+                Node::Element(Element { document, index })
+            }
+        })
+    }
+
+    /// Whether an empty line separates the element from the node before it
+    /// (an element or a comment). `false` for a first child.
+    pub fn blank_before(&self) -> bool {
+        self.data().blank_before
     }
 
     /// Every child element with this name, in document order.
@@ -201,19 +305,27 @@ impl<'a> Parser<'a> {
     }
 
     fn document(mut self) -> Result<Document, Error> {
-        self.skip_ignorable()?;
+        let mut prolog = Vec::new();
+        let blank = self.skip_ignorable(&mut prolog, false)?;
 
         if self.peek() != Some(b'<') {
             return Err(self.error("expected an element"));
         }
-        self.element(0)?;
+        let root = self.element(0)?;
+        self.nodes[root].blank_before = blank && !prolog.is_empty();
 
-        self.skip_ignorable()?;
+        let mut epilog = Vec::new();
+        self.skip_ignorable(&mut epilog, true)?;
         if self.position != self.text.len() {
             return Err(self.error("trailing content after the root element"));
         }
 
-        Ok(Document { nodes: self.nodes })
+        Ok(Document {
+            nodes: self.nodes,
+            root,
+            prolog,
+            epilog,
+        })
     }
 
     /// Parses one element, starting at its `<`, and returns its index.
@@ -233,13 +345,7 @@ impl<'a> Parser<'a> {
         // Reserved before the children are parsed, so the root always ends up
         // at index 0 and a child is always pushed after its parent.
         let index = self.nodes.len();
-        self.nodes.push(NodeData {
-            name,
-            attributes: Vec::new(),
-            children: Vec::new(),
-            text: String::new(),
-            line,
-        });
+        self.nodes.push(NodeData::element(name, line));
 
         loop {
             self.skip_whitespace();
@@ -266,6 +372,9 @@ impl<'a> Parser<'a> {
         // An independent copy of the source, so slicing it does not borrow
         // `self` while `self.nodes` is being written to.
         let text = self.text;
+        // Whether the last run of text ended in an empty line, for the next
+        // element or comment to pick up.
+        let mut blank = false;
 
         loop {
             match self.peek() {
@@ -288,9 +397,12 @@ impl<'a> Parser<'a> {
                         return Ok(());
                     }
 
+                    let has_previous = !self.nodes[index].children.is_empty();
+
                     if self.starts_with("<!--") {
-                        self.advance(4);
-                        self.skip_past("-->", "unterminated comment")?;
+                        let comment = self.comment(blank && has_previous)?;
+                        self.nodes[index].children.push(comment);
+                        blank = false;
                     } else if self.starts_with("<![CDATA[") {
                         self.advance(9);
                         let start = self.position;
@@ -302,7 +414,9 @@ impl<'a> Parser<'a> {
                         self.skip_past("?>", "unterminated processing instruction")?;
                     } else {
                         let child = self.element(depth + 1)?;
+                        self.nodes[child].blank_before = blank && has_previous;
                         self.nodes[index].children.push(child);
+                        blank = false;
                     }
                 }
 
@@ -313,6 +427,7 @@ impl<'a> Parser<'a> {
                     };
                     self.advance(offset);
 
+                    blank = ends_in_empty_line(&text[start..self.position]);
                     let decoded = decode(&text[start..self.position], self.line)?;
                     self.nodes[index].text.push_str(&decoded);
                 }
@@ -370,15 +485,45 @@ impl<'a> Parser<'a> {
         self.text[start..self.position].to_owned()
     }
 
+    /// Parses a comment, the cursor on its `<!--`, and returns its index.
+    fn comment(&mut self, blank_before: bool) -> Result<usize, Error> {
+        let text = self.text;
+        let line = self.line;
+
+        self.advance(4);
+        let start = self.position;
+        self.skip_past("-->", "unterminated comment")?;
+
+        let index = self.nodes.len();
+        self.nodes.push(NodeData {
+            text: tidy_comment(&text[start..self.position - 3]),
+            comment: true,
+            blank_before,
+            ..NodeData::element(String::new(), line)
+        });
+        Ok(index)
+    }
+
     /// Whitespace, comments, processing instructions and the document type
-    /// declaration — everything allowed outside the root element.
-    fn skip_ignorable(&mut self) -> Result<(), Error> {
+    /// declaration — everything allowed outside the root element. Comments
+    /// are collected into `comments`.
+    ///
+    /// Returns whether an empty line sits between whatever came last and the
+    /// thing the cursor stopped at. `has_previous` says whether the root
+    /// element already precedes it.
+    fn skip_ignorable(
+        &mut self,
+        comments: &mut Vec<usize>,
+        has_previous: bool,
+    ) -> Result<bool, Error> {
         loop {
+            let before = self.position;
             self.skip_whitespace();
+            let blank = ends_in_empty_line(&self.text[before..self.position]);
 
             if self.starts_with("<!--") {
-                self.advance(4);
-                self.skip_past("-->", "unterminated comment")?;
+                let blank_before = blank && (has_previous || !comments.is_empty());
+                comments.push(self.comment(blank_before)?);
             } else if self.starts_with("<!DOCTYPE") {
                 self.advance(9);
                 self.skip_past(">", "unterminated document type declaration")?;
@@ -386,7 +531,7 @@ impl<'a> Parser<'a> {
                 self.advance(2);
                 self.skip_past("?>", "unterminated processing instruction")?;
             } else {
-                return Ok(());
+                return Ok(blank);
             }
         }
     }
@@ -432,6 +577,51 @@ impl<'a> Parser<'a> {
             line: self.line,
         }
     }
+}
+
+/// Whether trailing whitespace holds an empty line: two line breaks with
+/// nothing but blanks between them.
+fn ends_in_empty_line(gap: &str) -> bool {
+    let trimmed = gap.trim_end_matches([' ', '\t', '\r', '\n']);
+    gap[trimmed.len()..]
+        .bytes()
+        .filter(|&byte| byte == b'\n')
+        .count()
+        >= 2
+}
+
+/// A comment's text as the editor wants it: trimmed, line breaks as `\n`, and
+/// the indentation shared by the lines after the first removed.
+fn tidy_comment(raw: &str) -> String {
+    let raw = raw.replace("\r\n", "\n");
+    let mut lines = raw.trim().split('\n');
+    let first = lines.next().unwrap_or("");
+    let rest: Vec<&str> = lines.collect();
+
+    // The longest run of blanks every non-empty later line starts with.
+    let mut indent: Option<&str> = None;
+    for line in rest.iter().filter(|line| !line.trim().is_empty()) {
+        let own = &line[..line.len() - line.trim_start_matches([' ', '\t']).len()];
+        indent = Some(match indent {
+            None => own,
+            Some(shared) => {
+                let length = shared
+                    .bytes()
+                    .zip(own.bytes())
+                    .take_while(|(a, b)| a == b)
+                    .count();
+                &shared[..length]
+            }
+        });
+    }
+    let indent = indent.unwrap_or("");
+
+    let mut tidy = first.trim_end().to_owned();
+    for line in rest {
+        tidy.push('\n');
+        tidy.push_str(line.strip_prefix(indent).unwrap_or(line.trim_start()).trim_end());
+    }
+    tidy
 }
 
 /// Resolves entity and character references in text or an attribute value.
@@ -483,6 +673,169 @@ fn decode(raw: &str, line: u32) -> Result<String, Error> {
 
     decoded.push_str(rest);
     Ok(decoded)
+}
+
+/// Writes the subset of XML [`Document`] reads: tab-indented elements,
+/// escaped attributes, and comments.
+///
+/// ```
+/// use y_core::xml::Writer;
+///
+/// let mut writer = Writer::new();
+/// writer.open("config");
+/// writer.comment("one binding");
+/// writer.open("hotkey");
+/// writer.attr("key", "Win+Space");
+/// writer.close();
+/// writer.close();
+/// assert_eq!(
+///     writer.finish(),
+///     "<config>\n\t<!-- one binding -->\n\t<hotkey key=\"Win+Space\"/>\n</config>\n",
+/// );
+/// ```
+///
+/// An element is a start tag that stays open for [`attr`](Writer::attr) until
+/// the next thing is written; closing an element that got no content makes it
+/// self-closing. Calls that don't fit (an attribute after content, more
+/// closes than opens) are bugs in the caller and panic in debug builds.
+#[derive(Debug, Default)]
+pub struct Writer {
+    out: String,
+    /// Names of the elements still open.
+    open: Vec<String>,
+    /// The innermost start tag has not been finished with `>` yet.
+    tag_open: bool,
+}
+
+impl Writer {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// `<?xml version="1.0" encoding="utf-8"?>`, for the top of a file.
+    pub fn declaration(&mut self) {
+        self.out
+            .push_str("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n");
+    }
+
+    /// Starts an element; set its attributes with [`attr`](Writer::attr).
+    pub fn open(&mut self, name: &str) {
+        self.finish_tag();
+        self.indent(self.open.len());
+        self.out.push('<');
+        self.out.push_str(name);
+        self.open.push(name.to_owned());
+        self.tag_open = true;
+    }
+
+    /// Adds an attribute to the element just opened.
+    pub fn attr(&mut self, name: &str, value: &str) {
+        debug_assert!(self.tag_open, "attribute after the element's content");
+        self.out.push(' ');
+        self.out.push_str(name);
+        self.out.push_str("=\"");
+        for character in value.chars() {
+            match character {
+                '&' => self.out.push_str("&amp;"),
+                '<' => self.out.push_str("&lt;"),
+                '>' => self.out.push_str("&gt;"),
+                '"' => self.out.push_str("&quot;"),
+                // Kept as references, so they survive being read back.
+                '\n' => self.out.push_str("&#10;"),
+                '\r' => self.out.push_str("&#13;"),
+                '\t' => self.out.push_str("&#9;"),
+                other => self.out.push(other),
+            }
+        }
+        self.out.push('"');
+    }
+
+    /// Closes the innermost element: `/>` if it has no content, else its end
+    /// tag.
+    pub fn close(&mut self) {
+        let name = self.open.pop();
+        debug_assert!(name.is_some(), "close without a matching open");
+        let Some(name) = name else { return };
+
+        if self.tag_open {
+            self.out.push_str("/>\n");
+            self.tag_open = false;
+        } else {
+            self.indent(self.open.len());
+            self.out.push_str("</");
+            self.out.push_str(&name);
+            self.out.push_str(">\n");
+        }
+    }
+
+    /// An element with no content, closed at once: `open` + `close`.
+    pub fn empty(&mut self) {
+        debug_assert!(self.tag_open, "empty() after the element's content");
+        self.close();
+    }
+
+    /// A comment at the current depth.
+    ///
+    /// `--` isn't allowed inside a comment, so it is written `- -`. A text of
+    /// one line stays on one line; a longer one gets the delimiters on lines
+    /// of their own and every line indented to the depth.
+    pub fn comment(&mut self, text: &str) {
+        self.finish_tag();
+        let depth = self.open.len();
+
+        let mut safe = text.replace("\r\n", "\n");
+        while safe.contains("--") {
+            safe = safe.replace("--", "- -");
+        }
+        let safe = safe.trim();
+
+        self.indent(depth);
+        if safe.contains('\n') {
+            self.out.push_str("<!--\n");
+            for line in safe.split('\n') {
+                let line = line.trim_end();
+                if !line.is_empty() {
+                    self.indent(depth + 1);
+                    self.out.push_str(line);
+                }
+                self.out.push('\n');
+            }
+            self.indent(depth);
+            self.out.push_str("-->\n");
+        } else {
+            self.out.push_str("<!-- ");
+            self.out.push_str(safe);
+            self.out.push_str(" -->\n");
+        }
+    }
+
+    /// An empty line, unless the output already ends in one or is empty.
+    pub fn blank_line(&mut self) {
+        self.finish_tag();
+        if !self.out.is_empty() && !self.out.ends_with("\n\n") {
+            self.out.push('\n');
+        }
+    }
+
+    /// The document written so far.
+    pub fn finish(self) -> String {
+        debug_assert!(self.open.is_empty(), "unclosed elements: {:?}", self.open);
+        self.out
+    }
+
+    /// Ends a pending start tag because content follows it.
+    fn finish_tag(&mut self) {
+        if self.tag_open {
+            self.out.push_str(">\n");
+            self.tag_open = false;
+        }
+    }
+
+    fn indent(&mut self, depth: usize) {
+        for _ in 0..depth {
+            self.out.push('\t');
+        }
+    }
 }
 
 #[cfg(test)]
@@ -577,5 +930,195 @@ mod tests {
         let deep = "<a>".repeat(MAX_DEPTH + 2);
         let error = Document::parse(&deep).expect_err("too deep");
         assert_eq!(error.message, "elements nested too deeply");
+    }
+
+    fn texts<'a>(comments: impl Iterator<Item = Comment<'a>>) -> Vec<&'a str> {
+        comments.map(|comment| comment.text()).collect()
+    }
+
+    #[test]
+    fn keeps_comments_around_the_root() {
+        let document =
+            Document::parse("<?xml version=\"1.0\"?>\n<!-- one -->\n\n<!-- two -->\n<a/>\n<!-- after -->")
+                .expect("valid");
+        assert_eq!(texts(document.prolog_comments()), ["one", "two"]);
+        assert_eq!(texts(document.epilog_comments()), ["after"]);
+
+        let blanks: Vec<_> = document.prolog_comments().map(|c| c.blank_before()).collect();
+        assert_eq!(blanks, [false, true]);
+        assert!(!document.root().blank_before());
+        assert_eq!(document.root().name(), "a");
+    }
+
+    #[test]
+    fn a_comment_stays_out_of_the_element_view() {
+        let document = Document::parse("<a><!-- x --><b/><!-- y --><c/></a>").expect("valid");
+        let names: Vec<_> = document.root().children().map(|e| e.name()).collect();
+        assert_eq!(names, ["b", "c"]);
+        assert_eq!(document.root().children_with_comments().count(), 4);
+    }
+
+    #[test]
+    fn keeps_comments_between_children_in_order() {
+        let document = Document::parse(
+            "<a>\n\t<!-- first -->\n\t<b/>\n\n\t<!-- second -->\n\t<c/>\n</a>",
+        )
+        .expect("valid");
+
+        let mut seen = Vec::new();
+        for node in document.root().children_with_comments() {
+            match node {
+                Node::Comment(c) => seen.push(format!("#{} {}", c.text(), c.blank_before())),
+                Node::Element(e) => seen.push(format!("{} {}", e.name(), e.blank_before())),
+            }
+        }
+        assert_eq!(
+            seen,
+            ["#first false", "b false", "#second true", "c false"],
+        );
+    }
+
+    #[test]
+    fn a_comment_can_be_the_only_content() {
+        let document = Document::parse("<a>\n\t<!-- only -->\n</a>").expect("valid");
+        assert_eq!(document.root().children().count(), 0);
+        let Some(Node::Comment(comment)) = document.root().children_with_comments().next() else {
+            panic!("expected a comment");
+        };
+        assert_eq!(comment.text(), "only");
+        assert_eq!(comment.line(), 2);
+    }
+
+    #[test]
+    fn dedents_a_multi_line_comment() {
+        let document = Document::parse(
+            "<a>\n\t\t<!--\n\t\t\tline one\n\t\t\t  indented\n\n\t\t\tline three\n\t\t-->\n</a>",
+        )
+        .expect("valid");
+        let Some(Node::Comment(comment)) = document.root().children_with_comments().next() else {
+            panic!("expected a comment");
+        };
+        assert_eq!(comment.text(), "line one\n  indented\n\nline three");
+    }
+
+    #[test]
+    fn writes_what_it_is_told() {
+        let mut writer = Writer::new();
+        writer.declaration();
+        writer.open("a");
+        writer.attr("v", "x & <y> \"z\"");
+        writer.comment("note");
+        writer.open("b");
+        writer.empty();
+        writer.blank_line();
+        writer.blank_line();
+        writer.open("c");
+        writer.open("d");
+        writer.close();
+        writer.close();
+        writer.close();
+
+        assert_eq!(
+            writer.finish(),
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n\
+             <a v=\"x &amp; &lt;y&gt; &quot;z&quot;\">\n\
+             \t<!-- note -->\n\
+             \t<b/>\n\
+             \n\
+             \t<c>\n\
+             \t\t<d/>\n\
+             \t</c>\n\
+             </a>\n"
+        );
+    }
+
+    #[test]
+    fn never_writes_a_double_hyphen_in_a_comment() {
+        let mut writer = Writer::new();
+        writer.open("a");
+        writer.comment("a -- b --- c");
+        writer.comment("ends with -");
+        writer.close();
+        let text = writer.finish();
+
+        let document = Document::parse(&text).expect("a well-formed document");
+        let Some(Node::Comment(first)) = document.root().children_with_comments().next() else {
+            panic!("expected a comment");
+        };
+        assert_eq!(first.text(), "a - - b - - - c");
+    }
+
+    #[test]
+    fn indents_a_multi_line_comment_to_its_depth() {
+        let mut writer = Writer::new();
+        writer.open("a");
+        writer.open("b");
+        writer.comment("one\n  two\n\nthree");
+        writer.close();
+        writer.close();
+        let text = writer.finish();
+        assert_eq!(
+            text,
+            "<a>\n\t<b>\n\t\t<!--\n\t\t\tone\n\t\t\t  two\n\n\t\t\tthree\n\t\t-->\n\t</b>\n</a>\n"
+        );
+
+        let document = Document::parse(&text).expect("valid");
+        let Some(Node::Comment(comment)) = document
+            .root()
+            .child("b")
+            .expect("present")
+            .children_with_comments()
+            .next()
+        else {
+            panic!("expected a comment");
+        };
+        assert_eq!(comment.text(), "one\n  two\n\nthree");
+    }
+
+    #[test]
+    fn parse_write_parse_keeps_elements_and_comments() {
+        fn write(element: Element<'_>, writer: &mut Writer) {
+            writer.open(element.name());
+            for (name, value) in element.attributes() {
+                writer.attr(name, value);
+            }
+            for node in element.children_with_comments() {
+                match node {
+                    Node::Comment(comment) => {
+                        if comment.blank_before() {
+                            writer.blank_line();
+                        }
+                        writer.comment(comment.text());
+                    }
+                    Node::Element(child) => {
+                        if child.blank_before() {
+                            writer.blank_line();
+                        }
+                        write(child, writer);
+                    }
+                }
+            }
+            writer.close();
+        }
+
+        let source = "<!-- head -->\n<a x=\"1 &amp; 2\">\n\t<!-- one -->\n\t<b y=\"&#10;\"/>\n\n\t<g>\n\t\t<!--\n\t\t\tdeep\n\t\t\ttext\n\t\t-->\n\t\t<c/>\n\t</g>\n</a>\n";
+        let first = Document::parse(source).expect("valid");
+
+        let mut writer = Writer::new();
+        for comment in first.prolog_comments() {
+            writer.comment(comment.text());
+        }
+        write(first.root(), &mut writer);
+        let written = writer.finish();
+
+        // Writing is stable: the second pass reproduces the first.
+        let second = Document::parse(&written).expect("valid");
+        let mut again = Writer::new();
+        for comment in second.prolog_comments() {
+            again.comment(comment.text());
+        }
+        write(second.root(), &mut again);
+        assert_eq!(again.finish(), written);
+        assert_eq!(written, source);
     }
 }

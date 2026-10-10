@@ -61,7 +61,7 @@ pub mod emphasis {
 
 /// Fixed sizes of things that are not content-sized.
 pub mod size {
-    /// Width to reserve for one [`crate::ui::controls::icon_button`]: its
+    /// Width to reserve for one [`crate::controls::icon_button`]: its
     /// 20px glyph plus the `Button`'s native 11px side padding, rounded up.
     /// A reservation, not a size the button is forced to — forcing 32px is
     /// what cropped the icons.

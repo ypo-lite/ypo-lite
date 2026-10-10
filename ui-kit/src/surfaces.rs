@@ -2,13 +2,13 @@
 //! note. One look per role, so a card on one screen and a card on another
 //! are the same card.
 
-use crate::ui::layout::{Stack, cell};
-use crate::ui::text;
-use crate::ui::tokens::{radius, size, space};
+use crate::layout::{Stack, cell};
+use crate::text;
+use crate::tokens::{radius, size, space};
 use windows_reactor::*;
 
 /// Padding inside a [`card`] — exported so a responsive card body can
-/// compute its own [`crate::ui::viewport::Viewport`] with
+/// compute its own [`crate::viewport::Viewport`] with
 /// `viewport.inset(CARD_INSET)`.
 pub const CARD_PADDING: f64 = space::L;
 /// Everything a card takes off each side: padding plus its border.

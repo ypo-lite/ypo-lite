@@ -4,7 +4,7 @@
 //! Module map:
 //! - [`ui`] — the app-agnostic toolkit every screen is built from (tokens,
 //!   [`ui::viewport::Viewport`], layout primitives, controls, table,
-//!   editor shell). **Read `y-snap-config/docs/ui-toolkit.md` before
+//!   editor shell). **Read `ui-kit/docs/ui-toolkit.md` before
 //!   adding or changing a screen.**
 //! - [`shell`] — the window frame (nav pane, page scroller, Save bar) and
 //!   the content [`ui::viewport::Viewport`] it leaves for screens.
@@ -31,13 +31,13 @@ mod hotkeys;
 mod icon_picker;
 mod icons;
 mod key_picker;
-mod keys;
 mod min_button;
 mod mouse;
 mod overlay;
 mod reorder;
 mod shell;
-mod ui;
+use ypo_ui as ui;
+use ypo_ui::keys;
 
 use windows::Win32::UI::Input::KeyboardAndMouse::{HOT_KEY_MODIFIERS, VIRTUAL_KEY};
 use windows_reactor::*;

@@ -17,7 +17,7 @@ Status: ⬜ todo · 🔨 in progress · ✅ done · 👁 done, verify live
   (a `windows-reactor` limit, a better idea found while building), note it
   in `ui-mockup.md` (to create, same shape as `y-snap-config`'s) and in the
   code, as the porting rules in `CLAUDE.md` ask.
-- **Follow `y-snap-config/docs/ui-toolkit.md`.** Every screen takes a
+- **Follow `ui-kit/docs/ui-toolkit.md`.** Every screen takes a
   `Viewport`, no literal sizes, `AutoGrid`/`Split`/`Table` for anything that
   must reflow, keyed children. Keep a `ui-checklist.md` for this app from
   the first screen on.
@@ -59,9 +59,9 @@ main screen.
 
 | # | Item | Status | Notes |
 |---|---|---|---|
-| 0.1 | Close spec §5 open questions | ⬜ | Running apps in the picker, Store-app logos as icons, "Start with Windows", shared UI. Record each answer in `spec.md`. |
-| 0.2 | **Extract the UI toolkit into a crate** | ⬜ | Recommended over copying. Move `y-snap-config/src/ui/` to a new workspace crate (e.g. `ui-kit`, lib name `ypo_ui`), along with `key_picker.rs` + `keys.rs` and the generic half of `reorder.rs`. Rule 6 (`ui/` never imports `crate::Msg`) already makes this mechanical. `icon_picker.rs` + `icons.rs` (the emoji picker) stay in `y-snap-config`, since y-pop's icon picker is a different thing. Move `ui-toolkit.md` with it. |
-| 0.3 | `y-snap-config` builds on the extracted crate | ⬜ | Pure move, no behaviour change. Its `ui-checklist.md` stays valid. Check one live run. |
+| 0.1 | Close spec §5 open questions | ✅ | Running apps in the picker, Store-app logos as icons, "Start with Windows", shared UI. Record each answer in `spec.md`. |
+| 0.2 | **Extract the UI toolkit into a crate** | ✅ | **Done:** `ui-kit` (lib `ypo_ui`) holds `ui/*` and `keys.rs`; `key_picker.rs` and `reorder.rs` still mention `ConfigApp`/`Msg`, so they stay in `y-snap-config` until 6.6 needs a callback-based key picker. Original note: Recommended over copying. Move `y-snap-config/src/ui/` to a new workspace crate (e.g. `ui-kit`, lib name `ypo_ui`), along with `key_picker.rs` + `keys.rs` and the generic half of `reorder.rs`. Rule 6 (`ui/` never imports `crate::Msg`) already makes this mechanical. `icon_picker.rs` + `icons.rs` (the emoji picker) stay in `y-snap-config`, since y-pop's icon picker is a different thing. Move `ui-toolkit.md` with it. |
+| 0.3 | `y-snap-config` builds on the extracted crate | 👁 | Pure move, no behaviour change. Its `ui-checklist.md` stays valid. Check one live run. |
 
 **Done when** `y-snap-config` runs unchanged on the shared crate.
 
@@ -74,10 +74,10 @@ Spec §2.8 needs them.
 
 | # | Item | Status | Notes |
 |---|---|---|---|
-| 1.1 | Comment nodes in the arena | ⬜ | Store each comment (text, line) as an arena node of its own kind. **`Element::children()` keeps returning elements only**, so `y-snap`'s and `y-pop`'s readers and all their tests are untouched. Add `Element::children_with_comments()` (an iterator of `Node::Element \| Node::Comment`), plus `Document::prolog_comments()` for comments before the root element. |
-| 1.2 | "Blank line before" flag | ⬜ | Per node (element or comment): was there an empty line between it and the previous sibling? It drives "attached" comments (spec §2.8) and keeps the file's grouping on save. |
-| 1.3 | `y_core::xml::Writer` | ⬜ | A small builder: `open(name)`, `attr(k, v)`, `close()`, `empty()`, `comment(text)`, `blank_line()`, tab indentation. Escapes attribute values (`& < > "`). In comments, replaces `--` with `- -`, and indents multi-line text to the current depth (strip common indentation on read, re-add on write). |
-| 1.4 | Tests | ⬜ | Comments before the root, between children, inside an empty-ish element; multi-line text and its indentation; `--`; parse → write → parse gives the same elements and comments. |
+| 1.1 | Comment nodes in the arena | ✅ | Store each comment (text, line) as an arena node of its own kind. **`Element::children()` keeps returning elements only**, so `y-snap`'s and `y-pop`'s readers and all their tests are untouched. Add `Element::children_with_comments()` (an iterator of `Node::Element \| Node::Comment`), plus `Document::prolog_comments()` for comments before the root element. |
+| 1.2 | "Blank line before" flag | ✅ | Per node (element or comment): was there an empty line between it and the previous sibling? It drives "attached" comments (spec §2.8) and keeps the file's grouping on save. |
+| 1.3 | `y_core::xml::Writer` | ✅ | A small builder: `open(name)`, `attr(k, v)`, `close()`, `empty()`, `comment(text)`, `blank_line()`, tab indentation. Escapes attribute values (`& < > "`). In comments, replaces `--` with `- -`, and indents multi-line text to the current depth (strip common indentation on read, re-add on write). |
+| 1.4 | Tests | ✅ | Comments before the root, between children, inside an empty-ish element; multi-line text and its indentation; `--`; parse → write → parse gives the same elements and comments. |
 
 **Done when** both apps' existing test suites pass untouched and the new
 tests cover 1.1–1.3.
@@ -170,7 +170,7 @@ move buttons alone, saved, and y-pop shows the same menu.
 | 6.3 | Launch fields | ⬜ | Arguments with a "Clipboard" insert and its "read at launch" note; Start in; Run as administrator; Launch through the shell as a tri-state showing the inherited value; run at y-pop start / exit. |
 | 6.4 | Folder fields | ⬜ | Filter, depth (0–200) with a plain-language readout ("files only", "1 level of subfolders"), and the open-folder entry. |
 | 6.5 | Store app field | ⬜ | `ComboBox` of installed Store apps (needs the enumeration from 8.5; free text until then). |
-| 6.6 | Hotkeys | ⬜ | Keycaps list, "Add hotkey" opening the shared `key_picker` (0.2) under the row, a per-binding Override switch, remove. Conflict check across the whole file (same combo twice) as a warning marker. |
+| 6.6 | Hotkeys | ⬜ | **First move `key_picker` (and the generic half of `reorder`) into `ui-kit`**, made callback-based so it no longer names `ConfigApp`/`Msg`; `y-snap-config` then uses it from there. Keycaps list, "Add hotkey" opening the shared `key_picker` under the row, a per-binding Override switch, remove. Conflict check across the whole file (same combo twice) as a warning marker. |
 | 6.7 | Run now | ⬜ | Calls the library's `launch` (2.6) with the expanded app and the current clipboard; any error goes to the status bar. |
 
 ---
@@ -197,6 +197,8 @@ move buttons alone, saved, and y-pop shows the same menu.
 | 8.4 | App picker — Browse and Manual | ⬜ | Browse… (multi-select file dialog → 8.1) and Manual (an empty app with Target focused). |
 | 8.5 | App picker — Start menu | ⬜ | Scan both `Start Menu\Programs` folders (common + user) for `.lnk` files, resolved with 8.1, off the UI thread, when the picker opens. Searchable list with icons and checkboxes, "already in this menu" flags, and "Add N apps". |
 | 8.6 | App picker — Store apps | ⬜ | Enumerate `shell:AppsFolder` (`SHCreateItemFromParsingName` + `IEnumShellItems`), reading the display name and `System.AppUserModel.ID`. Likely needs `Win32_UI_Shell_PropertiesSystem` and `Win32_System_Com_StructuredStorage` (for `PROPVARIANT`). Packaged apps only; desktop apps already come from 8.5. |
+| 8.7 | Running apps source | ⬜ | Spec §5.1. A source in the app picker listing the exe of each open window (`y-snap`'s enumeration, filtered like its `BANISHED` list). After 8.5; no model change. |
+| 8.8 | Store-app logo through `icon` | ⬜ | Spec §5.2. Decide the reserved `icon` value (proposal `@app`); y-pop resolves the logo from `app-id` at load time (shell item image), empty `icon` keeps the generic icon. Touches y-pop's reader, `Settings` and icon cache, plus an "App logo" choice in the icon picker (7.4). |
 
 **Done when** dragging a Start-menu shortcut and a folder onto the tree
 gives working entries that launch from y-pop after Save.

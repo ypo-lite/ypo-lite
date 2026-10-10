@@ -35,7 +35,7 @@ losing them on the way into Rust caused most of the app's layout bugs:
    `ui::viewport::Viewport` (the width each piece really gets) down the tree,
    and `AutoGrid`, `Split` and `Table` reflow from it.
 
-[`ui-toolkit.md`](ui-toolkit.md) is the guide to both;
+[`ui-toolkit.md`](../../ui-kit/docs/ui-toolkit.md) is the guide to both;
 [`ui-checklist.md`](ui-checklist.md) tracks each screen against them.
 
 ## Deliberate departures from this mock
