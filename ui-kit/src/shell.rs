@@ -8,7 +8,7 @@
 //! a tooltip) below [`EXPANDED_PANE_MIN_WINDOW`] — on a 700px window, the
 //! labelled pane alone was eating almost a third of the width.
 
-use crate::ui::prelude::*;
+use crate::prelude::*;
 use windows_reactor::*;
 
 /// Window width from which the nav pane shows labels.
@@ -62,16 +62,26 @@ pub fn page_frame(screen: View, layout: ShellLayout) -> View {
     scroll_y(Border::new().padding(Thickness::xy(layout.page_padding, space::XL)).content(screen))
 }
 
+/// What [`action_bar`] shows besides the buttons every app has.
+pub struct BarStatus<'a> {
+    pub text: &'a str,
+    /// Tooltip of the status line (the full text, the file path).
+    pub detail: &'a str,
+    /// `false` paints the status dot as an error.
+    pub healthy: bool,
+    /// Enables Save.
+    pub dirty: bool,
+    /// Tooltip of the Save button: what saving does to the file.
+    pub save_tooltip: &'a str,
+    /// Shown between the status and the buttons: an Undo link, an inline
+    /// confirmation.
+    pub extra: Option<View>,
+}
+
 /// The status / Reload / Save bar along the bottom of the window — one for
 /// the whole app, so an edit on one screen can be saved from another.
-pub fn action_bar(
-    status: &str,
-    status_detail: &str,
-    healthy: bool,
-    dirty: bool,
-    on_reload: Callback<()>,
-    on_save: Callback<()>,
-) -> View {
+pub fn action_bar(bar: BarStatus<'_>, on_reload: Callback<()>, on_save: Callback<()>) -> View {
+    let BarStatus { text: status, detail: status_detail, healthy, dirty, save_tooltip, extra } = bar;
     let status: View = Stack::horizontal(space::S)
         .child("dot", dot(if healthy { ThemeBrush::Accent } else { ThemeBrush::SystemCritical }))
         .child("text", text::single_line(status).vertical_alignment(VerticalAlignment::Center))
@@ -80,23 +90,18 @@ pub fn action_bar(
 
     // A Grid, not a horizontal StackPanel: the status takes what's left
     // after the buttons and trims, instead of pushing them off the window.
+    let status_cell = Border::new().vertical_alignment(VerticalAlignment::Center).grid_column(0).content(status);
+    let mut cells: Vec<(&str, View)> = vec![("status", status_cell)];
+    if let Some(extra) = extra {
+        cells.push(("extra", cell(extra, 0, 1)));
+    }
+    cells.push(("reload", cell(button("Reload from disk", false, true, on_reload), 0, 2)));
+    cells.push(("save", cell(button("Save", true, dirty, on_save).tooltip(save_tooltip), 0, 3)));
+
     let row: View = Grid::new()
-        .columns([GridLength::STAR, GridLength::Auto, GridLength::Auto])
+        .columns([GridLength::STAR, GridLength::Auto, GridLength::Auto, GridLength::Auto])
         .column_spacing(space::S)
-        .keyed_children([
-            ("status", Border::new().vertical_alignment(VerticalAlignment::Center).grid_column(0).content(status)),
-            ("reload", cell(button("Reload from disk", false, true, on_reload), 0, 1)),
-            (
-                "save",
-                cell(
-                    button("Save", true, dirty, on_save).tooltip(
-                        "Rewrites y-snap.xml from these settings. Comments and hand formatting in the file aren't kept.",
-                    ),
-                    0,
-                    2,
-                ),
-            ),
-        ]);
+        .keyed_children(cells);
 
     Border::new()
         .padding(Thickness::xy(space::L, space::S + 2.0))
@@ -106,12 +111,11 @@ pub fn action_bar(
         .content(row)
 }
 
-/// The problems `Settings::load` skipped past, above whichever screen is
-/// showing. Each was recorded instead of stopping the load — the rest of
-/// the file loaded fine — but whatever it describes isn't in `Settings`,
-/// so a save leaves it out of the file. Saying so before the first save
-/// is the whole point.
-pub fn warnings_banner(warnings: &[String], on_close: Callback<()>) -> View {
+/// The problems a load recorded instead of stopping, above whichever screen
+/// is showing. `title` says how many and of what; `advice` is what the
+/// user should know before saving (whether a save keeps or drops what the
+/// problems describe) — saying so before the first save is the point.
+pub fn warnings_banner(title: String, advice: &str, warnings: &[String], on_close: Callback<()>) -> View {
     const SHOWN: usize = 6;
     let mut lines: Vec<&str> = warnings.iter().take(SHOWN).map(String::as_str).collect();
     let more = warnings.len().saturating_sub(SHOWN);
@@ -125,16 +129,8 @@ pub fn warnings_banner(warnings: &[String], on_close: Callback<()>) -> View {
         .is_open(true)
         .is_closable(true)
         .on_closed(on_close)
-        .title(format!(
-            "{} part{} of y-snap.xml couldn't be read",
-            warnings.len(),
-            if warnings.len() == 1 { "" } else { "s" }
-        ))
-        .message(format!(
-            "They were skipped, and saving will leave them out of the file — fix them in the file first if you need \
-             them, then Reload.\n{}",
-            lines.join("\n")
-        ))
+        .title(title)
+        .message(format!("{advice}\n{}", lines.join("\n")))
         .into()
 }
 

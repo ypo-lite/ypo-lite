@@ -14,12 +14,14 @@
 //! | [`surfaces`] | Page, section, card, panel, note. |
 //! | [`table`] | Flexing table that turns into cards when it can't fit. |
 //! | [`editor`] | The inline Cancel/Done editor shell. |
+//! | [`shell`] | The window frame: nav pane modes, page scroller, status bar, warnings banner. |
 //! | [`keys`] | The key catalog behind the key picker. |
 
 pub mod controls;
 pub mod editor;
 pub mod keys;
 pub mod layout;
+pub mod shell;
 pub mod surfaces;
 pub mod table;
 pub mod text;

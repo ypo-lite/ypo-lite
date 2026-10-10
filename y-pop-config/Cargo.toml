@@ -1,0 +1,14 @@
+[package]
+name = "y-pop-config"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+windows = { workspace = true }
+windows-reactor = { workspace = true }
+y-core = { workspace = true }
+ui-kit = { workspace = true }
+y-pop = { path = "../y-pop" }
+
+[build-dependencies]
+y-core = { path = "../core", default-features = false, features = ["build"] }

@@ -35,8 +35,9 @@ mod min_button;
 mod mouse;
 mod overlay;
 mod reorder;
-mod shell;
+
 use ypo_ui as ui;
+use ui::shell;
 use ypo_ui::keys;
 
 use windows::Win32::UI::Input::KeyboardAndMouse::{HOT_KEY_MODIFIERS, VIRTUAL_KEY};
@@ -365,7 +366,7 @@ impl Component for ConfigApp {
         // Above every screen, not just one: what was skipped can be in any
         // section, and Save drops it whichever screen it's pressed from.
         let banner = (!settings.warnings.is_empty() && !self.warnings_dismissed)
-            .then(|| shell::warnings_banner(&settings.warnings, context.callback(|()| Msg::WarningsDismissed)));
+            .then(|| warnings_banner(&settings.warnings, context.callback(|()| Msg::WarningsDismissed)));
         let screen: View = Stack::vertical(space::L).maybe("warnings", banner).child("screen", screen).into();
 
         let current = self.section;
@@ -419,11 +420,17 @@ impl Component for ConfigApp {
                 None => (summary(settings), true),
             },
         };
+        let detail = format!("{status}\n{}", settings.path.display());
         let bar = shell::action_bar(
-            &status,
-            &format!("{status}\n{}", settings.path.display()),
-            healthy,
-            self.dirty,
+            shell::BarStatus {
+                text: &status,
+                detail: &detail,
+                healthy,
+                dirty: self.dirty,
+                save_tooltip: "Rewrites y-snap.xml from these settings. Comments and hand formatting in the file \
+                               aren't kept.",
+                extra: None,
+            },
             context.callback(|()| Msg::Reload),
             context.callback(|()| Msg::Save),
         );
@@ -431,6 +438,19 @@ impl Component for ConfigApp {
         // Nav takes the height the bar doesn't (`Star` over `Auto`).
         Grid::new().rows([GridLength::STAR, GridLength::Auto]).keyed_children([("nav", nav), ("bar", bar)])
     }
+}
+
+/// The load-warnings banner in y-snap's words: what was skipped isn't in
+/// `Settings`, so a save leaves it out of the file.
+fn warnings_banner(warnings: &[String], on_close: Callback<()>) -> View {
+    let count = warnings.len();
+    shell::warnings_banner(
+        format!("{count} part{} of y-snap.xml couldn't be read", if count == 1 { "" } else { "s" }),
+        "They were skipped, and saving will leave them out of the file — fix them in the file first if you need \
+         them, then Reload.",
+        warnings,
+        on_close,
+    )
 }
 
 /// "5 hotkeys · 16 overlay tiles" — the status line when nothing's pending.
