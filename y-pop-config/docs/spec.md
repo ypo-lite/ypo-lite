@@ -64,7 +64,7 @@ click. Under a group, children are menu entries in document order.
 | `group` | `name`, `icon`, `tooltip`, `default`, `autoopen`, `show-shortcuts`, `popup`, `popup-style` | `<hotkey>`*, any node |
 | `app` | `name`, `icon`, `tooltip`, `default`, `show-shortcuts`, `exe` \| `app-id`, `param`, `path`, `shell`, `elevate`, `events` (`start`,`exit`), `browse`, `filter`, `depth` (0–200), `open-folder` (`all`/`max-depth`/`never`) | `<hotkey>`* |
 | `separator` | `name` (empty = plain rule, set = titled), `icon`, `tooltip`, `default` | `<hotkey>`* (accepted, meaningless) |
-| `about`, `quit` | `name` (defaults to "About"/"Quit"), `icon`, `tooltip`, `default` | `<hotkey>`* |
+| `about`, `quit`, `settings` | `name` (defaults to "About"/"Quit"/"Settings…"), `icon`, `tooltip`, `default` | `<hotkey>`* |
 | `break` | none | none |
 | `hotkey` | `key` (`Win+Y`), `override` (bool, low-level hook fallback) | none |
 

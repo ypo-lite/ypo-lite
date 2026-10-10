@@ -13,15 +13,13 @@
 #![windows_subsystem = "windows"]
 
 mod browse;
-mod builtins;
-mod launch;
 mod menu;
-mod skins;
 
 use windows::Win32::UI::WindowsAndMessaging::{
-    HMENU, MB_ICONINFORMATION, MB_OK, MessageBoxW, WM_DRAWITEM, WM_HOTKEY, WM_INITMENUPOPUP,
-    WM_MEASUREITEM,
+    HMENU, MB_ICONINFORMATION, MB_OK, MessageBoxW, SW_SHOWNORMAL, WM_DRAWITEM, WM_HOTKEY,
+    WM_INITMENUPOPUP, WM_MEASUREITEM,
 };
+use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::core::{HSTRING, PCWSTR};
 
 use y_core::{
@@ -36,11 +34,11 @@ use y_core::{
 };
 
 use y_pop::{
-    config,
+    config, ipc,
     model::{ConfigTree, EventMask, NodeId, NodeKind},
 };
 
-const APP: AppInfo = AppInfo::new("Y-Pop", "YpoLite.YPop").single_instance();
+const APP: AppInfo = AppInfo::new("Y-Pop", ipc::CLASS).single_instance();
 
 struct YPop {
     tree: ConfigTree,
@@ -55,13 +53,20 @@ struct YPop {
     /// blocked — see `menu`'s module doc for why that reentrant call is
     /// safe to rely on here.
     session: Option<menu::Session>,
+    /// [`ipc::reload_message`]'s id, looked up once: `y-pop-config` sends it
+    /// after a save.
+    reload_message: u32,
+    /// A reload asked for while a popup was open. The open popup is built
+    /// from (and resolves its selection against) the current tree, so the
+    /// tree is only swapped once it has closed.
+    reload_pending: bool,
 }
 
 impl YPop {
     fn new() -> Self {
         y_core::log::line("loading configuration");
 
-        let tree = match builtins::load() {
+        let tree = match y_pop::builtins::load() {
             Ok(tree) => tree,
             Err(error) => {
                 y_core::log::line(&error);
@@ -77,6 +82,8 @@ impl YPop {
             tray: Vec::new(),
             hotkeys: None,
             session: None,
+            reload_message: ipc::reload_message(),
+            reload_pending: false,
         }
     }
 
@@ -103,6 +110,7 @@ impl YPop {
             NodeKind::App(app) => launch_and_report(hwnd, app),
             NodeKind::Quit => window::quit(0),
             NodeKind::About => show_about(),
+            NodeKind::Settings => self.open_settings(),
             // Never reached: a menu never assigns a command id to one of
             // these (see `menu::append_children`), and neither does a
             // hotkey binding meaningfully target one — kept only so this
@@ -149,30 +157,16 @@ impl YPop {
                 menu::Selection::Launch(app) => launch_and_report(hwnd, &app),
             }
         }
-    }
-}
 
-fn launch_and_report(hwnd: HWND, app: &y_pop::model::App) {
-    if let Err(error) = launch::launch(hwnd, app) {
-        y_core::log::line(format_args!("launch failed: {error}"));
+        if std::mem::take(&mut self.reload_pending) {
+            self.reload(hwnd);
+        }
     }
-}
 
-fn show_about() {
-    let message = HSTRING::from(format!("{} {}", APP.name, env!("CARGO_PKG_VERSION")));
-    let caption = HSTRING::from(APP.name);
-    unsafe {
-        MessageBoxW(
-            None,
-            PCWSTR(message.as_ptr()),
-            PCWSTR(caption.as_ptr()),
-            MB_OK | MB_ICONINFORMATION,
-        );
-    }
-}
-
-impl TrayApp for YPop {
-    fn on_create(&mut self, hwnd: HWND) -> Result<()> {
+    /// Registers every hotkey and creates one tray icon per root, for the
+    /// current tree. The counterpart of dropping `hotkeys` and clearing
+    /// `tray`, which a reload does first.
+    fn install(&mut self, hwnd: HWND) -> Result<()> {
         let mut hotkeys = HotkeyManager::new(hwnd);
         for (id, binding) in self.tree.hotkey_bindings() {
             // Only ever installs the low-level hook once RegisterHotKey has
@@ -204,7 +198,102 @@ impl TrayApp for YPop {
             )?;
             self.tray.push(tray);
         }
+        Ok(())
+    }
 
+    /// Re-reads `y-pop.xml` and swaps it in — `y-pop-config` asks for this
+    /// after a save. A file that doesn't load leaves the running
+    /// configuration alone (the error goes to the log, as at start-up), so a
+    /// half-typed edit never takes the hotkeys away. Only a tree that did load
+    /// unregisters the old hotkeys and tray icons.
+    ///
+    /// `start`/`exit` events are not fired again: they belong to the
+    /// process, not to the file.
+    fn reload(&mut self, hwnd: HWND) {
+        if self.session.is_some() {
+            self.reload_pending = true;
+            return;
+        }
+
+        y_core::log::line("reloading configuration");
+        let tree = match y_pop::builtins::load() {
+            Ok(tree) => tree,
+            Err(error) => {
+                y_core::log::line(format_args!("reload failed, keeping the old configuration: {error}"));
+                return;
+            }
+        };
+        for warning in &tree.warnings {
+            y_core::log::line(format_args!("{}: {warning}", config::FILE_NAME));
+        }
+
+        self.hotkeys = None;
+        self.tray.clear();
+        self.tree = tree;
+        if let Err(error) = self.install(hwnd) {
+            y_core::log::line(format_args!("reload: tray icons could not be created: {error}"));
+        }
+    }
+
+    /// Opens the settings app (`y-pop-config.exe`, expected next to this
+    /// executable — the two ship together). Without it, opens the file
+    /// itself, so `<settings/>` never silently does nothing. The settings app
+    /// is single-instance: a second click brings the open window forward.
+    fn open_settings(&self) {
+        let app = std::env::current_exe()
+            .ok()
+            .map(|exe| exe.with_file_name(ipc::CONFIG_EXE));
+        match app.filter(|app| app.is_file()) {
+            Some(app) => shell_open(&app),
+            None => {
+                y_core::log::line(format_args!(
+                    "{} isn't installed next to y-pop — opening the file instead",
+                    ipc::CONFIG_EXE
+                ));
+                shell_open(&config::path());
+            }
+        }
+    }
+}
+
+/// `ShellExecute`'s "open" on `path` — runs an executable, or opens a file
+/// in whatever is registered for it.
+fn shell_open(path: &std::path::Path) {
+    let file = HSTRING::from(path.as_os_str());
+    unsafe {
+        ShellExecuteW(
+            None,
+            windows::core::w!("open"),
+            &file,
+            None,
+            None,
+            SW_SHOWNORMAL,
+        )
+    };
+}
+
+fn launch_and_report(hwnd: HWND, app: &y_pop::model::App) {
+    if let Err(error) = y_pop::launch::launch(hwnd, app) {
+        y_core::log::line(format_args!("launch failed: {error}"));
+    }
+}
+
+fn show_about() {
+    let message = HSTRING::from(format!("{} {}", APP.name, env!("CARGO_PKG_VERSION")));
+    let caption = HSTRING::from(APP.name);
+    unsafe {
+        MessageBoxW(
+            None,
+            PCWSTR(message.as_ptr()),
+            PCWSTR(caption.as_ptr()),
+            MB_OK | MB_ICONINFORMATION,
+        );
+    }
+}
+
+impl TrayApp for YPop {
+    fn on_create(&mut self, hwnd: HWND) -> Result<()> {
+        self.install(hwnd)?;
         self.fire_events(EventMask::START);
         Ok(())
     }
@@ -260,6 +349,13 @@ impl TrayApp for YPop {
         }
         if msg == WM_DRAWITEM && y_core::menu::handle_draw_item(lparam) {
             return Some(LRESULT(1));
+        }
+
+        // Registered at run time, so a guard rather than a constant pattern;
+        // 0 means registration failed, and 0 is also `WM_NULL`.
+        if msg != 0 && msg == self.reload_message {
+            self.reload(hwnd);
+            return Some(LRESULT(0));
         }
 
         if msg == WM_HOTKEY {

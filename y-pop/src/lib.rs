@@ -14,7 +14,12 @@
 //! in the crate (tests included) uses them, not by whether `main` happens
 //! to reach every one of them yet.
 
+pub mod builtins;
 pub mod config;
+pub mod ipc;
+pub mod launch;
 pub mod model;
+pub mod settings;
+pub mod skins;
 pub mod theme;
 pub mod variables;

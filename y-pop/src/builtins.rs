@@ -9,16 +9,17 @@
 //! simply constructed with) and the mapping from a `y-pop.xml` token name to
 //! which of the two paths (a known folder, or one of those) it means.
 //!
-//! Deliberately not part of the `y_pop` library crate: `y_pop::config` is
-//! pure Rust so its tests never touch Win32 (see that module's doc comment)
-//! — plugging this in only ever happens here, in the real application.
+//! In the `y_pop` library, but kept apart from `y_pop::config` on purpose:
+//! that module is pure Rust so its tests never touch Win32 (see its doc
+//! comment), and plugging this in happens at the edge — the tray app, and
+//! the settings app, which shows what each token resolves to on this PC.
 
 use std::path::Path;
 
 use y_core::known_folders::{KnownFolder, KnownFolders};
-use y_pop::config::{self, LoadError};
-use y_pop::model::ConfigTree;
-use y_pop::variables::Lookup;
+use crate::config::{self, LoadError};
+use crate::model::ConfigTree;
+use crate::variables::Lookup;
 
 /// Loads `y-pop.xml` from wherever it lives, resolving its builtins from
 /// Win32 lazily as the file is parsed. The one entry point `main` needs:
@@ -35,6 +36,25 @@ pub fn load() -> Result<ConfigTree, LoadError> {
     let mut builtins = Builtins::new(&exe_dir, &path);
     config::load_from(path, &mut builtins)
 }
+
+/// Every token name [`Lookup::get`] answers for, in the order a settings
+/// screen lists them.
+pub const NAMES: &[&str] = &[
+    "pop",
+    "config",
+    "win",
+    "system",
+    "system86",
+    "programfiles",
+    "programfiles86",
+    "mydocs",
+    "mymusic",
+    "myvideo",
+    "desktop",
+    "appdata",
+    "appdata-r",
+    "user",
+];
 
 pub struct Builtins {
     folders: KnownFolders,
@@ -75,5 +95,18 @@ impl Lookup for Builtins {
             _ => return None,
         };
         self.folders.get(folder).map(str::to_owned)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_listed_name_resolves() {
+        let mut builtins = Builtins::new(Path::new("exe"), Path::new("config"));
+        for name in NAMES {
+            assert!(builtins.get(name).is_some(), "%{name}% has no value");
+        }
     }
 }

@@ -33,8 +33,8 @@ use windows::Win32::UI::Shell::{
 use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 use windows::core::{HSTRING, PCWSTR, PWSTR, Result};
 
-use y_pop::model::App;
-use y_pop::variables::{self, Variable};
+use crate::model::App;
+use crate::variables::{self, Variable};
 
 pub fn launch(hwnd: HWND, app: &App) -> Result<()> {
     if let Some(app_id) = &app.app_id {

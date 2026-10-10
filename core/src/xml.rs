@@ -705,6 +705,9 @@ pub struct Writer {
     open: Vec<String>,
     /// The innermost start tag has not been finished with `>` yet.
     tag_open: bool,
+    /// The output ends right after a start tag, so a blank line there would
+    /// only push the first child away from its parent.
+    fresh: bool,
 }
 
 impl Writer {
@@ -726,6 +729,7 @@ impl Writer {
         self.out.push_str(name);
         self.open.push(name.to_owned());
         self.tag_open = true;
+        self.fresh = false;
     }
 
     /// Adds an attribute to the element just opened.
@@ -754,6 +758,7 @@ impl Writer {
     /// tag.
     pub fn close(&mut self) {
         let name = self.open.pop();
+        self.fresh = false;
         debug_assert!(name.is_some(), "close without a matching open");
         let Some(name) = name else { return };
 
@@ -781,6 +786,7 @@ impl Writer {
     /// of their own and every line indented to the depth.
     pub fn comment(&mut self, text: &str) {
         self.finish_tag();
+        self.fresh = false;
         let depth = self.open.len();
 
         let mut safe = text.replace("\r\n", "\n");
@@ -809,10 +815,12 @@ impl Writer {
         }
     }
 
-    /// An empty line, unless the output already ends in one or is empty.
+    /// An empty line, unless the output already ends in one, is empty, or
+    /// ends right after a start tag (the first child of an element has
+    /// nothing to be separated from).
     pub fn blank_line(&mut self) {
         self.finish_tag();
-        if !self.out.is_empty() && !self.out.ends_with("\n\n") {
+        if !self.fresh && !self.out.is_empty() && !self.out.ends_with("\n\n") {
             self.out.push('\n');
         }
     }
@@ -828,6 +836,7 @@ impl Writer {
         if self.tag_open {
             self.out.push_str(">\n");
             self.tag_open = false;
+            self.fresh = true;
         }
     }
 
@@ -1030,6 +1039,20 @@ mod tests {
              \t</c>\n\
              </a>\n"
         );
+    }
+
+    #[test]
+    fn no_blank_line_right_after_a_start_tag() {
+        let mut writer = Writer::new();
+        writer.open("a");
+        writer.blank_line();
+        writer.open("b");
+        writer.empty();
+        writer.close();
+        assert_eq!(writer.finish(), "<a>
+	<b/>
+</a>
+");
     }
 
     #[test]

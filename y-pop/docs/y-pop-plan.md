@@ -78,7 +78,7 @@ Sketch, not a spec — attribute names are placeholders:
 
 Node kinds: `group` (submenu, or tray root), `app` (launch — `browse` is an
 `app` attribute, not its own node kind), `separator` (optionally titled),
-`about`, `quit`, `break` (later addition — a menu-column break at exactly
+`about`, `quit`, `settings` (opens `y-pop-config`, next to `y-pop.exe`), `break` (later addition — a menu-column break at exactly
 this point among its siblings, `y_core::menu::PopupMenu::add_break`/
 `MF_MENUBREAK`; a node of its own rather than PortAL's `break="true"`
 attribute on the item the break follows, see `crate::model::NodeKind::Break`
@@ -1050,8 +1050,9 @@ asking further:
    the sync `IconCache`, which stays the foundation both paths build on.
 8. 🟡 **Events, file watcher/live reload, variables.** `start`/`exit` events
    shipped in step 2; custom `<var>`s and builtin expansion shipped in step
-   1. **Not done**: watching `y-pop.xml` for changes and reloading without a
-   restart.
+   1. Reloading without a restart shipped with `y-pop-config` (`y_pop::ipc`: a
+   registered message after a save; a file that does not load keeps the old
+   configuration). **Not done**: watching `y-pop.xml` for edits made by hand.
 9. 🟡 **Memory work.** Exact-string interning (`variables::Pool`) shipped in
    step 1, alongside the flat `ConfigTree` arena itself (also part of that
    step, ahead of where this list originally placed the "memory work"

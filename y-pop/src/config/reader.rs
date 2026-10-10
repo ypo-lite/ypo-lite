@@ -266,7 +266,7 @@ impl<'b> Reader<'b> {
     }
 
     /// Walks every child of `element` that is a menu node (`group`, `app`,
-    /// `separator`, `about`, `quit`, `break`), skipping `<hotkey>` (already
+    /// `separator`, `about`, `quit`, `settings`, `break`), skipping `<hotkey>` (already
     /// consumed by [`Reader::hotkeys`]) and `<variables>`, and warning on
     /// anything else.
     pub(super) fn read_children(&mut self, element: Element<'_>) -> Vec<NodeId> {
@@ -283,6 +283,9 @@ impl<'b> Reader<'b> {
                 "separator" => children.push(self.read_leaf(child, NodeKind::Separator, "")),
                 "about" => children.push(self.read_leaf(child, NodeKind::About, "About")),
                 "quit" => children.push(self.read_leaf(child, NodeKind::Quit, "Quit")),
+                "settings" => {
+                    children.push(self.read_leaf(child, NodeKind::Settings, "Settings…"))
+                }
                 "break" => children.push(self.read_break(child)),
                 other => self.warn(child, format!("unknown element <{other}>, skipping")),
             }
@@ -444,7 +447,7 @@ impl<'b> Reader<'b> {
         }))
     }
 
-    /// `separator`, `about`, `quit` — same shared attributes, no kind-specific
+    /// `separator`, `about`, `quit`, `settings` — same shared attributes, no kind-specific
     /// ones, no children. `default_name` fills in for a missing `name`
     /// attribute — `""` for `separator` (a bare rule legitimately has no
     /// text; `menu::append_children` reads that emptiness to choose a plain

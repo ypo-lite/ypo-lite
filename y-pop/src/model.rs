@@ -237,6 +237,11 @@ pub enum NodeKind {
     Separator,
     About,
     Quit,
+    /// `<settings/>` — opens `y-pop-config` (see [`crate::ipc::CONFIG_EXE`]). A
+    /// y-pop menu is entirely the user's own, so there is no fixed place for a
+    /// "Settings…" entry; like `<about/>` and `<quit/>`, it goes wherever they
+    /// put it.
+    Settings,
     /// `<break/>` — a menu-column break at exactly this point among its
     /// siblings (`y_core::menu::PopupMenu::add_break`, Win32's
     /// `MF_MENUBREAK`), not an item of its own: [`crate::menu::

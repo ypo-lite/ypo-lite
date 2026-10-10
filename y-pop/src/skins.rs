@@ -32,7 +32,7 @@
 use y_core::menu::{self, Border, ColorPair, Fill, Gradient, MenuDesign};
 use y_core::overlay::Color;
 
-use y_pop::theme::{
+use crate::theme::{
     EdgeRule as ConfigEdgeRule, GradientDirection as ConfigGradientDirection, GradientOverride,
     Theme, ThemeOverrides,
 };
@@ -74,7 +74,7 @@ const FLAT_SELECTED_BACK: Color = Color::rgb(0xed, 0xf4, 0xfc);
 /// PortAL's `default` skin (`menu.cpp`'s `design1`): 1px border, 10px
 /// round, [`BLUE_ACCENT`], system base/selected, a white-to-`BLUE_ACCENT`
 /// vertical hover gradient.
-const DEFAULT: MenuDesign = MenuDesign {
+pub const DEFAULT: MenuDesign = MenuDesign {
     base: SYSTEM_LIKE_BASE,
     selected: SYSTEM_LIKE_SELECTED,
     disabled_text: SYSTEM_LIKE_DISABLED_TEXT,
@@ -100,7 +100,7 @@ const DEFAULT: MenuDesign = MenuDesign {
 /// PortAL's `flat` skin (`menu.cpp`'s `design2`): 1px border, no round,
 /// [`FLAT_BORDER`], system base, black-on-[`FLAT_SELECTED_BACK`] selected,
 /// no gradient.
-const FLAT: MenuDesign = MenuDesign {
+pub const FLAT: MenuDesign = MenuDesign {
     base: SYSTEM_LIKE_BASE,
     selected: ColorPair {
         text: Color::rgb(0x00, 0x00, 0x00),
@@ -124,7 +124,7 @@ const FLAT: MenuDesign = MenuDesign {
 /// white-on-black base, system selected, a [`BLUE_ACCENT`]-to-black
 /// horizontal hover gradient, the identical gradient again as an idle-row
 /// icon-column backdrop, and an edge rule on every row.
-const DARK: MenuDesign = MenuDesign {
+pub const DARK: MenuDesign = MenuDesign {
     base: ColorPair {
         text: Color::rgb(0xff, 0xff, 0xff),
         back: Color::rgb(0x00, 0x00, 0x00),
@@ -171,7 +171,7 @@ const DARK: MenuDesign = MenuDesign {
 /// custom-skin users never had to pick a base skin first either — so any
 /// override present resolves as if `theme="auto"` had been written too,
 /// then every set slot overrides that base.
-pub(crate) fn resolve_design(theme: Theme, overrides: ThemeOverrides) -> Option<MenuDesign> {
+pub fn resolve_design(theme: Theme, overrides: ThemeOverrides) -> Option<MenuDesign> {
     let effective = if theme == Theme::Native && overrides.any_set() {
         Theme::Auto
     } else {
@@ -239,7 +239,7 @@ fn convert_edge(edge: ConfigEdgeRule) -> menu::EdgeRule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use y_pop::theme::BorderOverride;
+    use crate::theme::BorderOverride;
 
     #[test]
     fn theme_native_with_no_overrides_stays_unthemed() {

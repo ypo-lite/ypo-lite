@@ -8,7 +8,7 @@
 //!
 //! # Theme
 //!
-//! [`crate::skins::resolve_design`] turns the config's `Theme` into
+//! [`y_pop::skins::resolve_design`] turns the config's `Theme` into
 //! `Option<MenuDesign>` — `None` for `Theme::Native` (plain OS chrome,
 //! `PopupMenu::new()`), `Some` for `Default`/`Flat`/`Dark`/`Auto`
 //! (owner-drawn, `PopupMenu::themed`). Resolved once per popup open, in
@@ -84,7 +84,7 @@ use y_pop::model::{
     App, Browse, ConfigTree, Defaults, EventMask, NodeData, NodeId, NodeKind, OpenFolder,
 };
 
-use crate::skins::resolve_design;
+use y_pop::skins::resolve_design;
 
 /// First id handed to a discovered (browsed) file — see the module doc.
 const DISCOVERED_ID_BASE: u32 = 1_000_000;
@@ -290,7 +290,7 @@ fn append_children(tree: &ConfigTree, parent: NodeId, menu: &mut PopupMenu, sess
             // child) to start a new column. See `NodeKind::Break`'s own doc
             // comment and `y_core::menu::PopupMenu::add_break`.
             NodeKind::Break => menu.add_break(),
-            NodeKind::App(_) | NodeKind::About | NodeKind::Quit => {
+            NodeKind::App(_) | NodeKind::About | NodeKind::Quit | NodeKind::Settings => {
                 let id = IDM_FIRST + child.as_u32();
                 let icon = resolve_icon(&mut session.icons, node);
                 let shortcut = shortcut_text(&tree.defaults, node);

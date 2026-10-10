@@ -97,6 +97,7 @@
 		<app name="Recent documents" exe="%docs%" browse="true" filter="*.*"/>
 
 		<separator/>
+		<settings/>
 		<about/>
 		<quit/>
 	</group>
