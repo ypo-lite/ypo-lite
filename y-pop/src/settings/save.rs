@@ -345,3 +345,14 @@ impl PopupStyle {
         }
     }
 }
+
+impl Item {
+    /// This item as `y-pop.xml` would hold it: its attached comments, then
+    /// its element and everything inside it. What an inspector previews —
+    /// written by the same code as a save, so it can't drift from it.
+    pub fn to_xml(&self) -> String {
+        let mut writer = Writer::new();
+        write_item(&mut writer, self);
+        writer.finish().trim_end().to_owned()
+    }
+}

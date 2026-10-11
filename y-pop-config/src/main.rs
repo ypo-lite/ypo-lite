@@ -24,14 +24,19 @@
 #![windows_subsystem = "windows"]
 
 mod general;
+mod inspector;
+mod menu_edit;
+mod menu_view;
 mod prefs;
 mod roots;
+mod tree;
 mod screens;
 mod variables;
 use ypo_ui as ui;
 use ui::shell;
 
 use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use windows_reactor::*;
@@ -41,6 +46,8 @@ use y_pop::config::{self, LoadError};
 use y_pop::ipc;
 use y_pop::settings::{ItemId, PopupStyle, Renderer, Settings, VarEntry};
 
+use menu_edit::MenuMsg;
+use menu_view::MenuUi;
 use prefs::{LastScreen, Prefs};
 use variables::VariablesUi;
 use ui::prelude::*;
@@ -88,6 +95,15 @@ struct ConfigApp {
     /// `RefCell` because a view only has `&self` and resolving fills the cache.
     builtins: RefCell<Builtins>,
     variables_ui: VariablesUi,
+    /// What is selected in each tray menu, by the menu's id. A menu with no
+    /// entry (or a stale one) has its own item selected.
+    selection: HashMap<ItemId, ItemId>,
+    /// Groups folded in the outline — how the outline looks, not the file.
+    collapsed: HashSet<ItemId>,
+    /// The row of less common things to add is open.
+    more_open: bool,
+    /// The inspector shows the XML an item is written as.
+    show_xml: bool,
     /// Renders what is copied while the window is alive — see
     /// `y_core::shell::ClipboardFlusher`. Held only for its `Drop`.
     _clipboard: Option<y_core::shell::ClipboardFlusher>,
@@ -182,6 +198,11 @@ enum Msg {
     NotesEdited(String),
     NotesReady,
 
+    // Tray menus
+    Menu(MenuMsg),
+    /// A control reported "nothing chosen": not an edit.
+    Ignored,
+
     // Variables
     VarNameChanged(usize, String),
     VarValueChanged(usize, String),
@@ -244,6 +265,10 @@ impl Component for ConfigApp {
             undo: None,
             builtins: RefCell::new(builtins),
             variables_ui: VariablesUi::default(),
+            selection: HashMap::new(),
+            collapsed: HashSet::new(),
+            more_open: false,
+            show_xml: false,
             _clipboard: y_core::shell::ClipboardFlusher::start(),
             notes_ready: false,
             window_width: shell::INITIAL_WINDOW.0,
@@ -280,8 +305,12 @@ impl Component for ConfigApp {
                     self.settings = Ok(undo.settings);
                     self.dirty = true;
                     self.variables_ui = VariablesUi::default();
+                    self.leave_missing_menu();
                 }
             }
+
+            Msg::Menu(message) => self.edit_menu(message),
+            Msg::Ignored => {}
 
             other => self.edit(other),
         }
@@ -328,7 +357,20 @@ impl Component for ConfigApp {
                 viewport,
                 context,
             ),
-            Screen::Menu(id) => screens::menu(settings, id, self.confirming_delete == Some(id), context),
+            Screen::Menu(id) => menu_view::menu_view(
+                settings,
+                &MenuUi {
+                    root: id,
+                    selected: self.selected(id),
+                    collapsed: &self.collapsed,
+                    more_open: self.more_open,
+                    show_xml: self.show_xml,
+                    show_comments: self.prefs.show_comments,
+                    confirming_delete: self.confirming_delete == Some(id),
+                },
+                viewport,
+                context,
+            ),
         };
 
         // Above every screen, not just one: what y-pop would warn about can
@@ -387,6 +429,16 @@ impl ConfigApp {
         self.screen = screen;
         self.confirming_delete = None;
         self.remember_screen();
+    }
+
+    /// After the settings were swapped for another version (Undo): a menu that
+    /// is not in them is a screen that is not there.
+    fn leave_missing_menu(&mut self) {
+        if let (Ok(settings), Screen::Menu(id)) = (&self.settings, self.screen)
+            && roots::find(settings, id).is_none()
+        {
+            self.go(Screen::General);
+        }
     }
 
     fn remember_screen(&mut self) {
@@ -620,7 +672,7 @@ impl ConfigApp {
                 if let Some(key) = roots::first_hotkey(item) {
                     label = label.child("hotkey", text::caption(key).opacity(emphasis::SUBTLE));
                 }
-                (target.tag(), entry(target, screens::menu_symbol(item), label.into()))
+                (target.tag(), entry(target, menu_view::symbol_of(&item.kind), label.into()))
             })
             .collect();
 
@@ -725,16 +777,11 @@ fn warnings_banner(warnings: &[String], on_close: Callback<()>) -> View {
     )
 }
 
+/// An app over `settings`, as `create` would make it but with no window and a
+/// file path under the temp folder (nothing in the tests saves).
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use y_pop::variables::Variable;
-
-    /// An app over `xml`, as `create` would make it but with no window and a
-    /// file path under the temp folder (nothing here saves).
-    fn app(xml: &str) -> ConfigApp {
-        let settings = Settings::load_str(xml, &mut Vec::<Variable>::new()).expect("valid");
-        ConfigApp {
+fn test_app(settings: Settings) -> ConfigApp {
+    ConfigApp {
             settings: Ok(settings),
             path: std::env::temp_dir().join("y-pop-config-tests").join("y-pop.xml"),
             missing: false,
@@ -749,10 +796,26 @@ mod tests {
             undo: None,
             builtins: RefCell::new(Builtins::new(Path::new(""), Path::new(""))),
             variables_ui: VariablesUi::default(),
+            selection: HashMap::new(),
+            collapsed: HashSet::new(),
+            more_open: false,
+            show_xml: false,
             _clipboard: None,
             notes_ready: true,
             window_width: 1000.0,
-        }
+    }
+}
+
+#[cfg(test)]
+mod menu_tests;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use y_pop::variables::Variable;
+
+    fn app(xml: &str) -> ConfigApp {
+        test_app(Settings::load_str(xml, &mut Vec::<Variable>::new()).expect("valid"))
     }
 
     fn settings(app: &ConfigApp) -> &Settings {

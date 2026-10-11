@@ -51,6 +51,25 @@ Every 👁 row is checked by resizing a real window across the thresholds:
 | 6 | Deleting a used variable names where it is used | 👁 | Inline question under the row; unused ones go at once, with Undo. |
 | 7 | The built-ins are listed as they resolve on this PC | 👁 | Read-only table; long values trim with a tooltip. |
 
+## Tray menu (`menu_view.rs`, `inspector.rs`)
+
+| # | Requirement | Status | Notes |
+|---|---|---|---|
+| 1 | The outline and the inspector share the page, or stack | 👁 | `Split` with minimums 300 / 320 (≈ 620 + gap). Stacked, the inspector is directly under the outline. Check where it switches at 560px and 1000px windows. |
+| 2 | A row is selectable, focusable, and readable | 👁 | Each row is a `Button` (Accent when selected). Check indent, the ▾/▸ button, long names trimming, and that keycaps stay readable on the Accent row. |
+| 3 | Nothing nests a button inside a button | ✅ | The expand button and the hidden-comments button are siblings of the row button in a `Grid`. |
+| 4 | The insertion marker shows where the next item goes | 👁 | An accent bar and "next item goes here" at the right depth: after the selected row, or at the end of a selected open group, or of the menu. Tested as `tree::insertion_point` / `rows`. |
+| 5 | Separators and column breaks read as what they are | 👁 | A rule (with its title in front), and "— column break —". |
+| 6 | Comments are visible and say they are read-only | 👁 | Muted one-liners with "N lines"; not selectable until phase 9. Hidden, they leave a speech-bubble button on the next item (or "hidden at the end"). |
+| 7 | The toolbar fits any width | 👁 | `AutoGrid` of buttons (App, Group, Separator, More; and the six under More). Check the wrap at the narrowest outline. |
+| 8 | The move bar says why a button is off | 👁 | ↑ ↓ ← → each enabled on its own, tooltips: "no group above to move into", "already at the top of this menu". |
+| 9 | "Move to…" starts over after a move | 👁 | Keyed by the item's place; check it doesn't keep showing the group the item was just sent to, and that choosing a group in another menu opens that menu. |
+| 10 | Switching the selected item starts every field fresh | 👁 | The fields are keyed by the item's id. Check the caret and a half-typed value don't leak between items. |
+| 11 | Every destructive edit can be undone | 👁 | Move, move to, delete, turn into a menu: one level, in the status bar. |
+| 12 | A tray menu is deleted only after a question | 👁 | Inline "Remove this tray icon and everything in it?" in the inspector. |
+| 13 | A root that isn't a menu has no outline | 👁 | An app, About… as a tray icon: the inspector alone, with "Turn into a menu". |
+| 14 | The XML preview is what a save writes | ✅ | `Item::to_xml`, the writer a save uses; tested. |
+
 ## Placeholder screens
 
-Skin and the tray menu list are still stubs from phase 3.
+Skin is still a stub from phase 3.

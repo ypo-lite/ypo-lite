@@ -10,6 +10,115 @@ Update a row's status in the same change that does the work.
 
 Status: ⬜ todo · 🔨 in progress · ✅ done · 👁 done, verify live
 
+## Where we are, and how to resume
+
+*Written at the end of the session that built phases 0–5. Update it when you
+stop again.*
+
+### State
+
+| Phase | State |
+|---|---|
+| 0 Decisions, shared UI crate | ✅ (`ui-kit`, spec §5 answered) |
+| 1 `y_core::xml` comments + writer | ✅ |
+| 2 `y_pop::settings`, ipc, reload, `<settings/>` | ✅ built; 2.8 and 2.9 👁 |
+| 3 `y-pop-config` shell | ✅ (user ran it and liked it) |
+| 4 General, Variables | ✅ built; 4.1–4.3 👁 |
+| 5 Tray menu: outline, inspector, add, move | ✅ built; 5.3–5.8 👁 — **never run yet** |
+| 6 Full app inspector, hotkeys, Run now | ⬜ **next** |
+| 7–11 | ⬜ (7, 9, 10 are independent of each other) |
+
+`cargo test --workspace` → 282 passing; `cargo clippy --workspace
+--all-targets` has one warning, an old doctest in `core/src/build.rs`
+(`needless_doctest_main`), not ours. The work of this session is **uncommitted
+until the user commits it**: check `git status` first.
+
+### Resume here
+
+1. **Ask the user for their live-check results** before building on top of
+   phase 5. They run the app themselves (`cargo run -p y-pop-config`); never
+   launch it, send input to it or screenshot it without asking first (global
+   rule). What to check, in order of risk:
+   - Phase 5 screen: the outline rows (each a `Button`, Accent when selected),
+     the toolbar wrapping, the inspector's move bar, "Move to…" starting over
+     after a move, fields not leaking between selected items. All of these
+     are rows in `ui-checklist.md` ("Tray menu"), numbered 1–13.
+   - Phase 4: Variables table at narrow widths (cards), live rename while
+     typing, the General screen's `setting` cards.
+   - Phase 2: `y-pop` reloading after a Save without a restart (2.8), and its
+     `<settings/>` entry opening `y-pop-config.exe` (2.9). Needs a running
+     y-pop and both exes in the same folder.
+   Mark each 👁 row ✅ (or note what is wrong) in this file and in
+   `ui-checklist.md`.
+2. **Then phase 6**, in this order:
+   1. 6.6's prerequisite first: move `key_picker.rs` (and the generic half of
+      `reorder.rs`) from `y-snap-config` into `ui-kit`, made callback-based so
+      it no longer names `ConfigApp`/`Msg`; `y-snap-config` then uses it from
+      there. This is the one place where `y-snap-config` is touched: run it
+      once afterwards.
+   2. 6.1–6.5 and 6.7 (target mode, target field with the resolved-path
+      readout, launch fields, folder fields, Store field, Run now). The basic
+      app form in `inspector.rs` is the thing to grow. Resolving paths needs
+      `y_pop::variables::expand` with `ConfigApp::builtins` (a `RefCell`).
+   3. 6.6 hotkeys, replacing the read-only keycaps (`hotkeys_line`).
+3. Read, before touching UI: `CLAUDE.md`, this file, `spec.md` (§5 holds the
+   decisions), `ui-checklist.md`, and **`ui-kit/docs/ui-toolkit.md`, whose
+   trap table has the WinUI surprises we already paid for** (multi-line
+   `TextBox` must be created empty; `\r` line breaks; clipboard flush).
+
+### Pending questions and decisions
+
+Open, for the user:
+
+- **Reserved `icon` value for Store-app logos** (spec §5.2, plan 8.8). I
+  proposed `icon="@app"`; unchecked against y-pop's icon parsing. Decide
+  before 8.8, not before.
+- **Is the "Show comments" switch wanted on Variables?** General has none
+  (the notes there are always one box, by request). Variables and the tree
+  toolbar still have it, remembered in `y-pop-config.ini`. Same treatment for
+  Variables, or keep?
+- **Comment selection (phase 9).** Comments have no ids in the model, so
+  phase 5 shows them and cannot select them. Phase 9 needs ids on `Comment`
+  (or a `(owner, index)` address); decide when starting 9.
+- **New items should focus their first field** (plan 11.2). Needs the same
+  "mount, then act a render later" trick as the notes box, or an
+  `ElementRef`. Wanted earlier?
+
+Found, not fixed:
+
+- **`y-pop` ignores the global `shell-execute`.** The reader sets
+  `app.shell = attr_bool("shell").unwrap_or(false)` and `launch` only looks at
+  `app.shell`, so `<y-pop shell-execute="true">` does nothing. The General
+  screen offers the switch, so it looks broken until this is fixed (about one
+  line in `y-pop/src/config/reader.rs`, plus a test). Changes y-pop's
+  behaviour: ask first.
+- **`y-snap` has its own copy of `shell_open`;** it could call
+  `y_core::shell::open`. Cosmetic.
+
+Settled this session (don't reopen without cause):
+
+- `ui-kit` is the home of anything two graphical apps share (spec §5.4);
+  `y_core::shell::ClipboardFlusher` fixed the exit crash after copying from a
+  `TextBox` (the user confirmed); a multi-line `TextBox` is mounted empty and
+  filled one render later (`ConfigApp::notes_ready`).
+- Moving steps over items, never comments; duplicate drops hotkeys; deleting a
+  tray menu asks first, everything else offers Undo (one level).
+- File notes on General are one box; the first edit merges them into one note
+  at the top of the file.
+
+### Working notes for the next session
+
+- No Python and no GNU tools beyond Git Bash: edit with the Edit/Write tools,
+  or `perl -0pi` with a delimiter that does not appear in the pattern (`~`;
+  **never `|`** if the pattern contains `\|`). A long heredoc with quotes can
+  break the shell: write the file with the Write tool instead. Check for stray
+  NULs or CRs after a perl replacement that contains `\x`, `\r`, `\n`.
+- The loop is: write the pure logic in a library with tests (`y-pop`,
+  `tree.rs`), then the view; test message handlers through `test_app`
+  (`main.rs`) and `menu_tests.rs`, which need no window.
+- Statuses: change a row's status in the same edit as the work, and add the
+  screen's table to `ui-checklist.md`.
+
 ## Ground rules
 
 - **The mockup is the reference for layout and behaviour, not for looks.**

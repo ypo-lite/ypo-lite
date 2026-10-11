@@ -529,3 +529,23 @@ fn a_text_box_s_line_breaks_are_not_an_edit() {
     assert!(settings.set_file_notes_text("one\r\rtwo!"));
     assert_eq!(settings.file_notes_text(), "one\n\ntwo!");
 }
+
+#[test]
+fn an_item_previews_as_the_xml_a_save_would_write() {
+    let settings = load(SHIPPED);
+    let notepad = settings
+        .items()
+        .find(|item| item.name.as_deref() == Some("Notepad"))
+        .expect("in the default file");
+    let xml = notepad.to_xml();
+    assert!(xml.starts_with("<!--\n\toverride=\"true\""), "{xml}");
+    assert!(xml.contains("<app name=\"Notepad\" exe=\"%win%\\notepad.exe\">"), "{xml}");
+    assert!(xml.contains("\t<hotkey key=\"Win+N\" override=\"true\"/>"), "{xml}");
+    assert!(xml.ends_with("</app>"), "{xml}");
+
+    // And it is part of what the whole file says.
+    let whole = settings.to_xml();
+    for line in xml.lines().skip(1) {
+        assert!(whole.contains(line.trim_start()), "{line}");
+    }
+}

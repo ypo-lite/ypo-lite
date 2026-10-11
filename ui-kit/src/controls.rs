@@ -160,6 +160,19 @@ pub fn move_buttons(index: usize, count: usize, on_up: Callback<()>, on_down: Ca
         .into()
 }
 
+/// [`icon_button`] that can be switched off — for a row of actions where some
+/// don't apply right now. The tooltip is also the place to say why not.
+pub fn icon_button_enabled(symbol: Symbol, tooltip: &str, enabled: bool, on_click: Callback<()>) -> View {
+    subtle_icon_button(SymbolIcon::new().symbol(symbol).into(), tooltip, enabled, on_click)
+}
+
+/// One ↑ or ↓ button, for a move bar whose directions are enabled
+/// independently (an item can often go up but not down).
+pub fn arrow_button(up: bool, tooltip: &str, enabled: bool, on_click: Callback<()>) -> View {
+    let glyph = if up { GLYPH_UP } else { GLYPH_DOWN };
+    subtle_icon_button(FontIcon::new().glyph(glyph).into(), tooltip, enabled, on_click)
+}
+
 /// Width an actions column reserves for [`move_buttons`] (or any two
 /// [`icon_button`]s side by side).
 pub const TWO_ICON_BUTTONS: f64 = 2.0 * size::ICON_BUTTON + space::XS;
