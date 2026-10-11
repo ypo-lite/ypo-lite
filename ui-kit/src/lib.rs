@@ -33,7 +33,7 @@ pub mod prelude {
     pub use super::controls::*;
     pub use super::editor::editor;
     pub use super::layout::{AutoGrid, Fill, Split, Stack, cell, scroll_y};
-    pub use super::surfaces::{CARD_INSET, card, note, page, panel, section};
+    pub use super::surfaces::{CARD_INSET, card, note, page, panel, section, setting};
     pub use super::table::{Column, Row, Table};
     pub use super::text;
     pub use super::tokens::{emphasis, radius, size, space};

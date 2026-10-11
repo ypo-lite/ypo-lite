@@ -1,45 +1,22 @@
 //! One function per screen: state and a [`Viewport`] in, a view out.
 //!
-//! Phase 3 only: General, Skin and Variables say what they will hold, and a
+//! Skin and the tray menu are still stubs from phase 3: Skin says what it will
+//! hold, and a
 //! tray menu shows its entries as a plain list with the one action the shell
 //! already supports (delete). The real screens replace these one by one.
 
-use y_pop::settings::{Entry, Item, ItemId, ItemKind, Settings, VarEntry};
+use y_pop::settings::{Entry, Item, ItemId, ItemKind, Settings};
 
 use crate::roots;
 use crate::ui::prelude::*;
 use crate::{ConfigApp, Msg};
 use windows_reactor::*;
 
-pub fn general(settings: &Settings, path: &std::path::Path) -> View {
-    let menus = roots::menus(settings).count();
-    let items = settings.items().count();
-    page(
-        "General",
-        "How y-pop draws its menus and launches what you pick.",
-        Stack::vertical(space::M)
-            .child("file", text::body(format!("{}", path.display())))
-            .child("count", text::caption(format!("{menus} tray menus · {items} items")))
-            .child("later", note("Menu style, shell-execute and show-shortcuts come next.")),
-    )
-}
-
 pub fn skin(_settings: &Settings) -> View {
     page(
         "Skin",
         "The theme of the popup menus, and what you override on top of it.",
         note("Theme cards, overrides and a live preview come next."),
-    )
-}
-
-pub fn variables(settings: &Settings) -> View {
-    let count = settings.variables.iter().filter(|entry| matches!(entry, VarEntry::Var(_))).count();
-    page(
-        "Variables",
-        "Names usable as %name% in any path below. A variable only sees the ones above it.",
-        Stack::vertical(space::M)
-            .child("count", text::body(format!("{count} variables")))
-            .child("later", note("The editable table comes next.")),
     )
 }
 

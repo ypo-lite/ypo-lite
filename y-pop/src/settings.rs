@@ -34,6 +34,9 @@ use crate::theme::{Theme, ThemeOverrides};
 
 mod load;
 mod save;
+mod vars;
+
+pub use vars::{NameError, UsedIn, references, rename_references};
 
 #[cfg(test)]
 mod tests;
@@ -322,6 +325,47 @@ impl Settings {
     /// A new, empty item of `kind` with a fresh id. The caller inserts it.
     pub fn new_item(&mut self, kind: ItemKind) -> Item {
         Item::new(self.new_id(), kind)
+    }
+
+    /// All the notes the file starts and ends with, as one text: before
+    /// `<y-pop>`, then at the top inside it, then after it, separated by an
+    /// empty line. What a single "notes" box shows.
+    pub fn file_notes_text(&self) -> String {
+        let notes: Vec<&str> = self
+            .prolog
+            .iter()
+            .chain(&self.intro)
+            .chain(&self.epilog)
+            .map(|comment| comment.text.as_str())
+            .collect();
+        notes.join("
+
+")
+    }
+
+    /// How many separate notes [`Settings::file_notes_text`] joins.
+    pub fn file_notes_count(&self) -> usize {
+        self.prolog.len() + self.intro.len() + self.epilog.len()
+    }
+
+    /// Replaces every file note with `text`, as one comment before `<y-pop>`
+    /// — or with none if `text` is blank. Returns `false`, changing nothing,
+    /// when `text` is what [`Settings::file_notes_text`] already says: a
+    /// notes box reports its text on first render, and that is not an edit.
+    ///
+    /// Notes that sat at the top inside `<y-pop>` or after it move to the
+    /// top once they are edited; until then they stay where they were.
+    pub fn set_file_notes_text(&mut self, text: &str) -> bool {
+        // A text box separates lines with `\r`; the file's notes use `\n`.
+        let text = text.replace("\r\n", "\n").replace('\r', "\n");
+        let text = text.as_str();
+        if text == self.file_notes_text() {
+            return false;
+        }
+        self.prolog = if text.trim().is_empty() { Vec::new() } else { vec![Comment::new(text)] };
+        self.intro.clear();
+        self.epilog.clear();
+        true
     }
 
     /// Every item, depth first in document order (an item before its

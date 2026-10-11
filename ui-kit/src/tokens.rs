@@ -68,6 +68,10 @@ pub mod size {
     pub const ICON_BUTTON: f64 = 44.0;
     /// One emoji button in the icon picker.
     pub const ICON_CHOICE: f64 = 48.0;
+    /// A multi-line text field shows at least this much (about seven lines)...
+    pub const TEXT_AREA_MIN_HEIGHT: f64 = 160.0;
+    /// ...and grows with its text up to this, then scrolls inside itself.
+    pub const TEXT_AREA_MAX_HEIGHT: f64 = 360.0;
     /// The colour bar of a palette swatch.
     pub const SWATCH_HEIGHT: f64 = 24.0;
     /// Border thickness of cards, table rules and keycaps.

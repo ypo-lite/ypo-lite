@@ -23,12 +23,15 @@
 
 #![windows_subsystem = "windows"]
 
+mod general;
 mod prefs;
 mod roots;
 mod screens;
+mod variables;
 use ypo_ui as ui;
 use ui::shell;
 
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
 use windows_reactor::*;
@@ -36,9 +39,10 @@ use y_core::single_instance;
 use y_pop::builtins::Builtins;
 use y_pop::config::{self, LoadError};
 use y_pop::ipc;
-use y_pop::settings::{ItemId, Settings};
+use y_pop::settings::{ItemId, PopupStyle, Renderer, Settings, VarEntry};
 
 use prefs::{LastScreen, Prefs};
+use variables::VariablesUi;
 use ui::prelude::*;
 
 fn main() {
@@ -80,6 +84,22 @@ struct ConfigApp {
     /// A tray menu is waiting for "Delete" to be confirmed.
     confirming_delete: Option<ItemId>,
     undo: Option<Undo>,
+    /// y-pop's builtin variables, resolved lazily and cached; behind a
+    /// `RefCell` because a view only has `&self` and resolving fills the cache.
+    builtins: RefCell<Builtins>,
+    variables_ui: VariablesUi,
+    /// Renders what is copied while the window is alive — see
+    /// `y_core::shell::ClipboardFlusher`. Held only for its `Drop`.
+    _clipboard: Option<y_core::shell::ClipboardFlusher>,
+    /// Whether the notes box on General has been mounted and may be given its
+    /// text. A WinUI `TextBox` keeps only the first line of a multi-line text
+    /// it is given while it is still single-line, and `windows-reactor` sets
+    /// `Text` before `AcceptsReturn` when it creates one — so the box is
+    /// created empty (already multi-line), and the text arrives one render
+    /// later, through [`Msg::NotesReady`]. Reset whenever the screen changes,
+    /// since leaving General discards the box. Until then an edit the box
+    /// reports is ignored: it would be the truncated text, not the user's.
+    notes_ready: bool,
     /// The window's client width in DIPs, from `on_window_size`.
     window_width: f64,
 }
@@ -150,15 +170,39 @@ enum Msg {
     DeleteConfirmed(ItemId),
     DeleteCancelled,
     Undo,
+
+    // General
+    RendererChosen(usize),
+    PopupStyleChosen(usize),
+    ShellExecuteToggled(bool),
+    ShowShortcutsToggled(bool),
+    OpenConfigFolder,
+    EditConfigXml,
+    ShowCommentsToggled(bool),
+    NotesEdited(String),
+    NotesReady,
+
+    // Variables
+    VarNameChanged(usize, String),
+    VarValueChanged(usize, String),
+    VarAdded,
+    VarMoved { index: usize, up: bool },
+    VarDeleteAsked(usize),
+    VarDeleteConfirmed(usize),
+    VarDeleteCancelled,
 }
 
 /// Reads `path`, with y-pop's own builtins so the warnings are y-pop's.
-fn load(path: &Path) -> (Result<Settings, LoadError>, bool) {
-    let exe_dir = std::env::current_exe()
+/// The folder this program is in — what `%pop%` means.
+fn exe_dir() -> PathBuf {
+    std::env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().map(Path::to_path_buf))
-        .unwrap_or_default();
-    let mut builtins = Builtins::new(&exe_dir, path);
+        .unwrap_or_default()
+}
+
+fn load(path: &Path) -> (Result<Settings, LoadError>, bool) {
+    let mut builtins = Builtins::new(&exe_dir(), path);
 
     match Settings::load_from(path.to_owned(), &mut builtins) {
         Err(LoadError::Missing(_)) => (Ok(Settings::empty()), true),
@@ -174,6 +218,7 @@ impl Component for ConfigApp {
         let path = config::path();
         let prefs = Prefs::load(&prefs::path_for(&path));
         let (settings, missing) = load(&path);
+        let builtins = Builtins::new(&exe_dir(), &path);
 
         let screen = match (&settings, prefs.last_screen) {
             (Ok(settings), LastScreen::Menu(position)) => {
@@ -197,6 +242,10 @@ impl Component for ConfigApp {
             confirming_reload: false,
             confirming_delete: None,
             undo: None,
+            builtins: RefCell::new(builtins),
+            variables_ui: VariablesUi::default(),
+            _clipboard: y_core::shell::ClipboardFlusher::start(),
+            notes_ready: false,
             window_width: shell::INITIAL_WINDOW.0,
         }
     }
@@ -230,8 +279,11 @@ impl Component for ConfigApp {
                 if let Some(undo) = self.undo.take() {
                     self.settings = Ok(undo.settings);
                     self.dirty = true;
+                    self.variables_ui = VariablesUi::default();
                 }
             }
+
+            other => self.edit(other),
         }
     }
 
@@ -260,10 +312,22 @@ impl Component for ConfigApp {
             }
         };
 
+        // The notes box is created empty and filled one render later.
+        if self.screen == Screen::General && !self.notes_ready {
+            let _ = context.callback(|()| Msg::NotesReady).call(());
+        }
+        let viewport = layout.content;
         let screen = match self.screen {
-            Screen::General => screens::general(settings, &self.path),
+            Screen::General => general::general_view(settings, &self.path, self.notes_ready, viewport, context),
             Screen::Skin => screens::skin(settings),
-            Screen::Variables => screens::variables(settings),
+            Screen::Variables => variables::variables_view(
+                settings,
+                &mut *self.builtins.borrow_mut(),
+                self.prefs.show_comments,
+                &self.variables_ui,
+                viewport,
+                context,
+            ),
             Screen::Menu(id) => screens::menu(settings, id, self.confirming_delete == Some(id), context),
         };
 
@@ -302,9 +366,24 @@ impl Component for ConfigApp {
     }
 }
 
+#[cfg(test)]
+impl ConfigApp {
+    /// What pressing Undo does, without a `ComponentContext`.
+    fn update_undo_for_test(&mut self) {
+        if let Some(undo) = self.undo.take() {
+            self.settings = Ok(undo.settings);
+            self.dirty = true;
+            self.variables_ui = VariablesUi::default();
+        }
+    }
+}
+
 impl ConfigApp {
     /// Changes screen and remembers it for the next run.
     fn go(&mut self, screen: Screen) {
+        if screen != self.screen {
+            self.notes_ready = false;
+        }
         self.screen = screen;
         self.confirming_delete = None;
         self.remember_screen();
@@ -319,6 +398,129 @@ impl ConfigApp {
             Screen::Menu(id) => roots::position(settings, id).map_or(LastScreen::General, LastScreen::Menu),
         };
         self.prefs.save(&prefs::path_for(&self.path));
+    }
+
+    /// Settles every message [`Component::update`] doesn't: the ones that
+    /// edit the settings, and the few buttons that act on the file.
+    fn edit(&mut self, message: Msg) {
+        // About the app and the file on disk, not about the settings.
+        match message {
+            Msg::ShowCommentsToggled(on) => {
+                self.prefs.show_comments = on;
+                self.prefs.save(&prefs::path_for(&self.path));
+                return;
+            }
+            Msg::OpenConfigFolder => {
+                if let Some(folder) = self.path.parent().filter(|folder| folder.is_dir()) {
+                    y_core::shell::open(folder);
+                }
+                return;
+            }
+            Msg::EditConfigXml => {
+                if self.path.is_file() {
+                    y_core::shell::open(&self.path);
+                }
+                return;
+            }
+            Msg::VarDeleteCancelled => {
+                self.variables_ui.confirming_delete = None;
+                return;
+            }
+            Msg::NotesReady => {
+                self.notes_ready = true;
+                return;
+            }
+            Msg::NotesEdited(_) if !self.notes_ready => return,
+            _ => {}
+        }
+
+        let Ok(settings) = &mut self.settings else { return };
+        let mut changed = false;
+
+        match message {
+            Msg::RendererChosen(choice) => {
+                let renderer = if choice == 0 { Renderer::Native } else { Renderer::Overlay };
+                if settings.globals.popup.unwrap_or(Renderer::Native) != renderer {
+                    settings.globals.popup = Some(renderer);
+                    changed = true;
+                }
+            }
+            // Only the list exists; the other two are disabled choices.
+            Msg::PopupStyleChosen(0)
+                if settings.globals.popup_style.unwrap_or(PopupStyle::List) != PopupStyle::List =>
+            {
+                settings.globals.popup_style = Some(PopupStyle::List);
+                changed = true;
+            }
+            Msg::ShellExecuteToggled(on) if settings.globals.shell_execute.unwrap_or(false) != on => {
+                settings.globals.shell_execute = Some(on);
+                changed = true;
+            }
+            Msg::ShowShortcutsToggled(on) if settings.globals.show_shortcuts.unwrap_or(true) != on => {
+                settings.globals.show_shortcuts = Some(on);
+                changed = true;
+            }
+
+            Msg::NotesEdited(text) => {
+                // Several notes becoming one is worth an Undo; typing in a
+                // single one is not.
+                let merging = settings.file_notes_count() > 1;
+                let before = merging.then(|| settings.clone());
+                if settings.set_file_notes_text(&text) {
+                    if let Some(before) = before {
+                        self.undo = Some(Undo { label: "Merged the file notes".to_owned(), settings: before });
+                    }
+                    changed = true;
+                }
+            }
+
+            Msg::VarNameChanged(index, name) => {
+                let unchanged = matches!(settings.variables.get(index), Some(VarEntry::Var(var)) if var.name == name);
+                if !unchanged {
+                    match settings.rename_variable(index, &name) {
+                        Ok(_) => {
+                            self.variables_ui.name_error = None;
+                            changed = true;
+                        }
+                        Err(error) => self.variables_ui.name_error = Some((index, error)),
+                    }
+                }
+            }
+            Msg::VarValueChanged(index, value) => {
+                if let Some(VarEntry::Var(var)) = settings.variables.get_mut(index)
+                    && var.value != value
+                {
+                    var.value = value;
+                    changed = true;
+                }
+            }
+            Msg::VarAdded => {
+                settings.add_variable();
+                changed = true;
+            }
+            Msg::VarMoved { index, up } => {
+                // Indices shift: whatever pointed at one is stale.
+                self.variables_ui = VariablesUi::default();
+                changed = settings.move_variable_entry(index, up);
+            }
+            Msg::VarDeleteAsked(index) => {
+                if settings.variable_users(index).is_empty() {
+                    changed = delete_variable(settings, index, &mut self.undo, &mut self.variables_ui);
+                } else {
+                    self.variables_ui.confirming_delete = Some(index);
+                }
+            }
+            Msg::VarDeleteConfirmed(index) => {
+                changed = delete_variable(settings, index, &mut self.undo, &mut self.variables_ui);
+            }
+
+            // Settled by `update`, or above.
+            _ => {}
+        }
+
+        if changed {
+            self.dirty = true;
+        }
     }
 
     fn add_menu(&mut self) {
@@ -358,6 +560,8 @@ impl ConfigApp {
 
     fn reload(&mut self) {
         let (settings, missing) = load(&self.path);
+        // A failed load had no notes box; the next one is a fresh mount.
+        self.notes_ready = false;
         self.settings = settings;
         self.missing = missing;
         self.dirty = false;
@@ -484,6 +688,23 @@ impl ConfigApp {
     }
 }
 
+/// Removes the variable at `index`, keeping what it was for Undo. `false` if
+/// there is no variable there.
+fn delete_variable(
+    settings: &mut Settings,
+    index: usize,
+    undo: &mut Option<Undo>,
+    ui: &mut VariablesUi,
+) -> bool {
+    let Some(VarEntry::Var(var)) = settings.variables.get(index) else {
+        return false;
+    };
+    *undo = Some(Undo { label: format!("Deleted variable {}", var.name), settings: settings.clone() });
+    settings.variables.remove(index);
+    *ui = VariablesUi::default();
+    true
+}
+
 /// "3 tray menus · 21 items" — the status line when nothing's pending.
 fn summary(settings: &Settings) -> String {
     let menus = roots::menus(settings).count();
@@ -508,6 +729,182 @@ fn warnings_banner(warnings: &[String], on_close: Callback<()>) -> View {
 mod tests {
     use super::*;
     use y_pop::variables::Variable;
+
+    /// An app over `xml`, as `create` would make it but with no window and a
+    /// file path under the temp folder (nothing here saves).
+    fn app(xml: &str) -> ConfigApp {
+        let settings = Settings::load_str(xml, &mut Vec::<Variable>::new()).expect("valid");
+        ConfigApp {
+            settings: Ok(settings),
+            path: std::env::temp_dir().join("y-pop-config-tests").join("y-pop.xml"),
+            missing: false,
+            prefs: Prefs::default(),
+            screen: Screen::General,
+            dirty: false,
+            save_error: None,
+            warnings_dismissed: false,
+            applied: None,
+            confirming_reload: false,
+            confirming_delete: None,
+            undo: None,
+            builtins: RefCell::new(Builtins::new(Path::new(""), Path::new(""))),
+            variables_ui: VariablesUi::default(),
+            _clipboard: None,
+            notes_ready: true,
+            window_width: 1000.0,
+        }
+    }
+
+    fn settings(app: &ConfigApp) -> &Settings {
+        app.settings.as_ref().expect("loaded")
+    }
+
+    const VARIABLES: &str = r#"<y-pop><variables>
+        <var name="a" value="1"/>
+        <var name="b" value="%a%2"/>
+    </variables><app name="X" exe="%a%x.exe"/></y-pop>"#;
+
+    #[test]
+    fn a_toggle_that_changes_nothing_is_not_an_edit() {
+        let mut app = app("<y-pop><quit/></y-pop>");
+        // The defaults: off, and on.
+        app.edit(Msg::ShellExecuteToggled(false));
+        app.edit(Msg::ShowShortcutsToggled(true));
+        app.edit(Msg::RendererChosen(0));
+        app.edit(Msg::PopupStyleChosen(0));
+        assert!(!app.dirty);
+        assert_eq!(settings(&app).globals, Default::default());
+
+        app.edit(Msg::ShellExecuteToggled(true));
+        assert!(app.dirty);
+        assert_eq!(settings(&app).globals.shell_execute, Some(true));
+    }
+
+    #[test]
+    fn choosing_the_overlay_is_written_and_the_unbuilt_layouts_are_not_choosable() {
+        let mut app = app("<y-pop><quit/></y-pop>");
+        app.edit(Msg::RendererChosen(1));
+        app.edit(Msg::PopupStyleChosen(1));
+        app.edit(Msg::PopupStyleChosen(2));
+        assert_eq!(settings(&app).globals.popup, Some(Renderer::Overlay));
+        assert_eq!(settings(&app).globals.popup_style, None);
+    }
+
+    #[test]
+    fn what_a_just_created_notes_box_reports_is_not_the_users_edit() {
+        let mut app = app("<!-- one --><y-pop><!-- two --><variables/><quit/></y-pop>");
+        app.notes_ready = false;
+
+        // The truncated first line a single-line `TextBox` keeps.
+        app.edit(Msg::NotesEdited("one".into()));
+        assert!(!app.dirty);
+        assert_eq!(settings(&app).file_notes_count(), 2, "nothing merged or lost");
+
+        app.edit(Msg::NotesReady);
+        assert!(app.notes_ready);
+        app.edit(Msg::NotesEdited("one
+
+two!".into()));
+        assert!(app.dirty);
+    }
+
+    #[test]
+    fn leaving_general_unmounts_the_box_and_returning_primes_it_again() {
+        let mut app = app("<y-pop><quit/></y-pop>");
+        assert!(app.notes_ready);
+        app.go(Screen::Skin);
+        app.go(Screen::General);
+        assert!(!app.notes_ready);
+    }
+
+    #[test]
+    fn the_notes_box_edits_one_note_and_merging_several_can_be_undone() {
+        let mut app = app("<!-- one --><y-pop><!-- two --><variables/><quit/></y-pop>");
+
+        // What the box shows on first render is not an edit.
+        let shown = settings(&app).file_notes_text();
+        app.edit(Msg::NotesEdited(shown));
+        assert!(!app.dirty && app.undo.is_none());
+
+        app.edit(Msg::NotesEdited("one
+
+two, changed".into()));
+        assert!(app.dirty);
+        assert_eq!(settings(&app).file_notes_count(), 1);
+        assert_eq!(app.undo.as_ref().map(|undo| undo.label.as_str()), Some("Merged the file notes"));
+
+        app.update_undo_for_test();
+        assert_eq!(settings(&app).file_notes_count(), 2);
+
+        // One note: typing is not something to undo.
+        app.edit(Msg::NotesEdited("a".into()));
+        app.undo = None;
+        app.edit(Msg::NotesEdited("ab".into()));
+        assert!(app.undo.is_none());
+    }
+
+    #[test]
+    fn renaming_a_variable_rewrites_its_users_and_a_bad_name_says_why() {
+        let mut app = app(VARIABLES);
+        app.edit(Msg::VarNameChanged(0, "first".into()));
+        assert!(app.dirty);
+        assert!(settings(&app).to_xml().contains(r#"value="%first%2""#));
+        assert!(settings(&app).to_xml().contains(r#"exe="%first%x.exe""#));
+
+        app.dirty = false;
+        app.edit(Msg::VarNameChanged(0, "b".into()));
+        assert!(!app.dirty, "a refused name is not an edit");
+        assert_eq!(app.variables_ui.name_error, Some((0, y_pop::settings::NameError::Taken)));
+
+        app.edit(Msg::VarNameChanged(0, "second".into()));
+        assert_eq!(app.variables_ui.name_error, None);
+    }
+
+    #[test]
+    fn deleting_a_used_variable_asks_first_and_can_be_undone() {
+        let mut app = app(VARIABLES);
+
+        app.edit(Msg::VarDeleteAsked(0));
+        assert_eq!(app.variables_ui.confirming_delete, Some(0));
+        assert_eq!(settings(&app).variables.len(), 2, "nothing deleted yet");
+        app.edit(Msg::VarDeleteCancelled);
+        assert_eq!(app.variables_ui.confirming_delete, None);
+
+        app.edit(Msg::VarDeleteAsked(0));
+        app.edit(Msg::VarDeleteConfirmed(0));
+        assert_eq!(settings(&app).variables.len(), 1);
+        assert!(app.dirty);
+        assert_eq!(app.undo.as_ref().map(|undo| undo.label.as_str()), Some("Deleted variable a"));
+
+        app.update_undo_for_test();
+        assert_eq!(settings(&app).variables.len(), 2);
+    }
+
+    #[test]
+    fn an_unused_variable_is_deleted_at_once() {
+        let mut app = app(VARIABLES);
+        app.edit(Msg::VarDeleteAsked(1));
+        assert_eq!(settings(&app).variables.len(), 1);
+        assert_eq!(app.variables_ui.confirming_delete, None);
+    }
+
+    #[test]
+    fn variables_are_added_edited_and_moved() {
+        let mut app = app(VARIABLES);
+        app.edit(Msg::VarAdded);
+        app.edit(Msg::VarValueChanged(2, "three".into()));
+        app.edit(Msg::VarMoved { index: 2, up: true });
+
+        let names: Vec<String> = settings(&app)
+            .variables
+            .iter()
+            .filter_map(|entry| match entry {
+                VarEntry::Var(var) => Some(format!("{}={}", var.name, var.value)),
+                VarEntry::Comment(_) => None,
+            })
+            .collect();
+        assert_eq!(names, ["a=1", "variable=three", "b=%a%2"]);
+    }
 
     #[test]
     fn a_tag_names_its_target_and_back() {

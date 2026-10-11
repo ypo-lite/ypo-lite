@@ -28,7 +28,29 @@ Every 👁 row is checked by resizing a real window across the thresholds:
 | 11 | Nav groups are not selectable | 👁 | "Settings" and "Tray menus" are expanded parents with `selects_on_invoked(false)`: `NavigationView` has no header item in `windows-reactor` 0.100. Check clicking them does nothing and they stay open. |
 | 12 | The screen and "show comments" are remembered | ✅ | `prefs.rs`, `y-pop-config.ini` next to `y-pop.xml`; unit-tested. |
 
-## Placeholder screens (phase 3)
+## General (`general.rs`)
 
-General, Skin, Variables and the tray menu list are stubs: a title, a line of
-what's coming, and counts. They have no layout to check yet.
+| # | Requirement | Status | Notes |
+|---|---|---|---|
+| 1 | A setting's control sits beside its text, or under it when narrow | 👁 | `setting()` switches at 460px of card content. Check at 560px window and at the 1000px pane switch. |
+| 2 | Menu style is one choice, the chosen one obvious | 👁 | `segmented` (Accent for the chosen one, not a checked toggle). |
+| 3 | Overlay layout appears only with the overlay, and says what isn't built | 👁 | Runner and Radial are disabled with a "Coming later" tooltip; a file that already says `runner` shows it selected. |
+| 4 | Switches show their real state | ✅ | Defaults when the attribute is absent: shell-execute off, show-shortcuts on. A value equal to the current one is not an edit (unit-tested). |
+| 5 | The file's path is visible and its folder and XML can be opened | 👁 | Both buttons go through `y_core::shell::open`. |
+| 6 | File notes can be read, edited, added, deleted | 👁 | Created empty and filled one render later (`notes_ready`), or WinUI keeps only the first line. One multi-line `TextBox` with every note joined; no "Show comments" switch here. Editing several notes merges them at the top (Undo offered); `--` is flagged. |
+
+## Variables (`variables.rs`)
+
+| # | Requirement | Status | Notes |
+|---|---|---|---|
+| 1 | The table fits any width | 👁 | `Table` with 5 columns, minimum ≈ 760px; below, each row is a card. Check the card layout, including the spanning comment rows (shown as plain lines). |
+| 2 | Comment rows are full width | 👁 | `Row::spanning`. |
+| 3 | Hidden comments are not forgotten | 👁 | A speech-bubble button beside the next variable's name (or a line at the end) turns them back on. |
+| 4 | Renaming rewrites the users, and a bad name says why | 👁 | Live on every keystroke; the refusal is a caption under the row. Check that a half-typed name doesn't make the box fight the typist. |
+| 5 | ↑/↓/delete are always visible and never reflow the row | 👁 | `THREE_ICON_BUTTONS` reserved. |
+| 6 | Deleting a used variable names where it is used | 👁 | Inline question under the row; unused ones go at once, with Undo. |
+| 7 | The built-ins are listed as they resolve on this PC | 👁 | Read-only table; long values trim with a tooltip. |
+
+## Placeholder screens
+
+Skin and the tray menu list are still stubs from phase 3.

@@ -16,10 +16,9 @@ mod browse;
 mod menu;
 
 use windows::Win32::UI::WindowsAndMessaging::{
-    HMENU, MB_ICONINFORMATION, MB_OK, MessageBoxW, SW_SHOWNORMAL, WM_DRAWITEM, WM_HOTKEY,
-    WM_INITMENUPOPUP, WM_MEASUREITEM,
+    HMENU, MB_ICONINFORMATION, MB_OK, MessageBoxW, WM_DRAWITEM, WM_HOTKEY, WM_INITMENUPOPUP,
+    WM_MEASUREITEM,
 };
-use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::core::{HSTRING, PCWSTR};
 
 use y_core::{
@@ -244,32 +243,16 @@ impl YPop {
             .ok()
             .map(|exe| exe.with_file_name(ipc::CONFIG_EXE));
         match app.filter(|app| app.is_file()) {
-            Some(app) => shell_open(&app),
+            Some(app) => y_core::shell::open(&app),
             None => {
                 y_core::log::line(format_args!(
                     "{} isn't installed next to y-pop — opening the file instead",
                     ipc::CONFIG_EXE
                 ));
-                shell_open(&config::path());
+                y_core::shell::open(&config::path());
             }
         }
     }
-}
-
-/// `ShellExecute`'s "open" on `path` — runs an executable, or opens a file
-/// in whatever is registered for it.
-fn shell_open(path: &std::path::Path) {
-    let file = HSTRING::from(path.as_os_str());
-    unsafe {
-        ShellExecuteW(
-            None,
-            windows::core::w!("open"),
-            &file,
-            None,
-            None,
-            SW_SHOWNORMAL,
-        )
-    };
 }
 
 fn launch_and_report(hwnd: HWND, app: &y_pop::model::App) {

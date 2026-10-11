@@ -98,6 +98,9 @@ struct ConfigApp {
     /// button) — closed whenever a new editor opens.
     icon_picker: IconPickerUi,
     overlay_section: OverlaySection,
+    /// Renders what is copied while the window is alive — see
+    /// `y_core::shell::ClipboardFlusher`. Held only for its `Drop`.
+    _clipboard: Option<y_core::shell::ClipboardFlusher>,
     /// The window's client width in DIPs, from `on_window_size`. Starts at
     /// the initial window width; the first delivery corrects it.
     window_width: f64,
@@ -268,6 +271,7 @@ impl Component for ConfigApp {
             key_picker: KeyPickerUi::default(),
             icon_picker: IconPickerUi::default(),
             overlay_section: OverlaySection::Layout,
+            _clipboard: y_core::shell::ClipboardFlusher::start(),
             window_width: shell::INITIAL_WINDOW.0,
         }
     }

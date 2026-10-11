@@ -244,7 +244,7 @@ its item. Duplicating an item doesn't copy it. Any other comment is a
 | # | Requirement | P |
 |---|---|---|
 | C1 | A comment row shows as a muted, italic first line, with a line count when longer. An attached comment sits just above its item, at the same indent, joined to it visually. | M |
-| C2 | **Show comments** toggle in the tree toolbar, with the number of comments in this menu. When hidden, comment rows aren't drawn, and the item each one belongs to (or the next item, for a free one) gets a small marker with a count. Clicking the marker shows comments again. The setting is remembered per user (not stored in `y-pop.xml`). The same toggle applies to the Variables table and the file notes. | M |
+| C2 | **Show comments** toggle in the tree toolbar, with the number of comments in this menu. When hidden, comment rows aren't drawn, and the item each one belongs to (or the next item, for a free one) gets a small marker with a count. Clicking the marker shows comments again. The setting is remembered per user (not stored in `y-pop.xml`). The same toggle applies to the Variables table. The file notes on General are always shown, as one box. | M |
 | C3 | The comment inspector has a multi-line text box, the attached/free toggle and a preview of the written `<!-- … -->`. Line breaks are kept. Leading indentation is removed on load and recreated from the nesting depth on save, so moving a comment doesn't leave it oddly indented. | M |
 | C4 | `--` isn't allowed inside an XML comment. The editor flags it inline, and the writer replaces it with `- -` rather than writing a broken file. | M |
 | C5 | Add a comment: "Comment" in the Add menu (at the insertion marker, free), and "Add comment above" in any item's inspector (attached). | M |

@@ -93,6 +93,10 @@ such as page padding. A component that knows its own minimum width should use
 | Cancel/Done editor | `editor(title, body, on_cancel, on_done)` | A `panel` with the actions in its header. |
 | Let a list be reordered | `reorder::list_footer` + `reorder::row_actions` (app side), built on `reorder_toggle` + `move_buttons` (toolkit) | Size the actions column `TWO_ICON_BUTTONS` so ↑/↓ fits where the row actions were. |
 | Labelled field | `field("Label", control)` | Caption above the control. |
+| One setting: text left, control right | `setting(title, description, control, viewport)` | A card; the control goes under the text below `SETTING_SIDE_BY_SIDE_MIN`. Pass the width the *card* gets. |
+| A few exclusive options | `segmented(&[Choice::new("A"), Choice::disabled("B", "why")], selected, on_select)` | The chosen one is Accent. Re-selecting reports its index again: ignore an unchanged value. |
+| A multi-line text field | `text_area(text, placeholder, on_change)` | Wraps; Enter inserts a line. |
+| A full-width row in a table | `Row::spanning(key, view)` | A comment, a section label. In card layout it is the view alone. |
 | Inputs | `combo`, `number_box`, `text_box`, `switch`, `labeled_switch`, `chip`, `button`, `icon_button`, `add_button` | All pre-filled; `icon_button` always has a tooltip. |
 | A bounded number to set by feel *and* exactly | `range_input(value, min, max, step, on_slide, on_type)` | Slider + number box; map both callbacks to one message that ignores unchanged values. |
 | Key combo display | `keycaps(&labels, large)` | Labels from `key_picker::combo_labels` / `keys::label`. |
@@ -196,6 +200,11 @@ documented defaults; confirm them on a live run if one looks off.
 | A controlled `ToggleButton` clicked while already checked unchecks itself natively; the model says "still checked", so the diff sends nothing | The screen and the model disagree | "Selected" is shown with `ButtonStyle::Accent` (key picker, palette swatches), which is re-rendered from state every time |
 | `Slider`/`NumberBox` report a value when it's first set, not only on user input | Opening a screen marks it "Unsaved changes" | In `update`, only write and set `dirty` when the value differs from the current one (see `MinButtonDelayChanged`) |
 | `NumberBox` coerces an out-of-range value to min/max and fires `ValueChanged` | Rendering a screen marks it dirty | Pass `None` (an empty box) for "unset" instead of an out-of-range sentinel (see `desktop`). Watch for this with any `minimum` above a value the config can hold. |
+| `TextBox` ends a line with ``; a lone `
+| `windows-reactor` sets a `TextBox`'s `Text` *before* `AcceptsReturn` when it creates one, and a still-single-line WinUI `TextBox` keeps only the first line of the text it is given | A multi-line note shows as its first line, and the box then reports that truncated line as if the user had typed it, so a handler that trusts it **loses the rest** | Create a `text_area` empty and give it its text one render later (see `ConfigApp::notes_ready` in `y-pop-config`: a message queued from `view`, reset whenever the box is remounted), and ignore what it reports until then |
+` shows as no break | A multi-line note renders as its first line only | `text_area()` converts both ways, so app code keeps `
+` |
+| A `TextBox` copy is a lazy clipboard entry that calls back into the app when pasted | After Ctrl+C, closing the window leaves the process stalling for some seconds and then ending with `0xc0000005` (access violation). Flushing *at exit* doesn't help — the runtime that would answer is already gone — and itself stalls | Hold a `y_core::shell::ClipboardFlusher` in the main component (`start()` in `create`): it flushes on the clipboard's change event, while the window is alive, so nothing lazy is left at exit. Untested remedy: confirm live. |
 | `ContentDialog` max width ~548px, `Flyout` width follows its anchor | Pickers cramped | Editors are inline page content (`editor`), never popups |
 | `VariableSizedWrapGrid` has one fixed item height | Cards clip when their text wraps | `AutoGrid` (rows are `Auto`) |
 | Fixed-pixel content in a vertical-only scroller | Clipped with no scrollbar | Rule 4: reflow or scale, never rely on sideways scrolling |

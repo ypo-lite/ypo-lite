@@ -47,7 +47,8 @@
 //! | [`overlay`] | layered, click-through windows drawn from a pixel buffer |
 //! | [`monitor`] | monitor geometry, work areas, per-monitor DPI |
 //! | [`config`] | portable `.ini` settings next to the executable |
-//! | [`xml`] | a small XML reader, for settings files that are not `.ini` |
+//! | [`xml`] | a small XML reader and writer (comments kept), for settings files that are not `.ini` |
+//! | [`shell`] | "open this file/folder/program" through `ShellExecute` |
 //! | [`theme`] | whether Windows is asking for a dark palette |
 //! | [`startup`] | run-at-logon registration |
 //! | [`resources`] | icons embedded by `build.rs` |
@@ -89,6 +90,8 @@ pub mod overlay;
 pub mod prelude;
 #[cfg(feature = "win")]
 pub mod resources;
+#[cfg(feature = "win")]
+pub mod shell;
 #[cfg(feature = "win")]
 pub mod single_instance;
 #[cfg(feature = "win")]

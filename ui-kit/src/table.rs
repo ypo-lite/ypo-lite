@@ -82,11 +82,20 @@ pub struct Row {
     key: String,
     cells: Vec<View>,
     detail: Option<View>,
+    /// Set for a [`Row::spanning`] row: the one view that is the whole row.
+    spanning: Option<View>,
 }
 
 impl Row {
     pub fn new(key: impl Into<String>, cells: Vec<View>) -> Self {
-        Self { key: key.into(), cells, detail: None }
+        Self { key: key.into(), cells, detail: None, spanning: None }
+    }
+
+    /// A row that is one view across every column instead of a cell per
+    /// column — a comment between records, a section label. In card layout
+    /// it is the view alone, not a card. It has no detail.
+    pub fn spanning(key: impl Into<String>, view: impl Into<View>) -> Self {
+        Self { key: key.into(), cells: Vec::new(), detail: None, spanning: Some(view.into()) }
     }
 
     /// A view spanning the whole row, directly beneath it — an open editor.
@@ -152,6 +161,20 @@ impl<'a> Table<'a> {
         }
 
         for row in self.rows {
+            if let Some(view) = row.spanning {
+                let line = tracks.len();
+                tracks.push(GridLength::Auto);
+                children.push((format!("{}/rule", row.key), rule(line, 1, column_count)));
+                let view = Border::new()
+                    .grid_row(line as i32)
+                    .grid_column(0)
+                    .grid_column_span(column_count as i32)
+                    .vertical_alignment(VerticalAlignment::Center)
+                    .padding(Thickness::xy(0.0, space::S - 2.0))
+                    .content(view);
+                children.push((format!("{}/span", row.key), view));
+                continue;
+            }
             let line = tracks.len();
             let spans = 1 + usize::from(row.detail.is_some());
             tracks.extend(std::iter::repeat_n(GridLength::Auto, spans));
@@ -214,6 +237,9 @@ fn rule(row: usize, spans: usize, columns: usize) -> View {
 /// One row as a card: a `header | value` grid, the actions cell in the top
 /// right, the detail underneath.
 fn row_card(columns: &[Column], row: Row) -> View {
+    if let Some(view) = row.spanning {
+        return view;
+    }
     let mut children: Vec<(String, View)> = Vec::new();
     let mut line = 0;
     let mut actions = None;

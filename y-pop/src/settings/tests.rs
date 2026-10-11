@@ -491,3 +491,41 @@ fn malformed_xml_is_an_error_with_a_line() {
     let error = Settings::load_str("<y-pop>\n<group></y-pop>", &mut builtins()).expect_err("bad");
     assert_eq!(error.line, 2);
 }
+
+#[test]
+fn the_file_notes_read_as_one_text_in_file_order() {
+    let settings = load(
+        "<!-- first -->\n<y-pop>\n<!-- second -->\n<variables><var name=\"a\" value=\"b\"/></variables>\n<quit/>\n</y-pop>\n<!-- last\n\nstill last -->",
+    );
+    assert_eq!(settings.file_notes_count(), 3);
+    assert_eq!(settings.file_notes_text(), "first\n\nsecond\n\nlast\n\nstill last");
+}
+
+#[test]
+fn editing_the_file_notes_merges_them_and_blank_removes_them() {
+    let mut settings = load("<!-- a --><y-pop><!-- b --><variables/><quit/></y-pop><!-- c -->");
+
+    // Reporting what is already there is not an edit.
+    let same = settings.file_notes_text();
+    assert!(!settings.set_file_notes_text(&same));
+    assert_eq!((settings.prolog.len(), settings.intro.len(), settings.epilog.len()), (1, 1, 1));
+
+    assert!(settings.set_file_notes_text("one note\nfor everything"));
+    assert_eq!(settings.file_notes_count(), 1);
+    assert_eq!(settings.file_notes_text(), "one note\nfor everything");
+    assert!(settings.to_xml().starts_with("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!--\n\tone note\n\tfor everything\n-->\n<y-pop"));
+
+    assert!(settings.set_file_notes_text("  \n "));
+    assert_eq!(settings.file_notes_count(), 0);
+    assert!(!settings.to_xml().contains("<!--"));
+}
+
+#[test]
+fn a_text_box_s_line_breaks_are_not_an_edit() {
+    let mut settings = load("<!-- one\n\ntwo -->\n<y-pop><quit/></y-pop>");
+    // What a WinUI text box reports for the same text.
+    assert!(!settings.set_file_notes_text("one\r\rtwo"));
+    assert!(!settings.set_file_notes_text("one\r\n\r\ntwo"));
+    assert!(settings.set_file_notes_text("one\r\rtwo!"));
+    assert_eq!(settings.file_notes_text(), "one\n\ntwo!");
+}

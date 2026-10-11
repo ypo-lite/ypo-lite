@@ -4,6 +4,7 @@
 
 use crate::layout::{Stack, cell};
 use crate::text;
+use crate::viewport::Viewport;
 use crate::tokens::{radius, size, space};
 use windows_reactor::*;
 
@@ -63,4 +64,32 @@ pub fn page(title: &str, lede: &str, body: impl Into<View>) -> View {
         .child("header", Stack::vertical(space::XS).child("title", text::title(title)).child("lede", text::lede(lede)))
         .child("body", body)
         .into()
+}
+
+/// Narrowest content width at which a [`setting`] keeps its control beside
+/// its text; narrower, the control goes underneath.
+pub const SETTING_SIDE_BY_SIDE_MIN: f64 = 460.0;
+
+/// One setting in a card: what it is and what it does on the left, its
+/// control on the right — under the text when the card is too narrow for
+/// both. `viewport` is the width the *card* gets (it takes its own padding
+/// off).
+pub fn setting(title: &str, description: &str, control: impl Into<View>, viewport: Viewport) -> View {
+    let words = Stack::vertical(space::XXS)
+        .child("title", text::body(title))
+        .child("description", text::caption(description));
+    let control = control.into();
+
+    let body: View = if viewport.inset(CARD_INSET).fits(SETTING_SIDE_BY_SIDE_MIN) {
+        Grid::new()
+            .columns([GridLength::STAR, GridLength::Auto])
+            .column_spacing(space::L)
+            .keyed_children([
+                ("words", cell(Border::new().vertical_alignment(VerticalAlignment::Center).content(words), 0, 0)),
+                ("control", cell(Border::new().vertical_alignment(VerticalAlignment::Center).content(control), 0, 1)),
+            ])
+    } else {
+        Stack::vertical(space::M).child("words", words).child("control", control).into()
+    };
+    card().content(body)
 }

@@ -164,6 +164,10 @@ pub fn move_buttons(index: usize, count: usize, on_up: Callback<()>, on_down: Ca
 /// [`icon_button`]s side by side).
 pub const TWO_ICON_BUTTONS: f64 = 2.0 * size::ICON_BUTTON + space::XS;
 
+/// Width an actions column reserves for [`move_buttons`] plus one more
+/// [`icon_button`] (↑ ↓ and delete, always visible).
+pub const THREE_ICON_BUTTONS: f64 = 3.0 * size::ICON_BUTTON + 2.0 * space::XS;
+
 /// The "Reorder" toggle beside a list's add button. While on, rows show
 /// [`move_buttons`] instead of their usual actions; Accent marks the mode,
 /// and the label says how to leave it.
@@ -237,4 +241,83 @@ pub fn dot(brush: impl Into<Brush>) -> View {
         .background(brush)
         .vertical_alignment(VerticalAlignment::Center)
         .into()
+}
+
+/// One option of a [`segmented`] choice.
+pub struct Choice<'a> {
+    pub label: &'a str,
+    pub enabled: bool,
+    /// What hovering it says — the reason, for a disabled one.
+    pub tooltip: Option<&'a str>,
+}
+
+impl<'a> Choice<'a> {
+    pub fn new(label: &'a str) -> Self {
+        Self { label, enabled: true, tooltip: None }
+    }
+
+    /// Shown but not choosable, with the reason as its tooltip ("coming
+    /// later") — better than hiding what the app will offer.
+    pub fn disabled(label: &'a str, why: &'a str) -> Self {
+        Self { label, enabled: false, tooltip: Some(why) }
+    }
+}
+
+/// A short row of exclusive options, the chosen one in the Accent style.
+///
+/// Accent, not a checked `ToggleButton`, for the reason in the toolkit's
+/// trap table: a checked toggle unchecks itself natively while the model
+/// says nothing changed. Re-selecting the chosen one reports its index
+/// again; the handler should treat an unchanged value as nothing.
+pub fn segmented(choices: &[Choice<'_>], selected: Option<usize>, on_select: Callback<usize>) -> View {
+    Stack::horizontal(space::XS)
+        .children(choices.iter().enumerate().map(|(index, choice)| {
+            let on_select = on_select.clone();
+            let button = Button::new()
+                .style(if selected == Some(index) { ButtonStyle::Accent } else { ButtonStyle::Default })
+                .is_enabled(choice.enabled)
+                .min_width(0.0)
+                .vertical_alignment(VerticalAlignment::Center)
+                .on_click(Callback::new(move |()| {
+                    let _ = on_select.call(index);
+                }))
+                .content(choice.label);
+            let view: View = match choice.tooltip {
+                Some(tooltip) => button.tooltip(tooltip),
+                None => button,
+            };
+            (index, view)
+        }))
+        .into()
+}
+
+/// A multi-line text field that wraps — a comment, a note. Tall enough to
+/// read a few lines at once, and scrolls inside itself past
+/// [`size::TEXT_AREA_MAX_HEIGHT`] rather than growing the page without end.
+///
+/// **Create it empty and give it its text one render later.** `Text` is set
+/// before `AcceptsReturn` when the box is created, and a still-single-line
+/// `TextBox` keeps only the first line of what it is given — then reports
+/// that line back as if it were an edit. The toolkit guide's trap table has
+/// the details; `ConfigApp::notes_ready` in `y-pop-config` is the pattern.
+///
+/// Lines are `\n` on both sides of this function. WinUI's `TextBox` ends a
+/// line with `\r` and shows a lone `\n` as no break at all (a three-line
+/// note rendered as its first line), so the text is converted on the way in
+/// and the reported text on the way out.
+pub fn text_area(text: impl Into<String>, placeholder: &str, on_change: Callback<String>) -> TextBox {
+    let on_change = Callback::new(move |text: String| {
+        let _ = on_change.call(text.replace("\r\n", "\n").replace('\r', "\n"));
+    });
+    let text = text.into().replace("\r\n", "\n").replace('\n', "\r");
+
+    TextBox::new()
+        .text(text)
+        .placeholder_text(placeholder)
+        .accepts_return(true)
+        .text_wrapping(TextWrapping::Wrap)
+        .min_height(size::TEXT_AREA_MIN_HEIGHT)
+        .max_height(size::TEXT_AREA_MAX_HEIGHT)
+        .on_text_changed(on_change)
+        .fill()
 }

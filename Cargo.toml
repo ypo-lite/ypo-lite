@@ -40,6 +40,8 @@ features = [
     "Win32_UI_Shell",
     "Win32_UI_Shell_Common",
     "Win32_UI_WindowsAndMessaging",
+    "ApplicationModel_DataTransfer",
+    "Foundation",
 ]
 
 [profile.release]
