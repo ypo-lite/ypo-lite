@@ -17,9 +17,22 @@
 //! an optimisation for how the app *looks* while idle, not for how much memory
 //! it actually costs the system.
 
-use windows::Win32::System::ProcessStatus::EmptyWorkingSet;
+use windows::Win32::System::ProcessStatus::{
+    EmptyWorkingSet, GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
+};
 use windows::Win32::System::Threading::GetCurrentProcess;
 use windows::core::Result;
+
+/// Bytes of this process currently resident — the "Memory" column of Task
+/// Manager. For showing to a user, not for deciding anything: see the module
+/// doc for how little it says about what the process actually costs.
+pub fn working_set_bytes() -> Option<usize> {
+    let mut counters = PROCESS_MEMORY_COUNTERS::default();
+    let size = size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+    unsafe { GetProcessMemoryInfo(GetCurrentProcess(), &mut counters, size) }
+        .ok()
+        .map(|()| counters.WorkingSetSize)
+}
 
 /// Releases the pages touched during start-up from the working set.
 ///

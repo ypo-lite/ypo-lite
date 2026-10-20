@@ -204,6 +204,7 @@ pub fn suggestions(action: Action) -> &'static [&'static str] {
         Action::Iconize => &["📥", "📦", "⬇️"],
         Action::Traynize => &["📤", "📥", "📦"],
         Action::Uniconize => &["↩️", "📤", "🔁"],
+        Action::UniconizeAll => &["📂", "🗃️", "🔁"],
         Action::DesktopNext => &["▶️", "➡️", "⏭️"],
         Action::DesktopPrev => &["◀️", "⬅️", "⏮️"],
         Action::DesktopNew => &["➕", "🆕", "🖥️"],

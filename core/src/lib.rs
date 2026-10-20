@@ -45,6 +45,7 @@
 //! | [`known_folders`] | Win32 "known folder" paths, resolved lazily and cached |
 //! | [`log`] | a tiny file logger, for a `windows_subsystem = "windows"` app with no console to print to |
 //! | [`overlay`] | layered, click-through windows drawn from a pixel buffer |
+//! | [`process`] | the process behind a window: its name, and whether UIPI lets us drive it |
 //! | [`monitor`] | monitor geometry, work areas, per-monitor DPI |
 //! | [`config`] | portable `.ini` settings next to the executable |
 //! | [`xml`] | a small XML reader and writer (comments kept), for settings files that are not `.ini` |
@@ -88,6 +89,8 @@ pub mod monitor;
 pub mod overlay;
 #[cfg(feature = "win")]
 pub mod prelude;
+#[cfg(feature = "win")]
+pub mod process;
 #[cfg(feature = "win")]
 pub mod resources;
 #[cfg(feature = "win")]

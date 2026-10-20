@@ -1,12 +1,29 @@
 # Notifications in `y-core` — spec
 
-Status: **draft, nothing implemented.** Agreed direction: route **A** — keep
+Status: **implemented in `core/src/tray.rs`** (deviations from the proposal
+below are listed under "As built"). Agreed direction: route **A** — keep
 `NIF_INFO` balloons (which Windows 10/11 already shows as toasts and files in
 the notification center) and make them richer and actionable. No WinRT
 `ToastNotificationManager`: it needs an AUMID plus a Start-menu shortcut for an
 unpackaged app and pulls WinRT into the binary, against "low memory, fast".
 
-## Today
+## As built
+
+* `TrayEvent::decode` keeps its `(event, position)` signature. The icon id is
+  a separate `TrayEvent::icon_id(lparam)`, so single-icon apps (`y-pop`,
+  `y-term`) were not touched.
+* `Notify::User(HICON)` carries the icon; the builder has `.level()`,
+  `.large_icon()`, `.silent()`, `.respect_quiet_time()`.
+* `TrayEvent::BalloonClosed` covers both `NIN_BALLOONTIMEOUT` and
+  `NIN_BALLOONHIDE`.
+* Truncation lives in `resources::copy_to_buffer_ellipsis` (`…`, never splits
+  a surrogate pair); the tooltip still uses the silent `copy_to_buffer`.
+* `skeleton` is **not** updated: it has no `notify` at all, so it did not
+  diverge, only lags. Port the builder there if/when it grows one.
+* Tests: `tray::tests` (decode, icon id) and `resources::ellipsis_tests`.
+* Only call site: `y-snap`'s `notify` helper.
+
+## Today (before the change)
 
 `TrayIcon::notify(title, message, Notify)` in `core/src/tray.rs`: one-shot
 `NIF_INFO` on the single icon, four stock icons, and no feedback.

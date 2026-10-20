@@ -55,7 +55,11 @@ use windows::Win32::UI::Shell::{
     SHGFI_ICON, SHGFI_SMALLICON, SHGFI_USEFILEATTRIBUTES, SHSTOCKICONID, SHSTOCKICONINFO,
     SIID_DELETE, SIID_INFO, SIID_SETTINGS,
 };
-use windows::Win32::UI::WindowsAndMessaging::{CopyIcon, DI_MASK, DI_NORMAL, DestroyIcon, DrawIconEx, HICON};
+use windows::Win32::Foundation::{ERROR_TIMEOUT, GetLastError, HWND, LPARAM, WPARAM};
+use windows::Win32::UI::WindowsAndMessaging::{
+    CopyIcon, DI_MASK, DI_NORMAL, DestroyIcon, DrawIconEx, GCLP_HICONSM, GetClassLongPtrW, HICON,
+    SMTO_ABORTIFHUNG, SendMessageTimeoutW, WM_GETICON,
+};
 use windows::core::HSTRING;
 
 /// An icon this process extracted — [`Drop`] destroys the underlying
@@ -76,6 +80,55 @@ impl Icon {
     /// but is not worth a panic if it ever does.
     fn duplicate(&self) -> Option<Icon> {
         unsafe { CopyIcon(self.0) }.ok().map(Icon)
+    }
+
+    /// A private copy of the small icon of another application's `window`,
+    /// or `None` if it has none to give.
+    ///
+    /// Asks the window (`WM_GETICON`), then falls back to its class. The ask
+    /// is bounded to 250 ms and gives up on a hung window, so a stuck
+    /// application cannot freeze the caller's message loop. The handle the
+    /// window hands back belongs to *it* and can vanish when it does, so what
+    /// is returned is a copy, owned — and destroyed — here.
+    pub fn of_window(window: HWND) -> Option<Icon> {
+        // ICON_SMALL2 (the size the shell uses for its own lists), ICON_SMALL,
+        // then ICON_BIG, which the system scales when drawn.
+        const WHICH: [usize; 3] = [2, 0, 1];
+
+        let mut found = 0usize;
+        for which in WHICH {
+            let mut reply = 0usize;
+            let sent = unsafe {
+                SendMessageTimeoutW(
+                    window,
+                    WM_GETICON,
+                    WPARAM(which),
+                    LPARAM(0),
+                    SMTO_ABORTIFHUNG,
+                    250,
+                    Some(&mut reply),
+                )
+            };
+            if sent.0 == 0 {
+                // Timed out or hung: asking again would only wait again.
+                if unsafe { GetLastError() } == ERROR_TIMEOUT {
+                    break;
+                }
+                continue;
+            }
+            if reply != 0 {
+                found = reply;
+                break;
+            }
+        }
+        if found == 0 {
+            found = unsafe { GetClassLongPtrW(window, GCLP_HICONSM) } as usize;
+        }
+        if found == 0 {
+            return None;
+        }
+
+        unsafe { CopyIcon(HICON(found as *mut c_void)) }.ok().map(Icon)
     }
 
     /// Renders this icon into a `size`×`size` 32-bit ARGB bitmap suitable

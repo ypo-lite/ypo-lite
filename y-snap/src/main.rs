@@ -5,11 +5,15 @@
 //! [`Action`] on a window. The actions themselves live in [`window`], the
 //! choice of window in [`target`].
 //!
-//! Not here yet: hiding windows behind a notification icon (iconize/traynize).
+//! Windows hidden by `iconize`/`traynize` are kept in [`hidden`]; this file
+//! owns the tray icon, the menus that list them, and the *About* balloon
+//! ([`about`]).
 
 #![windows_subsystem = "windows"]
 
+mod about;
 mod actions;
+mod hidden;
 mod min_overlay;
 mod mouse;
 mod overlay;
@@ -24,24 +28,27 @@ use y_snap::ipc;
 
 use windows::Win32::UI::{
     Shell::ShellExecuteW,
-    WindowsAndMessaging::{SW_SHOWNORMAL, WM_HOTKEY, WM_TIMER},
+    WindowsAndMessaging::{PostMessageW, SW_SHOWNORMAL, WM_CLOSE, WM_HOTKEY, WM_TIMER},
 };
 use windows::core::HSTRING;
 
 use y_core::{
     app::TrayApp,
     hotkey::{Fallback, HotkeyManager},
+    icon::Bitmap,
     ids::{IDH_FIRST, IDM_FIRST, TRAY_ICON_ID, WM_TRAY_CALLBACK},
-    memory, monitor,
+    memory,
+    menu::ICON_SIZE,
+    monitor,
     prelude::*,
-    resources::{IconSize, app_icon_or_stock},
-    tray::{Notify, TrayEvent},
-    window as message_loop,
+    resources::{IconSize, app_icon_or_stock, product_version},
+    tray::{Notification, Notify, TrayEvent},
 };
 
 use crate::action::Action;
 use crate::actions::Status;
 use crate::config::Settings;
+use crate::hidden::{Hidden, Mode};
 
 const APP: AppInfo = AppInfo::new("Y-Snap", ipc::CLASS).single_instance();
 
@@ -49,6 +56,12 @@ const IDM_RELOAD: u32 = IDM_FIRST;
 const IDM_OPEN_CONFIG: u32 = IDM_FIRST + 1;
 const IDM_EXIT: u32 = IDM_FIRST + 2;
 const IDM_SETTINGS: u32 = IDM_FIRST + 3;
+const IDM_ABOUT: u32 = IDM_FIRST + 4;
+const IDM_RESTORE_ALL: u32 = IDM_FIRST + 5;
+// The menu of a hidden window's own icon. The commands of the traynized
+// entries start at `hidden::IDM_ENTRY_FIRST`, well clear of these.
+const IDM_ENTRY_OPEN: u32 = IDM_FIRST + 6;
+const IDM_ENTRY_CLOSE: u32 = IDM_FIRST + 7;
 
 /// How many warnings a balloon shows before giving up and pointing at the
 /// file. A notification the user cannot read is a notification wasted.
@@ -75,11 +88,31 @@ struct YSnap {
     /// [`ipc::reload_message`]'s id, looked up once: `y-snap-config` sends
     /// it after saving, so a change applies without the tray menu.
     reload_message: u32,
+    /// The windows `iconize` and `traynize` took off the screen.
+    hidden: Hidden,
+    /// y-snap's own window: where the tray callbacks of hidden windows and
+    /// the purge timer are addressed. Set in `on_create`.
+    owner: HWND,
+    /// What the last balloon was for, so that a click on it can do something.
+    /// Only one balloon is live at a time.
+    balloon: Balloon,
+}
+
+/// What a balloon invited the user to do by clicking it.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Balloon {
+    /// Nothing: a plain message.
+    Plain,
+    /// *About*: a click opens the settings app.
+    About,
 }
 
 impl YSnap {
     fn new() -> Self {
         Self {
+            hidden: Hidden::new(),
+            owner: HWND::default(),
+            balloon: Balloon::Plain,
             tray: None,
             hotkeys: None,
             mouse_hook: None,
@@ -184,9 +217,60 @@ impl YSnap {
     }
 
     fn notify(&mut self, title: &str, message: &str, level: Notify) {
+        self.balloon = Balloon::Plain;
         if let Some(tray) = self.tray.as_mut() {
-            let _ = tray.notify(title, message, level);
+            let _ = tray.notify(&Notification::new(title, message).level(level));
         }
+    }
+
+    /// The *About* balloon: version, what is loaded, what it costs. Clicking
+    /// it opens the settings app.
+    fn show_about(&mut self) {
+        let version = product_version().unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_owned());
+        let title = format!("{} {version}", APP.name);
+
+        let config_path = self
+            .settings
+            .as_ref()
+            .map_or_else(config::path, |settings| settings.path.clone());
+        let body = about::body(&about::Facts {
+            loaded: self
+                .settings
+                .as_ref()
+                .map(|settings| (settings.hotkeys.len(), settings.overlay.items.len())),
+            config: &config_path,
+            working_set: memory::working_set_bytes(),
+            settings_app: self.settings_app().is_some(),
+        });
+
+        self.balloon = Balloon::About;
+        if let Some(tray) = self.tray.as_mut() {
+            let icon = app_icon_or_stock(IconSize::Large);
+            let about = Notification::new(&title, &body)
+                .level(Notify::User(icon))
+                .large_icon();
+            let _ = tray.notify(&about);
+        }
+    }
+
+    /// Hides `target` behind an icon of its own or in the menu, and says why
+    /// when it cannot.
+    fn hide(&mut self, target: Option<HWND>, mode: Mode) {
+        let Some(target) = target else { return };
+
+        if let Err(refusal) = self.hidden.hide(self.owner, target, mode)
+            && let Some(message) = refusal.message()
+        {
+            self.notify(APP.name, &message, Notify::Warning);
+        }
+    }
+
+    /// Leaves through the window's normal shutdown (`WM_CLOSE` →
+    /// `on_destroy`), so that hidden windows are brought back first.
+    /// Quitting the message loop directly would skip `on_destroy` and strand
+    /// them.
+    fn quit(&self, hwnd: HWND) {
+        let _ = unsafe { PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0)) };
     }
 
     /// A hotkey fired: find what it was bound to and do it.
@@ -204,7 +288,7 @@ impl YSnap {
         };
 
         match binding.action {
-            Action::Quit => message_loop::quit(0),
+            Action::Quit => self.quit(hwnd),
             Action::Reload => self.load(hwnd),
 
             // Needs the owner window and the overlay's own state, not just
@@ -234,6 +318,16 @@ impl YSnap {
     /// `desktop` is the 1-based `desktop` attribute, `0` for a caller with
     /// no such attribute to give (only [`Action::DesktopMove`] reads it).
     fn perform(&mut self, action: Action, target: Option<HWND>, desktop: u32) {
+        // The actions that act on the list of hidden windows, not on a window
+        // alone, so `actions::dispatch` cannot do them.
+        match action {
+            Action::Iconize => return self.hide(target, Mode::Iconized),
+            Action::Traynize => return self.hide(target, Mode::Traynized),
+            Action::Uniconize => return self.hidden.restore_last(),
+            Action::UniconizeAll => return self.hidden.restore_all(),
+            _ => {}
+        }
+
         match actions::dispatch(action, target, desktop) {
             // Nothing under the pointer worth acting on. Silence is the
             // right answer: the user pressed a key over the desktop, they do
@@ -372,10 +466,15 @@ impl YSnap {
     }
 
     fn show_menu(&mut self, hwnd: HWND, position: POINT) {
+        // Declared before the menu so it is dropped after it: Windows does
+        // not free an item's bitmap, and the menu reads it until it is gone.
+        let mut icons: Vec<Bitmap> = Vec::new();
         let Ok(menu) = PopupMenu::new() else { return };
 
         let _ = menu.add_disabled_item(APP.name);
         let _ = menu.add_separator();
+
+        self.add_hidden_section(&menu, &mut icons);
 
         match (&self.problem, &self.settings) {
             (Some(problem), _) => {
@@ -396,29 +495,109 @@ impl YSnap {
         let _ = menu.add_item(IDM_OPEN_CONFIG, "Edit y-snap.xml");
         let _ = menu.add_item(IDM_RELOAD, "Reload configuration");
         let _ = menu.add_separator();
+        let _ = menu.add_item(IDM_ABOUT, "About");
         let _ = menu.add_item(IDM_EXIT, "Exit");
 
         match menu.track(hwnd, position) {
             Some(IDM_SETTINGS) => self.open_settings(),
             Some(IDM_RELOAD) => self.load(hwnd),
             Some(IDM_OPEN_CONFIG) => self.open_config(),
-            Some(IDM_EXIT) => message_loop::quit(0),
-            _ => {}
+            Some(IDM_ABOUT) => self.show_about(),
+            Some(IDM_RESTORE_ALL) => self.hidden.restore_all(),
+            Some(IDM_EXIT) => self.quit(hwnd),
+            Some(id) => {
+                if let Some(slot) = hidden::slot_of_menu_id(id) {
+                    self.hidden.restore(slot);
+                }
+            }
+            None => {}
         }
 
         let _ = memory::trim_working_set();
     }
 
-    /// Opens the settings app (`y-snap-config.exe`, expected next to this
-    /// executable — the two ship together). Without it, falls back to the
+    /// The traynized windows at the top of the menu, one item each with the
+    /// window's own icon, and a way to bring everything back. Nothing at all
+    /// when nothing is hidden.
+    ///
+    /// `icons` receives the item bitmaps, which the caller must keep alive
+    /// until the menu is closed.
+    fn add_hidden_section(&self, menu: &PopupMenu, icons: &mut Vec<Bitmap>) {
+        let mut any = false;
+
+        for entry in self.hidden.traynized() {
+            if !any {
+                let _ = menu.add_titled_separator("Hidden windows");
+                any = true;
+            }
+
+            let id = hidden::menu_id(entry.slot);
+            let _ = menu.add_item(id, &menu_label(&entry.title, &entry.app));
+
+            if let Some(bitmap) = entry.icon.as_ref().and_then(|icon| icon.to_bitmap(ICON_SIZE)) {
+                let _ = menu.set_item_icon(id, bitmap.handle());
+                icons.push(bitmap);
+            }
+        }
+
+        // Iconized windows are not listed (their icon is the way back), but
+        // "restore all" is worth offering whatever is hidden.
+        if !self.hidden.is_empty() {
+            let _ = menu.add_item(IDM_RESTORE_ALL, "Restore all hidden windows");
+            let _ = menu.add_separator();
+        }
+    }
+
+    /// The right-click menu of an iconized window's own icon: the window's
+    /// application as a heading, then *Open* and *Close*.
+    fn show_entry_menu(&mut self, hwnd: HWND, slot: usize, position: POINT) {
+        let Some(entry) = self.hidden.get(slot) else {
+            return;
+        };
+        let window = entry.window;
+        let heading = if entry.app.is_empty() {
+            entry.title.clone()
+        } else {
+            entry.app.clone()
+        };
+
+        let Ok(menu) = PopupMenu::new() else { return };
+        let _ = menu.add_titled_separator(&heading.replace('&', "&&"));
+        let _ = menu.add_item(IDM_ENTRY_OPEN, "Open");
+        let _ = menu.add_item(IDM_ENTRY_CLOSE, "Close");
+
+        let chosen = menu.track(hwnd, position);
+
+        // The menu runs its own message loop, and the window may have gone
+        // (or the slot been reused) while it was open: act only on the same
+        // window.
+        if self.hidden.get(slot).map(|entry| entry.window) != Some(window) {
+            return;
+        }
+        match chosen {
+            Some(IDM_ENTRY_OPEN) => {
+                self.hidden.restore(slot);
+            }
+            Some(IDM_ENTRY_CLOSE) => self.hidden.close(slot),
+            _ => {}
+        }
+    }
+
+    /// `y-snap-config.exe`, expected next to this executable — the two ship
+    /// together. `None` when it is not there.
+    fn settings_app(&self) -> Option<std::path::PathBuf> {
+        std::env::current_exe()
+            .ok()
+            .map(|exe| exe.with_file_name(ipc::CONFIG_EXE))
+            .filter(|app| app.is_file())
+    }
+
+    /// Opens the settings app. Without it, falls back to the
     /// file itself, saying why, so "Settings…" never silently does nothing.
     /// The settings app is single-instance: a second click brings the open
     /// window forward rather than opening another.
     fn open_settings(&mut self) {
-        let app = std::env::current_exe()
-            .ok()
-            .map(|exe| exe.with_file_name(ipc::CONFIG_EXE));
-        let Some(app) = app.filter(|app| app.is_file()) else {
+        let Some(app) = self.settings_app() else {
             let message = format!(
                 "{} isn't installed next to y-snap — opening the file instead.",
                 ipc::CONFIG_EXE
@@ -447,6 +626,15 @@ impl YSnap {
     }
 }
 
+/// What a traynized window's menu item says: its title, cut to a reasonable
+/// width, or the application's name for a window with none. `&` is doubled,
+/// because a menu reads it as a mnemonic marker and a title such as
+/// "Q&A — Notes" would lose a letter.
+fn menu_label(title: &str, app: &str) -> String {
+    let text = if title.is_empty() { app } else { title };
+    hidden::shorten(text, hidden::MENU_TITLE_MAX).replace('&', "&&")
+}
+
 /// `ShellExecute`'s "open" on `path` — runs an executable, or opens a file
 /// with its associated application.
 fn shell_open(path: &std::path::Path) {
@@ -465,6 +653,7 @@ fn shell_open(path: &std::path::Path) {
 
 impl TrayApp for YSnap {
     fn on_create(&mut self, hwnd: HWND) -> Result<()> {
+        self.owner = hwnd;
         self.tray = Some(TrayIcon::new(
             hwnd,
             TRAY_ICON_ID,
@@ -483,6 +672,8 @@ impl TrayApp for YSnap {
         if let Some(tray) = self.tray.as_mut() {
             let _ = tray.restore();
         }
+        // The icons of iconized windows went with the old taskbar too.
+        self.hidden.restore_tray_icons();
     }
 
     fn on_activate(&mut self, hwnd: HWND) {
@@ -509,11 +700,30 @@ impl TrayApp for YSnap {
 
             WM_TRAY_CALLBACK => {
                 let (event, position) = TrayEvent::decode(wparam, lparam);
-                match event {
-                    TrayEvent::ContextMenu => self.show_menu(hwnd, position),
-                    // The conventional default action of a tray icon.
-                    TrayEvent::DoubleClick => self.open_settings(),
-                    _ => {}
+                let id = TrayEvent::icon_id(lparam);
+
+                if id == TRAY_ICON_ID {
+                    match event {
+                        TrayEvent::ContextMenu => self.show_menu(hwnd, position),
+                        // The conventional default action of a tray icon.
+                        TrayEvent::DoubleClick => self.open_settings(),
+                        TrayEvent::BalloonClicked if self.balloon == Balloon::About => {
+                            self.balloon = Balloon::Plain;
+                            self.open_settings();
+                        }
+                        _ => {}
+                    }
+                } else if let Some(slot) = hidden::slot_of_tray_id(id) {
+                    // The icon of a hidden window. A double click arrives
+                    // after the first click already brought the window back
+                    // and removed the icon, so it finds nothing: harmless.
+                    match event {
+                        TrayEvent::Select | TrayEvent::DoubleClick => {
+                            self.hidden.restore(slot);
+                        }
+                        TrayEvent::ContextMenu => self.show_entry_menu(hwnd, slot, position),
+                        _ => {}
+                    }
                 }
                 Some(LRESULT(0))
             }
@@ -537,6 +747,11 @@ impl TrayApp for YSnap {
                 if let Some(hook) = self.mouse_hook.as_mut() {
                     hook.check_liveness();
                 }
+                Some(LRESULT(0))
+            }
+
+            WM_TIMER if wparam.0 == hidden::PURGE_TIMER_ID => {
+                self.hidden.purge();
                 Some(LRESULT(0))
             }
 
@@ -577,6 +792,10 @@ impl TrayApp for YSnap {
     }
 
     fn on_destroy(&mut self) {
+        // First, while the message loop still runs: a hidden window has no
+        // other way back once y-snap is gone.
+        self.hidden.restore_all();
+
         // Order matters: the hotkeys, the mouse hook and the action
         // overlay's own keyboard hook all hold hooks that must come down
         // while the message loop is still running. There is deliberately no

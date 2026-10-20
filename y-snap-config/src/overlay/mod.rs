@@ -32,7 +32,7 @@ use y_snap::config::Overlay;
 /// ACTIONS`] plus [`Action::DesktopList`], which only means something on a
 /// tile (it expands into one tile per virtual desktop when the overlay
 /// opens).
-pub const OVERLAY_ACTIONS: [Action; 21] = [
+pub const OVERLAY_ACTIONS: [Action; 22] = [
     Action::Overlay,
     Action::Reload,
     Action::Quit,
@@ -48,6 +48,7 @@ pub const OVERLAY_ACTIONS: [Action; 21] = [
     Action::Iconize,
     Action::Traynize,
     Action::Uniconize,
+    Action::UniconizeAll,
     Action::DesktopNext,
     Action::DesktopPrev,
     Action::DesktopNew,

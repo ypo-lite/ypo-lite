@@ -22,7 +22,8 @@ loop. Everything else is picked à la carte.
 | ------ | ---- |
 | `app` | start-up, and the `TrayApp` trait that handles what every tray app handles the same way |
 | `window` | window classes, the window procedure, the message loop |
-| `tray` | notification area icon and balloons, RAII |
+| `tray` | notification area icon, RAII; balloons through a `Notification` builder (custom icon, silent, quiet time) with click events — see `docs/notifications.md` |
+| `process` | the process behind a window: its name, and whether UIPI lets us drive it |
 | `menu` | popup menus — items, check marks, submenus — RAII |
 | `hotkey` | system-wide hotkeys, low-level-hook override, `"Win+Shift+F12"` parsing |
 | `overlay` | layered click-through windows drawn from a pixel buffer |

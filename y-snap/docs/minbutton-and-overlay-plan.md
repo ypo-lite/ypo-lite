@@ -231,12 +231,15 @@ analysis doc + module can follow the same day. Roughly:
 
 Smaller, no research spike needed, listed here mainly so it isn't lost:
 
-- `traynize` — hide the window and give it its own icon in the
+> Done — see `iconize-traynize-plan.md`. The two definitions below were
+> written the wrong way round; as HulK has them, `iconize` is the one with
+> its own tray icon and `traynize` the one listed in y-snap's menu.
+
+- `iconize` — hide the window and give it its own icon in the
   notification area (`y_core::tray` already has the primitives `y-snap`
   uses for its own tray icon); clicking that icon restores it.
-- `iconize` — hide the window behind an icon in a small list y-snap keeps
-  for itself (not the system tray) — needs that list's own UI, however
-  minimal.
+- `traynize` — hide the window behind an entry in a list y-snap keeps
+  for itself (its tray menu, not an icon of its own).
 - `uniconize` — bring back the most recently hidden window, from whichever
   of the two lists above it went into; `Action::needs_window()` already
   excludes it (it acts on y-snap's own state, not a target), matching

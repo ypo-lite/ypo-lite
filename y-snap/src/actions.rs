@@ -27,7 +27,9 @@ pub enum Status {
 /// [`Action::Quit`] and [`Action::Reload`] are not here: they act on y-snap
 /// itself and need the application, not a window. Nor is [`Action::Overlay`]
 /// — it needs the application's settings and owner window too, so `main.rs`
-/// special-cases it the same way, before this is ever reached.
+/// special-cases it the same way, before this is ever reached. The same goes
+/// for iconize, traynize and the two uniconize actions: the windows they hide
+/// are kept in `main.rs`'s [`crate::hidden::Hidden`].
 pub fn dispatch(action: Action, target: Option<HWND>, desktop: u32) -> Status {
     if action.needs_window() && target.is_none() {
         return Status::NoTarget;
@@ -71,8 +73,9 @@ pub fn dispatch(action: Action, target: Option<HWND>, desktop: u32) -> Status {
             let _ = virtual_desktop::toggle_window_pinned(window);
         }
 
-        // Still to come: iconize/traynize, hiding windows behind a
-        // notification icon.
+        // Handled by the application before it gets here, so that nothing
+        // reaching this arm is silently ignored: the rest of what the
+        // configuration can name is still to come.
         _ => return Status::Pending,
     }
 
@@ -80,7 +83,8 @@ pub fn dispatch(action: Action, target: Option<HWND>, desktop: u32) -> Status {
 }
 
 /// Whether `action` currently does something real when dispatched — every
-/// arm [`dispatch`] does not fall through to [`Status::Pending`] for. The
+/// arm [`dispatch`] does not fall through to [`Status::Pending`] for, and the
+/// ones the application handles itself (see [`dispatch`]). The
 /// action overlay renders a tile disabled, rather than pretending it works,
 /// for anything this says no to.
 pub fn is_implemented(action: Action) -> bool {
@@ -100,6 +104,10 @@ pub fn is_implemented(action: Action) -> bool {
             | Action::DesktopNew
             | Action::DesktopMove
             | Action::PinToggle
+            | Action::Iconize
+            | Action::Traynize
+            | Action::Uniconize
+            | Action::UniconizeAll
     )
 }
 

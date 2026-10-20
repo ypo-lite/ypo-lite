@@ -15,11 +15,12 @@
 
 use windows::Win32::Foundation::{HANDLE, HWND, LPARAM, POINT, RECT, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GWL_EXSTYLE, GWL_STYLE, GetPropW, GetWindowRect, HWND_NOTOPMOST, HWND_TOPMOST, LWA_ALPHA,
-    PostMessageW, RemovePropW, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SWP_FRAMECHANGED,
-    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetCursorPos, SetLayeredWindowAttributes,
-    SetPropW, SetWindowPos, ShowWindow, WM_CLOSE, WS_CAPTION, WS_EX_LAYERED, WS_EX_TOOLWINDOW,
-    WS_EX_TOPMOST, WS_MAXIMIZE, WS_MINIMIZE, WS_THICKFRAME,
+    GWL_EXSTYLE, GWL_STYLE, GetPropW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
+    HWND_NOTOPMOST, HWND_TOPMOST, IsWindow, IsWindowVisible, LWA_ALPHA, PostMessageW,
+    RemovePropW, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, SWP_FRAMECHANGED,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetCursorPos, SetForegroundWindow,
+    SetLayeredWindowAttributes, SetPropW, SetWindowPos, ShowWindow, WM_CLOSE, WS_CAPTION,
+    WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_MAXIMIZE, WS_MINIMIZE, WS_THICKFRAME,
 };
 use windows::core::{PCWSTR, w};
 
@@ -60,6 +61,51 @@ pub fn maximize(window: HWND) {
 /// window from outside would lose work.
 pub fn close(window: HWND) {
     let _ = unsafe { PostMessageW(Some(window), WM_CLOSE, WPARAM(0), LPARAM(0)) };
+}
+
+/// Takes the window off the screen without closing it: minimized first, so
+/// that [`bring_back`] returns it to the state it had (a maximized window
+/// comes back maximized), then hidden.
+///
+/// Deliberately not `hide_taskbar`'s trick of changing the extended style: an
+/// application with several windows would lose the taskbar buttons of the ones
+/// still showing. `SW_HIDE` takes only this window.
+pub fn hide_away(window: HWND) {
+    let _ = unsafe { ShowWindow(window, SW_MINIMIZE) };
+    let _ = unsafe { ShowWindow(window, SW_HIDE) };
+}
+
+/// Undoes [`hide_away`] and puts the window in front. y-snap is acting on a
+/// click or a key it was just given, so Windows lets it take the foreground.
+pub fn bring_back(window: HWND) {
+    let _ = unsafe { ShowWindow(window, SW_SHOW) };
+    let _ = unsafe { ShowWindow(window, SW_RESTORE) };
+    let _ = unsafe { SetForegroundWindow(window) };
+}
+
+/// The window's title, as the owner last set it. Read from the system's own
+/// copy: it does not wait on the other application, so a hung one cannot
+/// block the caller.
+pub fn title(window: HWND) -> String {
+    let length = unsafe { GetWindowTextLengthW(window) };
+    if length <= 0 {
+        return String::new();
+    }
+
+    let mut buffer = vec![0u16; length as usize + 1];
+    let copied = unsafe { GetWindowTextW(window, &mut buffer) };
+    String::from_utf16_lossy(&buffer[..copied.max(0) as usize])
+}
+
+/// Whether the handle still names a window.
+pub fn exists(window: HWND) -> bool {
+    unsafe { IsWindow(Some(window)) }.as_bool()
+}
+
+/// Whether the window is shown on the desktop (minimized counts; hidden does
+/// not).
+pub fn is_visible(window: HWND) -> bool {
+    unsafe { IsWindowVisible(window) }.as_bool()
 }
 
 /// Keeps the window above every other, or stops.

@@ -1,9 +1,39 @@
 # y-snap — About, Iconize and Traynize — spec
 
-Status: **draft, nothing implemented.** Ports HulK's `iconize.cpp`, `menu.cpp`
-and `ShowAbout`, with the changes below. Depends on
+Status: **implemented** (`hidden.rs`, `about.rs`, `main.rs`), compiled, clippy
+clean and unit-tested; **not yet run on a desktop** — the live behaviour (hiding
+a real window, tray icons, menus, balloons) is unverified. Ports HulK's
+`iconize.cpp`, `menu.cpp` and `ShowAbout`, with the changes below. Depends on
 [`core/docs/notifications.md`](../../core/docs/notifications.md) (balloon
 builder, icon id and balloon events in `TrayEvent`).
+
+## As built — where it differs from the text below
+
+* **Names.** `iconize` = own tray icon, `traynize` = listed in the menu, as in
+  HulK (`ICONIZE_OPT_SYSTRAY` / `_INTERNAL`). The doc comments on
+  `Action::Iconize`/`Traynize` and Part 4 of `minbutton-and-overlay-plan.md`
+  had them the other way round; both are corrected.
+* **Quitting.** `Action::Quit` and the *Exit* item used to call
+  `PostQuitMessage` directly, which ends the loop *without* `WM_DESTROY`, so
+  `on_destroy` never ran. They now post `WM_CLOSE` (`YSnap::quit`), the normal
+  shutdown path, so `on_destroy` → `Hidden::restore_all` runs. This also means
+  y-snap's hooks and tray icon are now dropped on exit, which they were not.
+* **Purge** also drops an entry whose window is *visible again* (a program that
+  re-shows its own window, e.g. a second launch of a single-instance app) —
+  otherwise an icon would sit in the tray for a window already on screen.
+* **Elevation** is read from the target's token. From a non-elevated y-snap
+  that token is usually unreadable for an elevated process, so "cannot read" is
+  treated as "elevated" (`y_core::process::can_drive`): it errs toward refusing.
+* **Icons.** The window's icon is *copied* (`Icon::of_window`, `CopyIcon`), so
+  it stays valid if the window dies; `WM_GETICON` is bounded to 250 ms and gives
+  up on a hung window.
+* **Menu ids.** `IDM_ABOUT`, `IDM_RESTORE_ALL`, `IDM_ENTRY_OPEN/CLOSE` are
+  `IDM_FIRST + 4..7`; traynized entries start at `IDM_FIRST + 100`.
+* **About** uses `Notify::User` with the large app icon; a click opens the
+  settings app. The balloon text is built to 255 UTF-16 units (`about.rs`).
+* **Added to `core`:** `process` (owner pid, exe name, elevation),
+  `Icon::of_window`, `resources::product_version`, `memory::working_set_bytes`.
+* `uniconize-all` is also in `y-snap-config`'s hotkey and overlay action lists.
 
 ## 1. About
 
@@ -167,19 +197,19 @@ README table and `rsc/y-snap.xml` comments.
   Spec takes option 1. Handle reuse is a theoretical risk (a dead handle value
   reassigned to a new window within 5 s); entries also store the **pid** and
   re-validate with `GetWindowThreadProcessId` on purge and on restore.
-* **Crash recovery** *(you asked for details)*. If y-snap is killed, hidden
-  windows are orphaned: invisible, no icon to restore them. Mitigation:
-  1. On every registry change, write a tiny state file
-     `%LOCALAPPDATA%\Ypo-Lite\y-snap-hidden.txt` (one line per window:
-     `hwnd pid class`), deleted when the registry is empty.
-  2. At start-up, if the file exists, for each line whose `hwnd` still exists
-     *and* matches `pid` + class name and is **not visible**, `ShowWindow(SW_SHOW)`
-     it. Then delete the file. No UI, no prompt; one info balloon "Restored N
-     windows hidden by a previous session".
-  Cost: one small file write per hide/restore (not on a hot path). The class
-  + pid check protects against restoring a recycled handle. **Needs your
-  decision** — default proposal is *yes*, because an invisible, unrecoverable
-  window is the worst failure this feature can cause.
+* **Crash recovery — deferred, not part of the first implementation.** If
+  y-snap is killed, hidden windows are orphaned: invisible, with no icon to
+  restore them. Idea kept for later: an opt-in setting enabling a "cache"
+  file listing the hidden windows (`hwnd pid class`, one per line, rewritten
+  on each registry change, deleted when empty); at start-up, windows still
+  matching pid + class and not visible would be re-shown, with one info
+  balloon. The pid + class check guards against recycled handles.
+  **Undecided, to settle before building it:** the setting's name and place
+  in `y-snap.xml`, and where the file lives (candidates: next to the
+  configuration, `%LOCALAPPDATA%\Ypo-Lite\`, or `%TEMP%` — a portable copy
+  should stay portable, which argues for next to the exe/config). The registry
+  must therefore be written so a persistence hook can be added without
+  reshaping it (one `on_change` point).
 * **Explorer restart** (`TaskbarCreated`): `on_taskbar_created` must re-add
   every Iconized window's icon (`TrayIcon::restore` per entry), not only y-snap's.
 * **Balloon spam:** no balloon per hide; only refusals and the crash-recovery
@@ -210,7 +240,7 @@ window, tray icons, balloons) needs the desktop: per the project rules I will
 
 ## 9. Still open
 
-1. Crash-recovery state file: yes/no (proposal: yes).
-2. Dead-window purge: timer (proposal) vs WinEvent hook.
+1. Crash-recovery cache file: deferred (setting name, file location — §6).
+2. ~~Dead-window purge~~: decided, 5 s timer while the registry is non-empty.
 3. Left-click on y-snap's own icon: keep "nothing" for now, or pop the hidden list?
 4. Cap value inside 32–64 (proposal: 48).

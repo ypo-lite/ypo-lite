@@ -12,7 +12,7 @@ use y_snap::config::Binding;
 
 /// Every [`Action`] a hotkey (or gesture) can be bound to, in combo-box
 /// order. Not [`Action::DesktopList`] — see [`crate::overlay::OVERLAY_ACTIONS`].
-pub const ACTIONS: [Action; 20] = [
+pub const ACTIONS: [Action; 21] = [
     Action::Overlay,
     Action::Reload,
     Action::Quit,
@@ -28,6 +28,7 @@ pub const ACTIONS: [Action; 20] = [
     Action::Iconize,
     Action::Traynize,
     Action::Uniconize,
+    Action::UniconizeAll,
     Action::DesktopNext,
     Action::DesktopPrev,
     Action::DesktopNew,

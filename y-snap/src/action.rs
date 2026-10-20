@@ -38,12 +38,14 @@ pub enum Action {
     CenterCursor,
 
     // Hiding windows away.
-    /// Hide the window behind an icon in y-snap's own list.
+    /// Hide the window behind an icon of its own in the notification area.
     Iconize,
-    /// Hide the window behind its own icon in the notification area.
+    /// Hide the window and list it in y-snap's tray menu.
     Traynize,
     /// Bring back the most recently hidden window.
     Uniconize,
+    /// Bring back every hidden window.
+    UniconizeAll,
 
     // Virtual desktops.
     DesktopNext,
@@ -80,6 +82,7 @@ impl Action {
             "iconize" => Self::Iconize,
             "traynize" => Self::Traynize,
             "uniconize" => Self::Uniconize,
+            "uniconize-all" => Self::UniconizeAll,
 
             "desktop-next" => Self::DesktopNext,
             "desktop-prev" => Self::DesktopPrev,
@@ -110,6 +113,7 @@ impl Action {
             Self::Iconize => "iconize",
             Self::Traynize => "traynize",
             Self::Uniconize => "uniconize",
+            Self::UniconizeAll => "uniconize-all",
             Self::DesktopNext => "desktop-next",
             Self::DesktopPrev => "desktop-prev",
             Self::DesktopNew => "desktop-new",
@@ -128,6 +132,7 @@ impl Action {
             Self::Reload
                 | Self::Quit
                 | Self::Uniconize
+                | Self::UniconizeAll
                 | Self::DesktopNext
                 | Self::DesktopPrev
                 | Self::DesktopNew
@@ -198,6 +203,7 @@ mod tests {
             Action::Iconize,
             Action::Traynize,
             Action::Uniconize,
+            Action::UniconizeAll,
             Action::DesktopNext,
             Action::DesktopPrev,
             Action::DesktopNew,

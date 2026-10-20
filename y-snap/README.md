@@ -22,8 +22,11 @@ per-desktop tiles) — see [`y-core`'s own `virtual_desktop`
 module](../core/src/virtual_desktop.rs) for how the undocumented COM
 interface behind them is handled across Windows versions.
 
-Configured, parsed, and not written yet: the iconize/traynize list. Binding
-one says so in a balloon rather than doing nothing.
+Also working: hiding windows. `iconize` gives a window an icon of its own in
+the notification area, `traynize` lists it in y-snap's tray menu; see
+[Hidden windows](#hidden-windows) below. The tray menu also has an *About*
+balloon (version, what is loaded, memory), and clicking that balloon opens the
+settings app.
 
 ## The configuration file
 
@@ -60,7 +63,8 @@ The same names work on a hotkey and on an overlay tile.
 | `minimize` `maximize` `close` | the obvious ones; `maximize` restores a maximized window |
 | `always-on-top` `borderless` `transparency` `shade` `hide-taskbar` | toggles |
 | `center-cursor` | put the pointer in the middle of the window |
-| `iconize` `traynize` `uniconize` | hide the window behind an icon, and bring it back |
+| `iconize` `traynize` | hide the window behind an icon of its own, or in the tray menu |
+| `uniconize` `uniconize-all` | bring back the window hidden last, or all of them |
 | `desktop-next` `desktop-prev` `desktop-new` `desktop-move` `pin-toggle` | virtual desktops |
 | `desktop-list` | overlay only: expands into one tile per desktop |
 
@@ -165,11 +169,37 @@ is not a tile, it becomes tiles. A tile under the pointer is drawn in
 `hover-back-color`/`hover-text-color`, whether reached by mouse or by the
 overlay having just opened with the pointer already sitting over it.
 
+## Hidden windows
+
+`iconize` and `traynize` take the target window off the screen (minimized,
+then hidden — so a maximized window comes back maximized — and its taskbar
+button goes with it; other windows of the same program keep theirs).
+
+| | |
+| --- | --- |
+| `iconize` | the window gets an icon of its own in the notification area: its own icon, its title as the tooltip. Click to bring it back; right-click for *Open* / *Close*, under the program's name |
+| `traynize` | no icon of its own: the window is listed under **Hidden windows** at the top of y-snap's tray menu, with its icon. Click an item to bring it back |
+| `uniconize` | bring back the window hidden last, of either kind |
+| `uniconize-all` | bring back every hidden window, the latest first |
+
+The tray menu also has **Restore all hidden windows**. At most 48 windows can
+be hidden at once; one more is refused with a balloon. A window of an
+elevated program is refused too, unless y-snap is elevated as well — Windows
+would ignore the request without saying so.
+
+y-snap checks every five seconds, only while something is hidden, and forgets
+a window that was closed, or that its program showed again by itself. Quitting
+y-snap brings every hidden window back. If y-snap is *killed*, hidden windows
+stay hidden; `docs/iconize-traynize-plan.md` describes the opt-in cache file
+planned for that.
+
 ## Layout
 
 | | |
 | --- | --- |
 | `main.rs` | the tray app: the message loop, hotkey registration, dispatch |
+| `hidden.rs` | the windows `iconize`/`traynize` hid: the registry, the tray icons, the purge |
+| `about.rs` | the text of the *About* balloon, built to the balloon's size limit |
 | `action.rs` | the action vocabulary, shared by hotkeys and the overlay |
 | `config.rs` | reading `y-snap.xml` |
 | `actions.rs` | action → Win32 call, in one place |
