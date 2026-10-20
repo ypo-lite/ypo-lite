@@ -64,10 +64,10 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     MOD_SHIFT, MOD_WIN, RegisterHotKey, SendInput, UnregisterHotKey, VIRTUAL_KEY, VK_ADD, VK_APPS,
     VK_BACK, VK_BROWSER_BACK, VK_BROWSER_FAVORITES, VK_BROWSER_FORWARD, VK_BROWSER_HOME,
     VK_BROWSER_REFRESH, VK_BROWSER_SEARCH, VK_BROWSER_STOP, VK_CAPITAL, VK_CLEAR, VK_CONTROL,
-    VK_DECIMAL, VK_DELETE, VK_DIVIDE, VK_DOWN, VK_END, VK_ESCAPE, VK_HOME, VK_INSERT, VK_LEFT,
-    VK_LWIN, VK_MEDIA_NEXT_TRACK, VK_MEDIA_PLAY_PAUSE, VK_MEDIA_PREV_TRACK, VK_MEDIA_STOP, VK_MENU,
+    VK_DECIMAL, VK_DELETE, VK_DIVIDE, VK_DOWN, VK_END, VK_ESCAPE, VK_HOME, VK_INSERT,
+    VK_LAUNCH_APP1, VK_LAUNCH_APP2, VK_LAUNCH_MAIL, VK_LAUNCH_MEDIA_SELECT, VK_LEFT, VK_LWIN, VK_MEDIA_NEXT_TRACK, VK_MEDIA_PLAY_PAUSE, VK_MEDIA_PREV_TRACK, VK_MEDIA_STOP, VK_MENU,
     VK_MULTIPLY, VK_NEXT, VK_NUMLOCK, VK_NUMPAD0, VK_OEM_1, VK_OEM_2, VK_OEM_3, VK_OEM_4, VK_OEM_5,
-    VK_OEM_6, VK_OEM_7, VK_OEM_8, VK_OEM_COMMA, VK_OEM_MINUS, VK_OEM_PERIOD, VK_OEM_PLUS, VK_PAUSE,
+    VK_OEM_6, VK_OEM_7, VK_OEM_8, VK_OEM_102, VK_OEM_COMMA, VK_OEM_MINUS, VK_OEM_PERIOD, VK_OEM_PLUS, VK_PAUSE,
     VK_PRIOR, VK_RETURN, VK_RIGHT, VK_RSHIFT, VK_RWIN, VK_SCROLL, VK_SHIFT, VK_SNAPSHOT, VK_SPACE,
     VK_SUBTRACT, VK_TAB, VK_UP, VK_VOLUME_DOWN, VK_VOLUME_MUTE, VK_VOLUME_UP,
 };
@@ -160,7 +160,12 @@ impl fmt::Display for Hotkey {
 /// that layout puts it, not where the name says. `OEM7` says the same thing
 /// without the implication.
 pub fn key_from_name(name: &str) -> Option<VIRTUAL_KEY> {
-    let upper = name.to_ascii_uppercase();
+    // `LAUNCH_APP2`, `Launch-App2` and `LaunchApp2` are the same key.
+    let upper: String = name
+        .to_ascii_uppercase()
+        .chars()
+        .filter(|c| !matches!(c, '_' | '-'))
+        .collect();
     let bytes = upper.as_bytes();
 
     // Single letter or digit: the virtual-key code is the ASCII code itself.
@@ -230,6 +235,9 @@ pub fn key_from_name(name: &str) -> Option<VIRTUAL_KEY> {
         "OEM6" | "RBRACKET" => VK_OEM_6,
         "OEM7" | "QUOTE" => VK_OEM_7,
         "OEM8" => VK_OEM_8,
+        // The extra key of an ISO keyboard, next to the left Shift: `<` and
+        // `>` on most European layouts.
+        "OEM102" | "<" | "LESS" => VK_OEM_102,
         "PLUS" | "EQUALS" => VK_OEM_PLUS,
         "COMMA" => VK_OEM_COMMA,
         "MINUS" => VK_OEM_MINUS,
@@ -251,6 +259,10 @@ pub fn key_from_name(name: &str) -> Option<VIRTUAL_KEY> {
         "BROWSERSEARCH" => VK_BROWSER_SEARCH,
         "BROWSERFAVORITES" => VK_BROWSER_FAVORITES,
         "BROWSERHOME" => VK_BROWSER_HOME,
+        "LAUNCHMAIL" => VK_LAUNCH_MAIL,
+        "LAUNCHMEDIA" | "LAUNCHMEDIASELECT" => VK_LAUNCH_MEDIA_SELECT,
+        "LAUNCHAPP1" => VK_LAUNCH_APP1,
+        "LAUNCHAPP2" => VK_LAUNCH_APP2,
 
         _ => return None,
     })
@@ -308,6 +320,7 @@ pub fn key_name(key: VIRTUAL_KEY) -> String {
         "OEM6",
         "OEM7",
         "OEM8",
+        "<",
         "Plus",
         "Comma",
         "Minus",
@@ -326,6 +339,10 @@ pub fn key_name(key: VIRTUAL_KEY) -> String {
         "BrowserSearch",
         "BrowserFavorites",
         "BrowserHome",
+        "LaunchMail",
+        "LaunchMedia",
+        "LaunchApp1",
+        "LaunchApp2",
     ] {
         if key_from_name(name) == Some(key) {
             return name.to_owned();
@@ -841,7 +858,14 @@ mod tests {
 
     #[test]
     fn round_trips_through_display() {
-        for text in ["Win+Shift+F12", "Ctrl+Alt+A", "Win+Space", "Ctrl+PageDown"] {
+        for text in [
+            "Win+Shift+F12",
+            "Ctrl+Alt+A",
+            "Win+Space",
+            "Ctrl+PageDown",
+            "Win+<",
+            "LaunchApp2",
+        ] {
             let hotkey = Hotkey::parse(text).expect("valid");
             assert_eq!(hotkey.to_string(), text);
         }
@@ -853,6 +877,13 @@ mod tests {
             Hotkey::parse("ctrl + alt + del"),
             Hotkey::parse("Ctrl+Alt+Delete")
         );
+    }
+
+    #[test]
+    fn understands_iso_and_launch_keys() {
+        assert_eq!(Hotkey::parse("Win+<").map(|h| h.key), Some(VK_OEM_102));
+        assert_eq!(Hotkey::parse("LAUNCH_APP2").map(|h| h.key), Some(VK_LAUNCH_APP2));
+        assert_eq!(Hotkey::parse("launch-mail").map(|h| h.key), Some(VK_LAUNCH_MAIL));
     }
 
     #[test]

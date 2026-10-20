@@ -132,6 +132,7 @@ const SYMBOLS: &[Entry] = &[
     (",", "Comma"),
     (".", "Period"),
     ("/", "OEM2"),
+    ("< (ISO)", "<"),
 ];
 const NUMPAD: &[Entry] = &[
     ("Num 0", "Numpad0"),
@@ -165,6 +166,10 @@ const MEDIA: &[Entry] = &[
     ("Search", "BrowserSearch"),
     ("Favorites", "BrowserFavorites"),
     ("Home page", "BrowserHome"),
+    ("Mail", "LaunchMail"),
+    ("Media player", "LaunchMedia"),
+    ("App 1", "LaunchApp1"),
+    ("App 2", "LaunchApp2"),
 ];
 
 impl KeyCategory {

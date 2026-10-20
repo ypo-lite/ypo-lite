@@ -16,7 +16,7 @@ mod browse;
 mod menu;
 
 use windows::Win32::UI::WindowsAndMessaging::{
-    HMENU, MB_ICONINFORMATION, MB_OK, MessageBoxW, WM_DRAWITEM, WM_HOTKEY, WM_INITMENUPOPUP,
+    HMENU, MB_ICONINFORMATION, MB_OK, MessageBoxW, WM_DRAWITEM, WM_HOTKEY, WM_INITMENUPOPUP, WM_MENUCHAR,
     WM_MEASUREITEM,
 };
 use windows::core::{HSTRING, PCWSTR};
@@ -332,6 +332,12 @@ impl TrayApp for YPop {
         }
         if msg == WM_DRAWITEM && y_core::menu::handle_draw_item(lparam) {
             return Some(LRESULT(1));
+        }
+
+        // A themed popup's labels are owner-drawn, so Windows cannot match
+        // a typed key to an `&` mnemonic itself — see `handle_menu_char`.
+        if msg == WM_MENUCHAR {
+            return y_core::menu::handle_menu_char(wparam, lparam);
         }
 
         // Registered at run time, so a guard rather than a constant pattern;

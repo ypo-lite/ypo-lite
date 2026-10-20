@@ -60,13 +60,13 @@
 //! [`ItemKind`] needing to be visible to both — plain private items still
 //! reach `paint` for free, since it's a child module of this one.
 
-use windows::Win32::Foundation::{HWND, LPARAM, POINT, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::Graphics::Gdi::{CreateSolidBrush, DeleteObject, HBITMAP};
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, DestroyMenu, GetMenuInfo, GetMenuItemCount, GetMenuItemInfoW,
     HMENU, MENU_ITEM_FLAGS, MENUINFO, MENUITEMINFOW, MF_CHECKED, MF_DISABLED, MF_GRAYED,
-    MF_MENUBREAK, MF_OWNERDRAW, MF_POPUP, MF_SEPARATOR, MF_STRING, MFT_OWNERDRAW, MIIM_BITMAP,
-    MIIM_DATA, MIIM_FTYPE, MIIM_SUBMENU, MIM_BACKGROUND, PostMessageW, SetForegroundWindow,
+    MF_MENUBREAK, MF_OWNERDRAW, MF_POPUP, MF_SEPARATOR, MF_STRING, MFS_DISABLED, MFS_HILITE,
+    MFT_OWNERDRAW, MIIM_BITMAP, MIIM_DATA, MIIM_FTYPE, MIIM_STATE, MIIM_SUBMENU, MIM_BACKGROUND, PostMessageW, SetForegroundWindow,
     SetMenuInfo, SetMenuItemInfoW, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD,
     TPM_RIGHTBUTTON, TrackPopupMenu, WM_NULL,
 };
@@ -78,6 +78,92 @@ use crate::overlay::Color;
 
 pub mod paint;
 pub use paint::{ICON_SIZE, handle_draw_item, handle_measure_item};
+
+/// The mnemonic of a label — `P&ageant` is `a`, `&&` is a literal ampersand
+/// and not one — lowercased for comparison.
+fn mnemonic(text: &[u16]) -> Option<char> {
+    let mut units = text.iter().copied();
+    while let Some(unit) = units.next() {
+        if unit == b'&' as u16 {
+            let next = units.next()?;
+            if next != b'&' as u16 {
+                return char::from_u32(next as u32)?.to_lowercase().next();
+            }
+        }
+    }
+    None
+}
+
+/// `text` as it reads once the mnemonic markers are taken out (`P&ageant` →
+/// `Pageant`, `R&&D` → `R&D`) — what [`paint::handle_measure_item`] must
+/// measure, since `DrawText` will not draw the markers either.
+fn without_mnemonic_markers(text: &[u16]) -> Vec<u16> {
+    let mut plain = Vec::with_capacity(text.len());
+    let mut units = text.iter().copied();
+    while let Some(unit) = units.next() {
+        if unit == b'&' as u16 {
+            match units.next() {
+                Some(next) => plain.push(next),
+                None => break,
+            }
+        } else {
+            plain.push(unit);
+        }
+    }
+    plain
+}
+
+/// Handles `WM_MENUCHAR` — a key typed while a menu is open that matched no
+/// mnemonic as far as Windows can tell. For an owner-drawn (themed) item
+/// that is *every* mnemonic: Windows never sees the label (see the module
+/// doc), so choosing `P&ageant` by pressing `A` is this function's job.
+/// Returns the `LRESULT` to give back, or `None` for a key no item claims
+/// (let `DefWindowProc` beep).
+///
+/// One match is executed straight away; several are cycled through, one per
+/// key press, starting after the highlighted item — Windows' own behaviour
+/// for duplicate mnemonics.
+pub fn handle_menu_char(wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
+    const MNC_EXECUTE: isize = 2;
+    const MNC_SELECT: isize = 3;
+
+    let typed = char::from_u32((wparam.0 & 0xFFFF) as u32)?.to_lowercase().next()?;
+    let menu = HMENU(lparam.0 as *mut _);
+
+    let mut matches = Vec::new();
+    let mut highlighted = None;
+    for index in 0..item_count(menu) {
+        let mut info: MENUITEMINFOW = unsafe { std::mem::zeroed() };
+        info.cbSize = size_of::<MENUITEMINFOW>() as u32;
+        info.fMask = MIIM_FTYPE | MIIM_DATA | MIIM_STATE;
+        if unsafe { GetMenuItemInfoW(menu, index, true, &mut info) }.is_err() {
+            continue;
+        }
+        if info.fState.contains(MFS_HILITE) {
+            highlighted = Some(index);
+        }
+        if !info.fType.contains(MFT_OWNERDRAW)
+            || info.dwItemData == 0
+            || info.fState.contains(MFS_DISABLED)
+        {
+            continue;
+        }
+        let data = unsafe { &*(info.dwItemData as *const ItemData) };
+        if matches!(data.kind, ItemKind::Normal) && mnemonic(&data.text) == Some(typed) {
+            matches.push(index);
+        }
+    }
+
+    let first = *matches.first()?;
+    let (index, action) = match matches.as_slice() {
+        [only] => (*only, MNC_EXECUTE),
+        several => {
+            let after = highlighted.and_then(|h| several.iter().copied().find(|&i| i > h));
+            (after.unwrap_or(first), MNC_SELECT)
+        }
+    };
+    Some(LRESULT((action << 16) | index as isize))
+}
 
 pub struct PopupMenu {
     handle: HMENU,
@@ -904,6 +990,27 @@ mod tests {
     };
 
     use super::*;
+
+    fn wide(text: &str) -> Vec<u16> {
+        text.encode_utf16().collect()
+    }
+
+    #[test]
+    fn a_mnemonic_is_the_character_after_a_single_ampersand() {
+        assert_eq!(mnemonic(&wide("P&ageant")), Some('a'));
+        assert_eq!(mnemonic(&wide("&Word")), Some('w'));
+        assert_eq!(mnemonic(&wide("R&&D")), None);
+        assert_eq!(mnemonic(&wide("R&&D &Labs")), Some('l'));
+        assert_eq!(mnemonic(&wide("Plain")), None);
+        assert_eq!(mnemonic(&wide("Trailing&")), None);
+    }
+
+    #[test]
+    fn mnemonic_markers_are_stripped_for_measuring() {
+        assert_eq!(without_mnemonic_markers(&wide("P&ageant")), wide("Pageant"));
+        assert_eq!(without_mnemonic_markers(&wide("R&&D")), wide("R&D"));
+        assert_eq!(without_mnemonic_markers(&wide("Trailing&")), wide("Trailing"));
+    }
 
     /// Today's exact look (see [`MenuDesign::padding`]/[`MenuDesign::
     /// margin`]'s doc comments): zero-size/zero-round border, no padding,

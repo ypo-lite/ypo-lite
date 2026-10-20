@@ -105,10 +105,12 @@ pub fn handle_measure_item(lparam: LPARAM) -> bool {
     let mut size = SIZE::default();
     // An empty string measures as zero width, which would starve an
     // untitled separator of the padding it still needs on either side.
-    let text: Vec<u16> = if data.text.is_empty() {
-        vec![b' ' as u16]
-    } else {
-        data.text.clone()
+    let text: Vec<u16> = match data.kind {
+        _ if data.text.is_empty() => vec![b' ' as u16],
+        // `DrawText` swallows the mnemonic markers of a label — measure it
+        // the way it will be drawn.
+        ItemKind::Normal => super::without_mnemonic_markers(&data.text),
+        ItemKind::Separator => data.text.clone(),
     };
     let _ = unsafe { GetTextExtentPoint32W(hdc, &text, &mut size) };
 
@@ -501,9 +503,11 @@ fn draw_normal_item(hdc: HDC, rect: RECT, item_rect: RECT, data: &ItemData, text
     if let Some(shortcut) = &data.shortcut {
         let mut shortcut_rect = text_rect;
         shortcut_rect.right -= TEXT_PAD;
-        draw_text(hdc, shortcut.clone(), shortcut_rect, data.design.disabled_text, DT_RIGHT);
+        draw_text(hdc, shortcut.clone(), shortcut_rect, data.design.disabled_text, DT_RIGHT | DT_NOPREFIX);
     }
 
+    // Without `DT_NOPREFIX`: the label's `&` marks its mnemonic, which
+    // `DrawText` underlines (and `&&` draws as a literal ampersand).
     draw_text(hdc, data.text.clone(), text_rect, text_color, DT_LEFT);
 }
 
@@ -574,7 +578,7 @@ fn draw_text(
             hdc,
             &mut text,
             &mut rect,
-            align | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
+            align | DT_VCENTER | DT_SINGLELINE,
         );
     }
 }

@@ -51,10 +51,11 @@ use windows::Win32::Graphics::Gdi::{
 };
 use windows::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL};
 use windows::Win32::UI::Shell::{
-    ExtractIconExW, SHFILEINFOW, SHGetFileInfoW, SHGFI_ICON, SHGFI_SMALLICON,
-    SHGFI_USEFILEATTRIBUTES,
+    ExtractIconExW, SHFILEINFOW, SHGSI_ICON, SHGSI_SMALLICON, SHGetFileInfoW, SHGetStockIconInfo,
+    SHGFI_ICON, SHGFI_SMALLICON, SHGFI_USEFILEATTRIBUTES, SHSTOCKICONID, SHSTOCKICONINFO,
+    SIID_DELETE, SIID_INFO, SIID_SETTINGS,
 };
-use windows::Win32::UI::WindowsAndMessaging::{CopyIcon, DI_NORMAL, DestroyIcon, DrawIconEx, HICON};
+use windows::Win32::UI::WindowsAndMessaging::{CopyIcon, DI_MASK, DI_NORMAL, DestroyIcon, DrawIconEx, HICON};
 use windows::core::HSTRING;
 
 /// An icon this process extracted — [`Drop`] destroys the underlying
@@ -142,6 +143,19 @@ impl Icon {
         // needing to know which convention the other expects.
         let pixels =
             unsafe { std::slice::from_raw_parts_mut(bits.cast::<u8>(), (size as usize) * (size as usize) * 4) };
+
+        // A classic icon (PuTTY's, Pageant's: 4/8-bit colour plus an AND
+        // mask) has no alpha channel, so GDI draws its colours into the DIB
+        // and leaves every alpha byte at 0 — premultiplied below, that is a
+        // fully invisible icon. Rebuild the alpha from the icon's mask.
+        if pixels.chunks_exact(4).all(|pixel| pixel[3] == 0)
+            && let Some(mask) = self.mask(size)
+        {
+            for (pixel, covered) in pixels.chunks_exact_mut(4).zip(mask) {
+                pixel[3] = if covered { 255 } else { 0 };
+            }
+        }
+
         for pixel in pixels.chunks_exact_mut(4) {
             let a = pixel[3] as u32;
             pixel[0] = ((pixel[0] as u32 * a) / 255) as u8; // B
@@ -150,6 +164,54 @@ impl Icon {
         }
 
         Some(Bitmap(bitmap))
+    }
+
+    /// Which pixels of this icon are opaque, per its AND mask (`DI_MASK`
+    /// draws black where the icon covers the pixel, white where it lets the
+    /// background through). Row order is the DIB's own (bottom-up), the same
+    /// as [`Icon::to_bitmap`]'s, so the two line up pixel for pixel. `None`
+    /// if the scratch bitmap cannot be made.
+    fn mask(&self, size: i32) -> Option<Vec<bool>> {
+        let info = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: size,
+                biHeight: size,
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let mut bits: *mut c_void = std::ptr::null_mut();
+        let bitmap =
+            unsafe { CreateDIBSection(None, &info, DIB_RGB_COLORS, &mut bits, None, 0) }.ok()?;
+        if bits.is_null() {
+            let _ = unsafe { DeleteObject(bitmap.into()) };
+            return None;
+        }
+        let len = (size as usize) * (size as usize) * 4;
+        // White first: anything the mask does not paint black is transparent.
+        unsafe { std::ptr::write_bytes(bits.cast::<u8>(), 0xFF, len) };
+
+        let dc = unsafe { CreateCompatibleDC(None) };
+        if dc.is_invalid() {
+            let _ = unsafe { DeleteObject(bitmap.into()) };
+            return None;
+        }
+        let previous = unsafe { SelectObject(dc, bitmap.into()) };
+        let drawn = unsafe { DrawIconEx(dc, 0, 0, self.0, size, size, 0, None, DI_MASK) };
+        unsafe { SelectObject(dc, previous) };
+        let _ = unsafe { DeleteDC(dc) };
+
+        let mask = drawn.is_ok().then(|| {
+            let pixels = unsafe { std::slice::from_raw_parts(bits.cast::<u8>(), len) };
+            pixels.chunks_exact(4).map(|pixel| pixel[0] == 0).collect()
+        });
+        let _ = unsafe { DeleteObject(bitmap.into()) };
+        mask
     }
 }
 
@@ -203,6 +265,30 @@ enum CacheKey {
     Extension(String),
     /// Shared by every directory, name aside.
     Directory,
+    /// One of the shell's stock icons (see [`StockIcon`]).
+    Stock(i32),
+}
+
+/// A shell stock icon — for the menu entries that have no file to take an
+/// icon from.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum StockIcon {
+    /// The blue "i".
+    Info,
+    /// The red cross.
+    Delete,
+    /// The cog.
+    Settings,
+}
+
+impl StockIcon {
+    fn id(self) -> SHSTOCKICONID {
+        match self {
+            Self::Info => SIID_INFO,
+            Self::Delete => SIID_DELETE,
+            Self::Settings => SIID_SETTINGS,
+        }
+    }
 }
 
 /// Resolves and caches icons — see the module doc for the two shapes and
@@ -246,6 +332,24 @@ impl IconCache {
                 } else {
                     shell_icon(path, false)
                 }
+            })
+            .as_ref()
+            .and_then(Icon::duplicate)
+    }
+
+    /// A shell stock icon, small size. `None` if Windows has none to give.
+    pub fn for_stock(&mut self, stock: StockIcon) -> Option<Icon> {
+        self.cache
+            .entry(CacheKey::Stock(stock.id().0))
+            .or_insert_with(|| {
+                let mut info = SHSTOCKICONINFO {
+                    cbSize: size_of::<SHSTOCKICONINFO>() as u32,
+                    ..Default::default()
+                };
+                unsafe { SHGetStockIconInfo(stock.id(), SHGSI_ICON | SHGSI_SMALLICON, &mut info) }
+                    .ok()
+                    .filter(|()| !info.hIcon.is_invalid())
+                    .map(|()| Icon(info.hIcon))
             })
             .as_ref()
             .and_then(Icon::duplicate)

@@ -76,7 +76,7 @@ use windows::Win32::Graphics::Gdi::HBITMAP;
 use windows::Win32::UI::WindowsAndMessaging::HMENU;
 use windows::core::Result;
 
-use y_core::icon::{Bitmap, Icon, IconCache};
+use y_core::icon::{Bitmap, Icon, IconCache, StockIcon};
 use y_core::ids::IDM_FIRST;
 use y_core::menu::{self, MenuDesign, PopupMenu};
 
@@ -174,9 +174,10 @@ impl Session {
 /// the generic folder icon for a `Group` (PortAL's own default — confirmed
 /// against a screenshot of PortAL's stock menu, not assumed — every
 /// submenu shows a folder unless its config gives it something else), the
-/// icon its own `exe` carries for an `App`. Nothing else (`About`, `Quit`,
-/// a titled `Separator`) gets a default; PortAL does not derive one for
-/// those either.
+/// icon its own `exe` carries for an `App`, a shell stock icon for `About`
+/// (info), `Quit` (red cross) and `Settings` (cog) — a divergence from
+/// PortAL, which left those bare; `icon=` on the node still overrides. A
+/// titled `Separator` gets none.
 fn resolve_icon(icons: &mut IconCache, node: &NodeData) -> Option<Icon> {
     if let Some(source) = &node.icon {
         return icons.for_file(&source.path, source.index);
@@ -188,6 +189,9 @@ fn resolve_icon(icons: &mut IconCache, node: &NodeData) -> Option<Icon> {
         // directory name that happens to contain a '.'.
         NodeKind::App(app) if app.browse.is_some() => icons.for_directory(),
         NodeKind::App(app) => icons.for_file(app.exe.as_deref()?, None),
+        NodeKind::About => icons.for_stock(StockIcon::Info),
+        NodeKind::Quit => icons.for_stock(StockIcon::Delete),
+        NodeKind::Settings => icons.for_stock(StockIcon::Settings),
         _ => None,
     }
 }
@@ -334,10 +338,12 @@ pub fn on_init_menu_popup(session: &mut Session, hmenu: HMENU) {
     }
 
     for entry in entries {
+        // A file called "R&D" is not a menu mnemonic.
+        let label = entry.name.replace('&', "&&");
         if entry.is_dir {
             let icon = session.icons.for_directory();
             if entry.browsable {
-                let Ok(submenu) = menu::append_submenu(hmenu, &entry.name, session.design) else {
+                let Ok(submenu) = menu::append_submenu(hmenu, &label, session.design) else {
                     continue;
                 };
                 let position = menu::item_count(hmenu).saturating_sub(1);
@@ -360,14 +366,14 @@ pub fn on_init_menu_popup(session: &mut Session, hmenu: HMENU) {
                 // no submenu, that opens the folder itself instead of
                 // listing further.
                 let id = session.next_discovered_id();
-                let _ = menu::append_item(hmenu, id, &entry.name, session.design);
+                let _ = menu::append_item(hmenu, id, &label, session.design);
                 session.attach_icon(icon, |bitmap| menu::set_item_icon(hmenu, id, bitmap));
                 session.discovered.insert(id, open_folder_app(&entry.path));
             }
         } else {
             let icon = session.icons.for_file(&entry.path, None);
             let id = session.next_discovered_id();
-            let _ = menu::append_item(hmenu, id, &entry.name, session.design);
+            let _ = menu::append_item(hmenu, id, &label, session.design);
             session.attach_icon(icon, |bitmap| menu::set_item_icon(hmenu, id, bitmap));
 
             session.discovered.insert(
@@ -829,7 +835,7 @@ mod tests {
     }
 
     #[test]
-    fn quit_gets_no_icon_by_default() {
+    fn quit_gets_a_stock_icon_by_default() {
         let _guard = serialized();
         let tree = config::load_str(
             r#"<y-pop><group name="Root"><quit/></group></y-pop>"#,
@@ -840,7 +846,7 @@ mod tests {
         let quit_id = tree.children(root).next().expect("one child");
 
         let (popup, _session) = build(&tree, root);
-        assert!(!item_has_icon(popup.handle(), IDM_FIRST + quit_id.as_u32()));
+        assert!(item_has_icon(popup.handle(), IDM_FIRST + quit_id.as_u32()));
     }
 
     /// The bug report this feature exists for: `show-shortcuts="true"` (the
