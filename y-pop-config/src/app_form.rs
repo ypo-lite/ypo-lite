@@ -121,11 +121,11 @@ fn target(
         let label = if folder { "Folder" } else { "Program or file" };
         let placeholder = if folder { r"%mydocs%\Projects" } else { r"%programfiles%\App\app.exe" };
 
-        let browse: View = button("Browse…", false, false, context.callback(|()| Msg::Ignored));
+        let browse: View = button("Browse…", false, true, context.callback(move |()| Msg::Menu(MenuMsg::Browse(id))));
         let tools = AutoGrid::new(180.0)
             .max_columns(2)
             .item("insert", insert_variable(settings, id, TextField::Target, &raw, false, context))
-            .item("browse", browse.tooltip("Comes with the file dialog"))
+            .item("browse", browse.tooltip(if folder { "Choose a folder" } else { "Choose a program or file" }))
             .build(viewport);
 
         let expanded = settings.expand_text(&raw, &mut *ui.builtins.borrow_mut());

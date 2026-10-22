@@ -46,8 +46,8 @@ use std::collections::HashMap;
 use std::ffi::c_void;
 
 use windows::Win32::Graphics::Gdi::{
-    BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateCompatibleDC, CreateDIBSection, DIB_RGB_COLORS,
-    DeleteDC, DeleteObject, HBITMAP, SelectObject,
+    BI_RGB, BITMAP, BITMAPINFO, BITMAPINFOHEADER, CreateCompatibleDC, CreateDIBSection, DIB_RGB_COLORS,
+    DeleteDC, DeleteObject, GetObjectW, HBITMAP, SelectObject,
 };
 use windows::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL};
 use windows::Win32::UI::Shell::{
@@ -219,6 +219,26 @@ impl Icon {
         Some(Bitmap(bitmap))
     }
 
+    /// This icon as PNG bytes, `size`×`size` with straight alpha — what a UI
+    /// toolkit that loads images from encoded data wants (`windows-reactor`'s
+    /// `Image::source_data`). Goes through [`Icon::to_bitmap`], so it draws
+    /// and handles masks the same way; `None` if that fails.
+    pub fn to_png(&self, size: i32) -> Option<Vec<u8>> {
+        let bgra = self.to_bitmap(size)?.pixels(size)?;
+        let row = size as usize * 4;
+        let mut rgba = Vec::with_capacity(bgra.len());
+        // The bitmap is bottom-up and premultiplied; a PNG is top-down and straight.
+        for line in bgra.chunks_exact(row).rev() {
+            for pixel in line.chunks_exact(4) {
+                let alpha = pixel[3] as u32;
+                let straight = |channel: u8| (channel as u32 * 255).checked_div(alpha).map_or(0, |value| value.min(255) as u8);
+                rgba.extend_from_slice(&[straight(pixel[2]), straight(pixel[1]), straight(pixel[0]), pixel[3]]);
+            }
+        }
+        let png = crate::png::encode_rgba(size as u32, size as u32, &rgba);
+        (!png.is_empty()).then_some(png)
+    }
+
     /// Which pixels of this icon are opaque, per its AND mask (`DI_MASK`
     /// draws black where the icon covers the pixel, white where it lets the
     /// background through). Row order is the DIB's own (bottom-up), the same
@@ -285,6 +305,21 @@ pub struct Bitmap(HBITMAP);
 impl Bitmap {
     pub fn handle(&self) -> HBITMAP {
         self.0
+    }
+
+    /// A copy of the pixels of a `size`×`size` 32-bit DIB section (what
+    /// [`Icon::to_bitmap`] makes): BGRA, bottom row first. `None` for a
+    /// bitmap that is not one.
+    fn pixels(&self, size: i32) -> Option<Vec<u8>> {
+        let mut info = BITMAP::default();
+        let got = unsafe {
+            GetObjectW(self.0.into(), size_of::<BITMAP>() as i32, Some((&mut info as *mut BITMAP).cast::<c_void>()))
+        };
+        let len = size as usize * size as usize * 4;
+        if got == 0 || info.bmBits.is_null() || info.bmWidth != size || info.bmHeight != size {
+            return None;
+        }
+        Some(unsafe { std::slice::from_raw_parts(info.bmBits.cast::<u8>(), len) }.to_vec())
     }
 }
 
@@ -430,6 +465,15 @@ impl IconCache {
     }
 }
 
+
+/// How many icons the file at `path` holds (`.exe`, `.dll`, `.ico`…), 0 if
+/// it has none or cannot be read. The positions `0..count` are what
+/// [`IconCache::for_file`] takes as an index.
+pub fn count_in_file(path: &str) -> u32 {
+    let wide = HSTRING::from(path);
+    // Index -1 with no buffers asks only for the count.
+    unsafe { ExtractIconExW(&wide, -1, None, None, 0) }
+}
 fn extract_own_icon(path: &str, index: i32) -> Option<Icon> {
     let wide = HSTRING::from(path);
     let mut icon = HICON::default();
@@ -527,6 +571,30 @@ mod tests {
             + r"\notepad.exe";
         let icon = cache.for_file(&notepad, None);
         assert!(icon.is_some(), "notepad.exe should have an icon");
+    }
+
+    #[test]
+    fn counts_the_icons_in_a_real_file() {
+        let dll = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_owned())
+            + r"\System32\shell32.dll";
+        assert!(count_in_file(&dll) > 100);
+        assert_eq!(count_in_file(r"C:\no\such\file.dll"), 0);
+    }
+
+    #[test]
+    fn converts_to_png_bytes_that_are_not_blank() {
+        let _guard = serialized();
+        let mut cache = IconCache::new();
+        let notepad = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_owned())
+            + r"\notepad.exe";
+        let icon = cache.for_file(&notepad, None).expect("notepad.exe has an icon");
+        let png = icon.to_png(32).expect("converts to a PNG");
+        assert_eq!(&png[1..4], b"PNG");
+        // IHDR says 32×32, and the pixels are not all one transparent value.
+        assert_eq!(&png[16..24], &[0, 0, 0, 32, 0, 0, 0, 32]);
+        let idat = png.windows(4).position(|w| w == b"IDAT").expect("an IDAT chunk");
+        let pixels = &png[idat + 4 + 2 + 5..];
+        assert!(pixels[..32 * 4].iter().any(|&b| b != 0) || pixels[32 * 4..2000].iter().any(|&b| b != 0));
     }
 
     #[test]

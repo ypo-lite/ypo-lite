@@ -25,6 +25,8 @@
 
 mod general;
 mod app_form;
+mod app_icons;
+mod icon_picker;
 mod inspector;
 mod menu_edit;
 mod menu_view;
@@ -113,6 +115,10 @@ struct ConfigApp {
     target_stash: HashMap<ItemId, (Option<String>, Option<String>)>,
     /// What "Run now" last did, for the status bar: the text and whether it went well.
     run_status: Option<(String, bool)>,
+    /// The icons of the items, loaded in the background (`app_icons`).
+    icons: app_icons::IconStore,
+    /// The icon picker modal, when one is open.
+    icon_picker: icon_picker::IconPickerUi,
     /// Renders what is copied while the window is alive — see
     /// `y_core::shell::ClipboardFlusher`. Held only for its `Drop`.
     _clipboard: Option<y_core::shell::ClipboardFlusher>,
@@ -212,6 +218,11 @@ enum Msg {
     /// A control reported "nothing chosen": not an edit.
     Ignored,
 
+    /// An item's icon came back from the thread pool (PNG bytes, or none found).
+    IconLoaded(app_icons::IconSpec, Option<Vec<u8>>),
+    /// The icon picker.
+    Icon(icon_picker::IconMsg),
+
     // Variables
     VarNameChanged(usize, String),
     VarValueChanged(usize, String),
@@ -244,7 +255,7 @@ impl Component for ConfigApp {
     type Input = ();
     type Message = Msg;
 
-    fn create(_input: &(), _context: &ComponentContext<Self>) -> Self {
+    fn create(_input: &(), context: &ComponentContext<Self>) -> Self {
         let path = config::path();
         let prefs = Prefs::load(&prefs::path_for(&path));
         let (settings, missing) = load(&path);
@@ -259,7 +270,7 @@ impl Component for ConfigApp {
             _ => Screen::General,
         };
 
-        Self {
+        let mut app = Self {
             settings,
             path,
             missing,
@@ -281,13 +292,17 @@ impl Component for ConfigApp {
             hotkeys: menu_view::HotkeyUi::default(),
             target_stash: HashMap::new(),
             run_status: None,
+            icons: app_icons::IconStore::default(),
+            icon_picker: icon_picker::IconPickerUi::default(),
             _clipboard: y_core::shell::ClipboardFlusher::start(),
             notes_ready: false,
             window_width: shell::INITIAL_WINDOW.0,
-        }
+        };
+        app.request_icons(context);
+        app
     }
 
-    fn update(&mut self, message: Msg, _context: &ComponentContext<Self>) {
+    fn update(&mut self, message: Msg, context: &ComponentContext<Self>) {
         match message {
             Msg::WindowResized(size) => self.window_width = size.width,
             Msg::WarningsDismissed => self.warnings_dismissed = true,
@@ -324,9 +339,12 @@ impl Component for ConfigApp {
 
             Msg::Menu(message) => self.edit_menu(message),
             Msg::Ignored => {}
+            Msg::IconLoaded(spec, png) => self.icons.finish(spec, png),
+            Msg::Icon(message) => self.edit_icon(message),
 
             other => self.edit(other),
         }
+        self.request_icons(context);
     }
 
     fn view(&self, _input: &(), context: &mut ViewContext<Self>) -> View {
@@ -381,6 +399,7 @@ impl Component for ConfigApp {
                     show_comments: self.prefs.show_comments,
                     confirming_delete: self.confirming_delete == Some(id),
                     builtins: &self.builtins,
+                    icons: &self.icons,
                 },
                 viewport,
                 context,
@@ -431,12 +450,24 @@ impl Component for ConfigApp {
 
         // Nav takes the height the bar doesn't (`Star` over `Auto`).
         let app: View = Grid::new().rows([GridLength::STAR, GridLength::Auto]).keyed_children([("nav", nav), ("bar", bar)]);
-
-        // The hotkey picker covers the whole window, bar included.
-        match inspector::hotkey_modal(settings, &self.hotkeys, Viewport::new(self.window_width), context) {
-            Some(modal) => Grid::new().keyed_children([("app", app), ("modal", modal)]),
-            None => app,
-        }
+        // A picker covers the whole window, bar included.
+        let window = Viewport::new(self.window_width);
+        let modal = inspector::hotkey_modal(settings, &self.hotkeys, window, context).or_else(|| {
+            icon_picker::icon_modal(
+                settings,
+                &self.icon_picker,
+                &mut *self.builtins.borrow_mut(),
+                &self.icons,
+                window,
+                context,
+            )
+        });
+        // Always the same wrapper, the app always its first child: if the root
+        // changed shape when a picker opened, the reactor would rebuild the
+        // whole app under it and every scroll position would be lost.
+        let mut layers = vec![("app", app)];
+        layers.extend(modal.map(|modal| ("modal", modal)));
+        Grid::new().keyed_children(layers)
     }
 }
 
@@ -453,6 +484,28 @@ impl ConfigApp {
 }
 
 impl ConfigApp {
+    /// Starts loading, on the thread pool, every icon the tree shows that has
+    /// not been asked for yet. Called after every message: an edit to a
+    /// target or an `icon=` can make a new one necessary.
+    fn request_icons(&mut self, context: &ComponentContext<Self>) {
+        let Ok(settings) = &self.settings else { return };
+        let wanted: Vec<app_icons::IconSpec> = {
+            let mut builtins = self.builtins.borrow_mut();
+            let mut wanted: Vec<_> =
+                settings.items().filter_map(|item| app_icons::spec_for(settings, item, &mut *builtins)).collect();
+            wanted.extend(self.icon_picker.visible());
+            wanted
+        };
+        for spec in wanted {
+            if self.icons.begin(&spec) {
+                context.spawn_background(move |_| {
+                    let png = app_icons::load_png(&spec);
+                    Msg::IconLoaded(spec, png)
+                });
+            }
+        }
+    }
+
     /// Changes screen and remembers it for the next run.
     fn go(&mut self, screen: Screen) {
         if screen != self.screen {
@@ -862,6 +915,8 @@ fn test_app(settings: Settings) -> ConfigApp {
             hotkeys: menu_view::HotkeyUi::default(),
             target_stash: HashMap::new(),
             run_status: None,
+            icons: app_icons::IconStore::default(),
+            icon_picker: icon_picker::IconPickerUi::default(),
             _clipboard: None,
             notes_ready: true,
             window_width: 1000.0,

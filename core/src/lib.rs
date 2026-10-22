@@ -72,6 +72,8 @@ pub mod app;
 #[cfg(feature = "win")]
 pub mod config;
 #[cfg(feature = "win")]
+pub mod dialog;
+#[cfg(feature = "win")]
 pub mod hotkey;
 #[cfg(feature = "win")]
 pub mod icon;
@@ -83,6 +85,7 @@ pub mod known_folders;
 pub mod memory;
 #[cfg(feature = "win")]
 pub mod menu;
+pub mod png;
 #[cfg(feature = "win")]
 pub mod monitor;
 #[cfg(feature = "win")]

@@ -363,3 +363,46 @@ fn launch_and_folder_fields_set_and_clear_their_attributes() {
     assert_eq!(crate::menu_edit::depth_words(0), "files only, no subfolders");
     assert_eq!(crate::menu_edit::depth_words(1), "1 level of subfolders");
 }
+
+fn icon_of(app: &ConfigApp, name: &str) -> Option<String> {
+    tree::item(settings(app), id(app, name)).expect("an item").icon.clone()
+}
+
+#[test]
+fn the_icon_picker_commits_live_and_cancel_puts_the_old_value_back() {
+    use crate::icon_picker::{IconMsg, Source};
+
+    let mut app = app();
+    let a = id(&app, "A");
+
+    app.edit_icon(IconMsg::Open(a));
+    assert_eq!(app.icon_picker.open, Some(a));
+    // `a.exe` is not a file: its own program offers nothing to pick from.
+    assert!(app.icon_picker.visible().is_empty());
+
+    app.edit_icon(IconMsg::Source(Source::Named(0)));
+    assert_eq!(app.icon_picker.visible().len(), 96);
+    app.edit_icon(IconMsg::Pick(Some(3)));
+    assert_eq!(icon_of(&app, "A").as_deref(), Some(r"%system%\shell32.dll,3"));
+    assert!(app.dirty);
+
+    // Next page, then Cancel: the item is as it was.
+    app.edit_icon(IconMsg::Page(1));
+    assert_eq!(app.icon_picker.visible().len(), 96);
+    app.edit_icon(IconMsg::Closed { accepted: false });
+    assert_eq!(icon_of(&app, "A"), None);
+    assert_eq!(app.icon_picker.open, None);
+
+    // OK keeps; it reopens on the source the icon already comes from.
+    app.edit_icon(IconMsg::Open(a));
+    app.edit_icon(IconMsg::Source(Source::Named(1)));
+    app.edit_icon(IconMsg::Pick(Some(7)));
+    app.edit_icon(IconMsg::Closed { accepted: true });
+    assert_eq!(icon_of(&app, "A").as_deref(), Some(r"%system%\imageres.dll,7"));
+    app.edit_icon(IconMsg::Open(a));
+    assert_eq!(app.icon_picker.source, Some(Source::Named(1)));
+
+    // "From target" clears the attribute.
+    app.edit_icon(IconMsg::Pick(None));
+    assert_eq!(icon_of(&app, "A"), None);
+}

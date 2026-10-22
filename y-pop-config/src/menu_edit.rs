@@ -122,6 +122,8 @@ pub enum MenuMsg {
     TurnIntoMenu(ItemId),
     /// Launches the app as y-pop would.
     RunNow(ItemId),
+    /// Browse… beside the target: a file or folder dialog, whose answer becomes the target.
+    Browse(ItemId),
 
     // An app.
     TargetMode(ItemId, TargetMode),
@@ -210,6 +212,31 @@ impl ConfigApp {
         tree::item(settings, id)?.hotkeys.get(index).map(|entry| entry.key.clone())
     }
 
+    /// Asks for the target of the app `id` — a file, or a folder in Folder
+    /// mode — opening where the current one is. `None` if cancelled.
+    fn browse_target(&self, id: ItemId) -> Option<String> {
+        let settings = self.settings.as_ref().ok()?;
+        let item = tree::item(settings, id)?;
+        let ItemKind::App(fields) = &item.kind else { return None };
+        let folder = TargetMode::of(fields) == TargetMode::Folder;
+
+        let current = settings.expand_text(fields.exe.as_deref().unwrap_or_default(), &mut *self.builtins.borrow_mut());
+        let current = std::path::PathBuf::from(current.trim().trim_matches('"'));
+        let start = if current.is_dir() { Some(current) } else { current.parent().map(std::path::Path::to_path_buf) };
+
+        let options = y_core::dialog::OpenOptions {
+            title: Some(if folder { "Choose a folder" } else { "Choose a program or file" }),
+            filters: if folder { &[] } else { &[("Programs and shortcuts", "*.exe;*.lnk;*.bat;*.cmd"), ("All files", "*.*")] },
+            start_folder: start.as_deref(),
+            pick_folders: folder,
+            ..Default::default()
+        };
+        // The window being clicked is the foreground one.
+        let owner = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
+        let picked = y_core::dialog::open_files(Some(owner), &options).ok()?;
+        picked.into_iter().next().map(|path| path.to_string_lossy().into_owned())
+    }
+
     /// "Run now": launches the app as y-pop would — expanded, with the
     /// current clipboard — and puts the outcome in the status bar.
     fn run_now(&mut self, id: ItemId) {
@@ -246,6 +273,18 @@ impl ConfigApp {
             }
             MenuMsg::XmlToggled => {
                 self.show_xml = !self.show_xml;
+                return;
+            }
+            MenuMsg::Browse(id) => {
+                if let Some(path) = self.browse_target(id) {
+                    self.run_status = None;
+                    if let Ok(settings) = &mut self.settings
+                        && let Some(item) = tree::item_mut(settings, id)
+                        && set_text(item, TextField::Target, path)
+                    {
+                        self.dirty = true;
+                    }
+                }
                 return;
             }
             MenuMsg::RunNow(id) => {
@@ -508,6 +547,7 @@ impl ConfigApp {
             | MenuMsg::XmlToggled
             | MenuMsg::HotkeyEdit(..)
             | MenuMsg::RunNow(_)
+            | MenuMsg::Browse(_)
             | MenuMsg::HotkeyCategory(_)
             | MenuMsg::HotkeySearch(_) => {}
         }
@@ -562,7 +602,7 @@ pub(crate) fn text_of(item: &y_pop::settings::Item, field: TextField) -> String 
 /// absent" depends on what the attribute is: a group or an app always has a
 /// name, but an empty title on a separator is a plain rule, and on About or
 /// Quit it is y-pop's own default word. Returns whether anything changed.
-fn set_text(item: &mut y_pop::settings::Item, field: TextField, text: String) -> bool {
+pub(crate) fn set_text(item: &mut y_pop::settings::Item, field: TextField, text: String) -> bool {
     let absent_when_empty = |text: String| (!text.is_empty()).then_some(text);
 
     // Set `slot` to `new` if it differs.

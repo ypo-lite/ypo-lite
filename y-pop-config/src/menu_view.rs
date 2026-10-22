@@ -29,6 +29,7 @@ pub struct MenuUi<'a> {
     pub show_comments: bool,
     /// Resolves `%builtins%` for the target readout; filled lazily.
     pub builtins: &'a std::cell::RefCell<y_pop::builtins::Builtins>,
+    pub icons: &'a crate::app_icons::IconStore,
     /// "Delete this tray menu?" is waiting for an answer.
     pub confirming_delete: bool,
 }
@@ -319,7 +320,7 @@ fn row_body(settings: &Settings, item: &Item, ui: &MenuUi<'_>) -> View {
         ItemKind::Break => text::caption("— column break —").into(),
         kind => {
             let mut parts = Stack::horizontal(space::S)
-                .child("icon", SymbolIcon::new().symbol(symbol_of(kind)))
+                .child("icon", ui.item_icon(settings, item, crate::app_icons::SHOWN))
                 .child("name", text::single_line(roots::label(item)));
 
             if let ItemKind::App(app) = kind {
@@ -391,4 +392,13 @@ fn hidden_row(count: usize, indent: f64, context: &ViewContext<ConfigApp>) -> Vi
     Border::new()
         .margin(Thickness::new(indent + EXPAND_SLOT, 0.0, 0.0, 0.0))
         .content(Stack::horizontal(space::S).child("marker", marker).child("text", text::caption("hidden at the end")))
+}
+
+impl MenuUi<'_> {
+    /// `item`'s icon, `size` DIPs square: the real one once it has loaded,
+    /// its symbol until then (and where it has none).
+    pub fn item_icon(&self, settings: &Settings, item: &Item, size: f64) -> View {
+        let spec = crate::app_icons::spec_for(settings, item, &mut *self.builtins.borrow_mut());
+        crate::app_icons::icon_or_symbol(self.icons.image(spec.as_ref(), size), symbol_of(&item.kind), size)
+    }
 }

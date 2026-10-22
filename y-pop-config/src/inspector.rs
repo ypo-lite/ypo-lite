@@ -11,8 +11,9 @@
 
 use y_pop::settings::{Item, ItemId, ItemKind, Settings};
 
+use crate::icon_picker::IconMsg;
 use crate::menu_edit::{FlagField, MenuMsg, TextField, canonical_hotkey, split_hotkey};
-use crate::menu_view::{HotkeyUi, MenuUi, symbol_of};
+use crate::menu_view::{HotkeyUi, MenuUi};
 use crate::tree::{self, MoveDir};
 use crate::ui::key_picker::{KeyPickerEvents, combo_labels, key_picker};
 use crate::ui::editor::modal;
@@ -102,7 +103,7 @@ fn header(
         }
     };
     let identity: View = Stack::horizontal(space::M)
-        .child("icon", SymbolIcon::new().symbol(symbol_of(&item.kind)))
+        .child("icon", ui.item_icon(settings, item, 24.0))
         .child(
             "who",
             Stack::vertical(space::XXS)
@@ -199,7 +200,12 @@ fn fields(settings: &Settings, ui: &MenuUi<'_>, item: &Item, is_root: bool, view
     let icon = || {
         field(
             "Icon",
-            text_box(item.icon.clone().unwrap_or_default(), "From its target, or path,index", text_of(TextField::Icon)),
+            Stack::vertical(space::S)
+                .child("text", text_box(item.icon.clone().unwrap_or_default(), "From its target, or path,index", text_of(TextField::Icon)))
+                .child(
+                    "choose",
+                    button("Choose icon…", false, true, context.callback(move |()| Msg::Icon(IconMsg::Open(id)))),
+                ),
         )
     };
     let grid = |items: Vec<(&'static str, View)>| AutoGrid::new(200.0).max_columns(2).items(items).build(viewport);
