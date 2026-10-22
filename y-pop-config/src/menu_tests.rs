@@ -236,3 +236,75 @@ fn a_tray_menu_moves_among_the_others_and_its_screen_stays_open() {
     assert_eq!(order, ["Other", "Menu", "Task"]);
     assert_eq!(app.screen, Screen::Menu(menu), "it is addressed by id");
 }
+
+fn hotkeys_of(app: &ConfigApp, name: &str) -> Vec<(String, bool)> {
+    let item = tree::item(settings(app), id(app, name)).expect("an item");
+    item.hotkeys.iter().map(|entry| (entry.key.clone(), entry.can_override)).collect()
+}
+
+#[test]
+fn a_hotkey_is_built_from_modifiers_then_a_key_and_can_be_removed_with_undo() {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{MOD_CONTROL, MOD_WIN, VK_F5};
+
+    let mut app = app();
+    let a = id(&app, "A");
+    app.edit_menu(MenuMsg::HotkeyAdd(a));
+    assert_eq!(app.hotkeys.open, Some((a, 0)));
+    assert_eq!(hotkeys_of(&app, "A"), [(String::new(), false)]);
+
+    // Chips before the key: the modifiers are kept in the text.
+    app.edit_menu(MenuMsg::HotkeyModifier(a, 0, MOD_WIN));
+    app.edit_menu(MenuMsg::HotkeyModifier(a, 0, MOD_CONTROL));
+    assert_eq!(hotkeys_of(&app, "A")[0].0, "Win+Ctrl");
+    app.edit_menu(MenuMsg::HotkeyKey(a, 0, VK_F5));
+    assert_eq!(hotkeys_of(&app, "A")[0].0, "Win+Ctrl+F5");
+    app.edit_menu(MenuMsg::HotkeyModifier(a, 0, MOD_WIN));
+    assert_eq!(hotkeys_of(&app, "A")[0].0, "Ctrl+F5");
+
+    app.edit_menu(MenuMsg::HotkeyOverride(a, 0, true));
+    assert_eq!(hotkeys_of(&app, "A"), [("Ctrl+F5".to_owned(), true)]);
+
+    app.edit_menu(MenuMsg::HotkeyRemove(a, 0));
+    assert!(hotkeys_of(&app, "A").is_empty());
+    assert_eq!(app.hotkeys.open, None);
+    app.update_undo_for_test();
+    assert_eq!(hotkeys_of(&app, "A").len(), 1);
+}
+
+#[test]
+fn hotkey_texts_split_and_join_both_ways() {
+    use crate::menu_edit::{canonical_hotkey, join_hotkey, split_hotkey};
+
+    let (modifiers, key) = split_hotkey("win+SHIFT+f12");
+    assert_eq!(join_hotkey(modifiers, key), "Win+Shift+F12");
+    let (modifiers, key) = split_hotkey("Alt");
+    assert!(key.is_none());
+    assert_eq!(join_hotkey(modifiers, key), "Alt");
+    assert_eq!(canonical_hotkey("ctrl+alt+a"), canonical_hotkey("Alt+Ctrl+A"));
+    assert_eq!(canonical_hotkey("Ctrl+"), None);
+}
+
+#[test]
+fn cancelling_the_hotkey_dialog_restores_the_hotkey_and_drops_a_new_one() {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{VK_F5, VK_F6};
+
+    let mut app = app();
+    let a = id(&app, "A");
+
+    // A new hotkey that is cancelled never reaches the file.
+    app.edit_menu(MenuMsg::HotkeyAdd(a));
+    app.edit_menu(MenuMsg::HotkeyKey(a, 0, VK_F5));
+    app.edit_menu(MenuMsg::HotkeyClosed { accepted: false });
+    assert!(hotkeys_of(&app, "A").is_empty());
+    assert_eq!(app.hotkeys.open, None);
+
+    // OK keeps it; editing it again and cancelling goes back to it.
+    app.edit_menu(MenuMsg::HotkeyAdd(a));
+    app.edit_menu(MenuMsg::HotkeyKey(a, 0, VK_F5));
+    app.edit_menu(MenuMsg::HotkeyClosed { accepted: true });
+    app.edit_menu(MenuMsg::HotkeyEdit(a, 0));
+    app.edit_menu(MenuMsg::HotkeyKey(a, 0, VK_F6));
+    assert_eq!(hotkeys_of(&app, "A")[0].0, "F6");
+    app.edit_menu(MenuMsg::HotkeyClosed { accepted: false });
+    assert_eq!(hotkeys_of(&app, "A")[0].0, "F5");
+}

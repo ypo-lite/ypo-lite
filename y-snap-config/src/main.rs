@@ -8,7 +8,7 @@
 //!   adding or changing a screen.**
 //! - [`shell`] — the window frame (nav pane, page scroller, Save bar) and
 //!   the content [`ui::viewport::Viewport`] it leaves for screens.
-//! - [`keys`] / [`key_picker`] — the key catalog and the picker built on it;
+//! - [`keys`] / [`ui::key_picker`] — the key catalog and the picker built on it;
 //!   [`icons`] / [`icon_picker`] — the same for tile icons.
 //! - one module per screen: [`hotkeys`], [`mouse`], [`overlay`], [`min_button`].
 //!
@@ -30,7 +30,6 @@
 mod hotkeys;
 mod icon_picker;
 mod icons;
-mod key_picker;
 mod min_button;
 mod mouse;
 mod overlay;
@@ -51,7 +50,7 @@ use y_snap::ipc;
 
 use icon_picker::IconPickerUi;
 use icons::IconCategory;
-use key_picker::KeyPickerUi;
+use ui::key_picker::{KeyPickerEvents, KeyPickerUi};
 use keys::KeyCategory;
 use mouse::GestureKind;
 use overlay::OverlaySection;
@@ -73,6 +72,17 @@ fn main() {
         Err(_) => None,
     };
     App::run_component::<ConfigApp>(()).unwrap();
+}
+
+/// The key picker's callbacks, wired to this app's messages.
+fn key_events(context: &ViewContext<ConfigApp>) -> KeyPickerEvents {
+    KeyPickerEvents {
+        on_key: context.callback(Msg::KeyPicked),
+        on_modifier: context.callback(Msg::ModifierToggled),
+        on_category: context.callback(Msg::KeyCategorySelected),
+        on_search_changed: context.callback(Msg::KeySearchChanged),
+        on_search_chosen: context.callback(Msg::KeySearchChosen),
+    }
 }
 
 struct ConfigApp {
@@ -527,7 +537,7 @@ impl ConfigApp {
             }
             Msg::KeyPicked(key) => match self.editing {
                 Some(Editing::Hotkey { index, .. }) => {
-                    settings.hotkeys[index].hotkey.key = key;
+                    settings.hotkeys[index].hotkey = settings.hotkeys[index].hotkey.with_key(key);
                     self.dirty = true;
                 }
                 Some(Editing::Tile { index, .. }) => {
@@ -544,7 +554,7 @@ impl ConfigApp {
             }
             Msg::ModifierToggled(modifier) => {
                 if let Some(Editing::Hotkey { index, .. }) = self.editing {
-                    settings.hotkeys[index].hotkey.modifiers.0 ^= modifier.0;
+                    settings.hotkeys[index].hotkey = settings.hotkeys[index].hotkey.toggled(modifier);
                     self.dirty = true;
                 }
             }

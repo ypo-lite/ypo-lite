@@ -104,6 +104,8 @@ struct ConfigApp {
     more_open: bool,
     /// The inspector shows the XML an item is written as.
     show_xml: bool,
+    /// The hotkey picker under an item's hotkey, when one is open.
+    hotkeys: menu_view::HotkeyUi,
     /// Renders what is copied while the window is alive — see
     /// `y_core::shell::ClipboardFlusher`. Held only for its `Drop`.
     _clipboard: Option<y_core::shell::ClipboardFlusher>,
@@ -269,6 +271,7 @@ impl Component for ConfigApp {
             collapsed: HashSet::new(),
             more_open: false,
             show_xml: false,
+            hotkeys: menu_view::HotkeyUi::default(),
             _clipboard: y_core::shell::ClipboardFlusher::start(),
             notes_ready: false,
             window_width: shell::INITIAL_WINDOW.0,
@@ -305,6 +308,7 @@ impl Component for ConfigApp {
                     self.settings = Ok(undo.settings);
                     self.dirty = true;
                     self.variables_ui = VariablesUi::default();
+                    self.hotkeys = menu_view::HotkeyUi::default();
                     self.leave_missing_menu();
                 }
             }
@@ -367,6 +371,7 @@ impl Component for ConfigApp {
                     show_xml: self.show_xml,
                     show_comments: self.prefs.show_comments,
                     confirming_delete: self.confirming_delete == Some(id),
+                    hotkeys: &self.hotkeys,
                 },
                 viewport,
                 context,
@@ -440,6 +445,7 @@ impl ConfigApp {
         }
         self.screen = screen;
         self.confirming_delete = None;
+        self.hotkeys = menu_view::HotkeyUi::default();
         self.remember_screen();
     }
 
@@ -596,6 +602,7 @@ impl ConfigApp {
 
     fn delete_menu(&mut self, id: ItemId) {
         self.confirming_delete = None;
+        self.hotkeys = menu_view::HotkeyUi::default();
         let Ok(settings) = &mut self.settings else { return };
 
         let before = settings.clone();
@@ -634,6 +641,7 @@ impl ConfigApp {
         self.applied = None;
         self.confirming_reload = false;
         self.confirming_delete = None;
+        self.hotkeys = menu_view::HotkeyUi::default();
         self.undo = None;
         // A menu that is gone from the file is a screen that is gone.
         if let (Ok(settings), Screen::Menu(id)) = (&self.settings, self.screen)
@@ -832,6 +840,7 @@ fn test_app(settings: Settings) -> ConfigApp {
             collapsed: HashSet::new(),
             more_open: false,
             show_xml: false,
+            hotkeys: menu_view::HotkeyUi::default(),
             _clipboard: None,
             notes_ready: true,
             window_width: 1000.0,

@@ -5,7 +5,7 @@
 //! window narrows. It replaces `VariableSizedWrapGrid`, whose one fixed
 //! item height (210px) clipped a card the moment its hint wrapped.
 
-use crate::key_picker::MODIFIERS;
+use crate::ui::key_picker::MODIFIERS;
 use crate::ui::prelude::*;
 use crate::{ConfigApp, Msg};
 use windows::Win32::UI::Input::KeyboardAndMouse::HOT_KEY_MODIFIERS;

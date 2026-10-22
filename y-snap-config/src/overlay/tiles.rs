@@ -11,7 +11,8 @@
 
 use super::OVERLAY_ACTIONS;
 use crate::icon_picker::{IconPickerUi, icon_field, icon_picker};
-use crate::key_picker::{KeyPickerUi, key_picker};
+use crate::key_events;
+use crate::ui::key_picker::{KeyPickerUi, key_picker};
 use crate::keys;
 use crate::reorder::{list_footer, row_actions};
 use crate::ui::prelude::*;
@@ -198,7 +199,7 @@ fn tile_editor(
     let key: View = if item.action == Action::DesktopList {
         note("A desktop-list tile has no key of its own: it becomes one tile per virtual desktop, keyed 1, 2, 3….")
     } else {
-        section("Key", key_picker(item.key, None, picker, viewport, context))
+        section("Key", key_picker(item.key, None, picker, viewport, &key_events(context)))
     };
 
     editor(

@@ -16,9 +16,11 @@
 //! | [`editor`] | The inline Cancel/Done editor shell. |
 //! | [`shell`] | The window frame: nav pane modes, page scroller, status bar, warnings banner. |
 //! | [`keys`] | The key catalog behind the key picker. |
+//! | [`key_picker`] | The key/modifier picker, driven by [`key_picker::KeyPickerEvents`] callbacks. |
 
 pub mod controls;
 pub mod editor;
+pub mod key_picker;
 pub mod keys;
 pub mod layout;
 pub mod shell;

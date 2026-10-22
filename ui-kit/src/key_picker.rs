@@ -11,14 +11,18 @@
 //! - a category selector (Letters, F-keys, Navigation, …), tabs when they
 //!   fit and a dropdown when they don't;
 //! - that category's keys as equal-width buttons in an
-//!   [`crate::ui::layout::AutoGrid`] — they wrap to the width available,
-//!   so nothing is ever off-window, and only one category is on screen at a
-//!   time, so the panel stays short.
+//!   [`AutoGrid`] — they wrap to the width available, so nothing is ever
+//!   off-window, and only one category is on screen at a time, so the panel
+//!   stays short.
 //!
 //! Still never typed and never captured from a live keypress
 //! (`windows-reactor` has no key events; a raw Win32 hook was considered
 //! and turned down): every choice is a real key from [`crate::keys`], so
 //! there is no invalid state to design around.
+//!
+//! The picker names no app `Msg`: the app owns a [`KeyPickerUi`] (category
+//! and search text), and passes [`KeyPickerEvents`] — one [`Callback`] per
+//! thing the user can do.
 //!
 //! The current key is shown with the Accent button style, not as a checked
 //! `ToggleButton`: clicking a checked toggle unchecks it natively while the
@@ -27,8 +31,7 @@
 //! re-derived from state on every render; a native toggle's own state isn't.
 
 use crate::keys::{self, KeyCategory};
-use crate::ui::prelude::*;
-use crate::{ConfigApp, Msg};
+use crate::prelude::*;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     HOT_KEY_MODIFIERS, MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, VIRTUAL_KEY,
 };
@@ -46,6 +49,16 @@ impl KeyPickerUi {
     pub fn opening_on(key: Option<VIRTUAL_KEY>) -> Self {
         Self { category: key.and_then(KeyCategory::of).unwrap_or_default(), search: String::new() }
     }
+}
+
+/// What the user can do in the picker, as the app wants to hear about it.
+#[derive(Clone)]
+pub struct KeyPickerEvents {
+    pub on_key: Callback<VIRTUAL_KEY>,
+    pub on_modifier: Callback<HOT_KEY_MODIFIERS>,
+    pub on_category: Callback<KeyCategory>,
+    pub on_search_changed: Callback<String>,
+    pub on_search_chosen: Callback<String>,
 }
 
 pub const MODIFIERS: [(&str, HOT_KEY_MODIFIERS); 4] =
@@ -71,7 +84,7 @@ pub fn key_picker(
     modifiers: Option<HOT_KEY_MODIFIERS>,
     ui: &KeyPickerUi,
     viewport: Viewport,
-    context: &ViewContext<ConfigApp>,
+    events: &KeyPickerEvents,
 ) -> View {
     let labels = combo_labels(modifiers.unwrap_or_default(), key);
     let readout: View =
@@ -81,8 +94,8 @@ pub fn key_picker(
         .text(ui.search.clone())
         .placeholder_text("Type a key name — F13, PgDn, Num 5…")
         .items_source(keys::search(&ui.search))
-        .on_text_changed(context.callback(Msg::KeySearchChanged))
-        .on_suggestion_chosen(context.callback(Msg::KeySearchChosen))
+        .on_text_changed(events.on_search_changed.clone())
+        .on_suggestion_chosen(events.on_search_chosen.clone())
         .fill();
 
     let mut controls = AutoGrid::new(260.0).max_columns(2).gap(space::L, space::M);
@@ -91,7 +104,8 @@ pub fn key_picker(
         let chips =
             AutoGrid::new(56.0).max_columns(4).gap(space::XS, space::XS).items(MODIFIERS.map(|(name, modifier)| {
                 let checked = modifiers.0 & modifier.0 != 0;
-                (name, chip(name, checked, true, context.callback(move |_| Msg::ModifierToggled(modifier))))
+                let on_modifier = events.on_modifier.clone();
+                (name, chip(name, checked, true, Callback::new(move |_: bool| { let _ = on_modifier.call(modifier); })))
             }));
         controls = controls.item("modifiers", field("Modifiers — any combination", chips.build(chip_viewport)));
     }
@@ -100,29 +114,31 @@ pub fn key_picker(
     Stack::vertical(space::L)
         .child("readout", readout)
         .child("controls", controls.build(viewport))
-        .child("category", category_selector(ui.category, viewport, context))
-        .child(format!("keys/{:?}", ui.category), key_grid(ui.category, key, viewport, context))
+        .child("category", category_selector(ui.category, viewport, &events.on_category))
+        .child(format!("keys/{:?}", ui.category), key_grid(ui.category, key, viewport, &events.on_key))
         .into()
 }
 
-fn category_selector(current: KeyCategory, viewport: Viewport, context: &ViewContext<ConfigApp>) -> View {
+fn category_selector(current: KeyCategory, viewport: Viewport, on_category: &Callback<KeyCategory>) -> View {
     if viewport.fits(TABS_MIN_WIDTH) {
         let items = KeyCategory::ALL.map(|category| {
             let item: View = SelectorBarItem::new().text(category.title()).is_selected(category == current).into();
             (category.title(), item)
         });
+        let on_category = on_category.clone();
         SelectorBar::new()
-            .on_selected_text_changed(context.callback(move |title: Option<String>| {
-                Msg::KeyCategorySelected(title.as_deref().and_then(KeyCategory::from_title).unwrap_or(current))
+            .on_selected_text_changed(Callback::new(move |title: Option<String>| {
+                let _ = on_category.call(title.as_deref().and_then(KeyCategory::from_title).unwrap_or(current));
             }))
             .slots([SlotView::collection(SelectorBarSlot::Items, items)])
     } else {
         let selected = KeyCategory::ALL.iter().position(|&category| category == current);
+        let on_category = on_category.clone();
         let picker = combo(
             KeyCategory::ALL.map(KeyCategory::title),
             selected,
-            context.callback(move |choice: Option<usize>| {
-                Msg::KeyCategorySelected(choice.map_or(current, |index| KeyCategory::ALL[index]))
+            Callback::new(move |choice: Option<usize>| {
+                let _ = on_category.call(choice.map_or(current, |index| KeyCategory::ALL[index]));
             }),
         );
         field("Keys", picker)
@@ -133,17 +149,18 @@ fn key_grid(
     category: KeyCategory,
     current: Option<VIRTUAL_KEY>,
     viewport: Viewport,
-    context: &ViewContext<ConfigApp>,
+    on_key: &Callback<VIRTUAL_KEY>,
 ) -> View {
     AutoGrid::new(category.min_button_width())
         .max_columns(13)
         .gap(space::XS, space::XS)
         .items(category.keys().map(|(label, key)| {
+            let on_key = on_key.clone();
             let button: View = Button::new()
                 .style(if Some(key) == current { ButtonStyle::Accent } else { ButtonStyle::Default })
                 .min_width(0.0)
                 .fill()
-                .on_click(context.callback(move |()| Msg::KeyPicked(key)))
+                .on_click(Callback::new(move |()| { let _ = on_key.call(key); }))
                 .content(label);
             (label, button)
         }))

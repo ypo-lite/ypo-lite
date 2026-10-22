@@ -6,10 +6,15 @@
 //! edit only marks the file as changed when the value really differs, because
 //! WinUI controls report a value when they are first shown.
 
-use y_pop::settings::{ItemId, ItemKind, Renderer};
+use windows::Win32::UI::Input::KeyboardAndMouse::{HOT_KEY_MODIFIERS, VIRTUAL_KEY};
+use y_core::hotkey::Hotkey;
+use y_pop::settings::{HotkeyEntry, ItemId, ItemKind, Renderer};
 
+use crate::menu_view::HotkeyUi;
 use crate::roots;
 use crate::tree::{self, MoveDir, NewKind};
+use crate::ui::key_picker::{KeyPickerUi, MODIFIERS};
+use crate::ui::keys::{self, KeyCategory};
 use crate::{ConfigApp, Screen, Undo};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -49,6 +54,56 @@ pub enum MenuMsg {
     /// 0 inherit, 1 native, 2 overlay.
     PopupStyle(ItemId, usize),
     TurnIntoMenu(ItemId),
+
+    // Hotkeys: `(item, position among its hotkeys)` addresses one.
+    HotkeyAdd(ItemId),
+    /// Opens the picker dialog on that hotkey.
+    HotkeyEdit(ItemId, usize),
+    /// The dialog closed: OK keeps the edit, anything else restores the
+    /// hotkey as it was (and drops one that was just added).
+    HotkeyClosed { accepted: bool },
+    HotkeyRemove(ItemId, usize),
+    HotkeyOverride(ItemId, usize, bool),
+    HotkeyKey(ItemId, usize, VIRTUAL_KEY),
+    HotkeyModifier(ItemId, usize, HOT_KEY_MODIFIERS),
+    HotkeySearchChosen(ItemId, usize, String),
+    HotkeyCategory(KeyCategory),
+    HotkeySearch(String),
+}
+
+/// A hotkey as written in the file, as the picker shows it: the modifiers it
+/// names and its key. An unreadable text keeps whatever modifiers it names,
+/// so chips can be set before a key is.
+pub(crate) fn split_hotkey(raw: &str) -> (HOT_KEY_MODIFIERS, Option<VIRTUAL_KEY>) {
+    if let Some(hotkey) = Hotkey::parse(raw) {
+        // `parse` adds MOD_NOREPEAT, which the picker has no chip for.
+        let held = MODIFIERS.iter().fold(0, |held, (_, modifier)| held | (hotkey.modifiers.0 & modifier.0));
+        return (HOT_KEY_MODIFIERS(held), Some(hotkey.key));
+    }
+    let held = raw
+        .split('+')
+        .filter_map(|part| MODIFIERS.iter().find(|(name, _)| name.eq_ignore_ascii_case(part.trim())))
+        .fold(0, |held, (_, modifier)| held | modifier.0);
+    (HOT_KEY_MODIFIERS(held), None)
+}
+
+/// The inverse of [`split_hotkey`]: without a key, just the modifiers' names.
+pub(crate) fn join_hotkey(modifiers: HOT_KEY_MODIFIERS, key: Option<VIRTUAL_KEY>) -> String {
+    match key {
+        Some(key) => Hotkey::new(modifiers, key).to_string(),
+        None => MODIFIERS
+            .iter()
+            .filter(|(_, modifier)| modifiers.0 & modifier.0 != 0)
+            .map(|(name, _)| *name)
+            .collect::<Vec<_>>()
+            .join("+"),
+    }
+}
+
+/// A hotkey text in one canonical spelling, so `ctrl+alt+f5` and `Ctrl+Alt+F5`
+/// count as the same combination. `None` when it isn't one.
+pub(crate) fn canonical_hotkey(raw: &str) -> Option<String> {
+    Hotkey::parse(raw).map(|hotkey| hotkey.to_string())
 }
 
 impl ConfigApp {
@@ -69,6 +124,12 @@ impl ConfigApp {
             .copied()
             .filter(|&id| tree::is_inside(settings, root, id))
             .unwrap_or(root)
+    }
+
+    /// The text of one hotkey, if it exists.
+    fn hotkey_text(&self, id: ItemId, index: usize) -> Option<String> {
+        let settings = self.settings.as_ref().ok()?;
+        tree::item(settings, id)?.hotkeys.get(index).map(|entry| entry.key.clone())
     }
 
     pub(crate) fn edit_menu(&mut self, message: MenuMsg) {
@@ -92,6 +153,23 @@ impl ConfigApp {
             }
             MenuMsg::XmlToggled => {
                 self.show_xml = !self.show_xml;
+                return;
+            }
+            MenuMsg::HotkeyEdit(id, index) => {
+                let raw = self.hotkey_text(id, index);
+                self.hotkeys = HotkeyUi {
+                    open: raw.is_some().then_some((id, index)),
+                    picker: KeyPickerUi::opening_on(raw.as_deref().and_then(|raw| split_hotkey(raw).1)),
+                    original: raw.unwrap_or_default(),
+                };
+                return;
+            }
+            MenuMsg::HotkeyCategory(category) => {
+                self.hotkeys.picker.category = category;
+                return;
+            }
+            MenuMsg::HotkeySearch(text) => {
+                self.hotkeys.picker.search = text;
                 return;
             }
             _ => {}
@@ -224,8 +302,65 @@ impl ConfigApp {
                 }
             }
 
+            MenuMsg::HotkeyClosed { accepted } => {
+                let open = self.hotkeys.open.take();
+                let item = open
+                    .filter(|_| !accepted)
+                    .and_then(|(id, index)| tree::item_mut(settings, id).map(|item| (item, index)))
+                    .filter(|(item, index)| *index < item.hotkeys.len());
+                if let Some((item, index)) = item {
+                    if self.hotkeys.original.is_empty() {
+                        item.hotkeys.remove(index);
+                    } else {
+                        item.hotkeys[index].key = std::mem::take(&mut self.hotkeys.original);
+                    }
+                    changed = true;
+                }
+                self.hotkeys = HotkeyUi::default();
+            }
+            MenuMsg::HotkeyAdd(id) => {
+                if let Some(item) = tree::item_mut(settings, id) {
+                    item.hotkeys.push(HotkeyEntry { key: String::new(), can_override: false, extra_attrs: Vec::new() });
+                    self.hotkeys =
+                        HotkeyUi { open: Some((id, item.hotkeys.len() - 1)), ..HotkeyUi::default() };
+                    changed = true;
+                }
+            }
+            MenuMsg::HotkeyRemove(id, index) => {
+                let before = settings.clone();
+                if let Some(item) = tree::item_mut(settings, id).filter(|item| index < item.hotkeys.len()) {
+                    let removed = item.hotkeys.remove(index);
+                    let shown = if removed.key.is_empty() { "a hotkey".to_owned() } else { removed.key };
+                    self.undo = Some(Undo { label: format!("Removed {shown}"), settings: before });
+                    self.hotkeys = HotkeyUi::default();
+                    changed = true;
+                }
+            }
+            MenuMsg::HotkeyOverride(id, index, on) => {
+                if let Some(entry) = tree::item_mut(settings, id).and_then(|item| item.hotkeys.get_mut(index)) {
+                    changed = entry.can_override != on;
+                    entry.can_override = on;
+                }
+            }
+            MenuMsg::HotkeyKey(id, index, key) => changed = set_hotkey(settings, id, index, |m, _| (m, Some(key))),
+            MenuMsg::HotkeyModifier(id, index, modifier) => {
+                changed = set_hotkey(settings, id, index, |m, key| (HOT_KEY_MODIFIERS(m.0 ^ modifier.0), key));
+            }
+            MenuMsg::HotkeySearchChosen(id, index, suggestion) => {
+                if let Some(key) = keys::from_suggestion(&suggestion) {
+                    self.hotkeys.picker = KeyPickerUi::opening_on(Some(key));
+                    changed = set_hotkey(settings, id, index, |m, _| (m, Some(key)));
+                }
+            }
+
             // Settled above.
-            MenuMsg::Select(_) | MenuMsg::ToggleCollapsed(_) | MenuMsg::MoreToggled | MenuMsg::XmlToggled => {}
+            MenuMsg::Select(_)
+            | MenuMsg::ToggleCollapsed(_)
+            | MenuMsg::MoreToggled
+            | MenuMsg::XmlToggled
+            | MenuMsg::HotkeyEdit(..)
+            | MenuMsg::HotkeyCategory(_)
+            | MenuMsg::HotkeySearch(_) => {}
         }
 
         if changed {
@@ -236,6 +371,23 @@ impl ConfigApp {
             self.selection.insert(menu, item);
         }
     }
+}
+
+/// Rewrites one hotkey through `change(modifiers, key)`. The other attributes
+/// of the `<hotkey>` stay as they were. Returns whether the text changed.
+fn set_hotkey(
+    settings: &mut y_pop::settings::Settings,
+    id: ItemId,
+    index: usize,
+    change: impl FnOnce(HOT_KEY_MODIFIERS, Option<VIRTUAL_KEY>) -> (HOT_KEY_MODIFIERS, Option<VIRTUAL_KEY>),
+) -> bool {
+    let Some(entry) = tree::item_mut(settings, id).and_then(|item| item.hotkeys.get_mut(index)) else { return false };
+    let (modifiers, key) = split_hotkey(&entry.key);
+    let (modifiers, key) = change(modifiers, key);
+    let text = join_hotkey(modifiers, key);
+    let changed = entry.key != text;
+    entry.key = text;
+    changed
 }
 
 /// Sets one text of `item`. Whether an empty text means "the attribute is

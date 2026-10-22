@@ -20,7 +20,7 @@ pub mod preview;
 pub mod tiles;
 
 use crate::icon_picker::IconPickerUi;
-use crate::key_picker::KeyPickerUi;
+use crate::ui::key_picker::KeyPickerUi;
 use crate::ui::prelude::*;
 use crate::{ConfigApp, Msg};
 use palette::PaletteField;

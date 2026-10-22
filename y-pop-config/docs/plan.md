@@ -279,7 +279,7 @@ move buttons alone, saved, and y-pop shows the same menu.
 | 6.3 | Launch fields | ⬜ | Arguments with a "Clipboard" insert and its "read at launch" note; Start in; Run as administrator; Launch through the shell as a tri-state showing the inherited value; run at y-pop start / exit. |
 | 6.4 | Folder fields | ⬜ | Filter, depth (0–200) with a plain-language readout ("files only", "1 level of subfolders"), and the open-folder entry. |
 | 6.5 | Store app field | ⬜ | `ComboBox` of installed Store apps (needs the enumeration from 8.5; free text until then). |
-| 6.6 | Hotkeys | ⬜ | **First move `key_picker` (and the generic half of `reorder`) into `ui-kit`**, made callback-based so it no longer names `ConfigApp`/`Msg`; `y-snap-config` then uses it from there. Keycaps list, "Add hotkey" opening the shared `key_picker` under the row, a per-binding Override switch, remove. Conflict check across the whole file (same combo twice) as a warning marker. |
+| 6.6 | Hotkeys | ⬜ | **Prerequisite done:** `ui_kit::key_picker` (`key_picker`, `KeyPickerUi`, `KeyPickerEvents` callbacks) is shared, and `y-snap-config` uses it. The generic half of `reorder` is left in `y-snap-config`: its controls are already in `ui-kit`, and the rest only names `Msg`. Keycaps list, "Add hotkey" opening the shared `key_picker` under the row, a per-binding Override switch, remove. Conflict check across the whole file (same combo twice) as a warning marker. |
 | 6.7 | Run now | ⬜ | Calls the library's `launch` (2.6) with the expanded app and the current clipboard; any error goes to the status bar. |
 
 ---

@@ -126,6 +126,17 @@ impl Hotkey {
         Some(Self::new(HOT_KEY_MODIFIERS(modifiers), key?))
     }
 
+    /// The same modifiers on another key — what a key picker's click does.
+    pub const fn with_key(self, key: VIRTUAL_KEY) -> Self {
+        Self { key, ..self }
+    }
+
+    /// The same key with `modifier` switched on if it was off, and off if it
+    /// was on — what a key picker's modifier chip does.
+    pub const fn toggled(self, modifier: HOT_KEY_MODIFIERS) -> Self {
+        Self { modifiers: HOT_KEY_MODIFIERS(self.modifiers.0 ^ modifier.0), ..self }
+    }
+
     fn has(&self, modifier: HOT_KEY_MODIFIERS) -> bool {
         self.modifiers.0 & modifier.0 != 0
     }

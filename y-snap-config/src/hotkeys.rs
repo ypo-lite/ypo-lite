@@ -2,7 +2,8 @@
 //! to one [`Action`]. A row's Key cell opens the key picker right under
 //! that row ([`Row::detail`]).
 
-use crate::key_picker::{KeyPickerUi, combo_labels, key_picker};
+use crate::key_events;
+use crate::ui::key_picker::{KeyPickerUi, combo_labels, key_picker};
 use crate::reorder::{list_footer, row_actions};
 use crate::ui::prelude::*;
 use crate::{ConfigApp, EditorClose, ListKind, Msg};
@@ -68,7 +69,7 @@ pub fn hotkeys_view(
                     Some(binding.hotkey.modifiers),
                     picker,
                     detail_viewport.inset(CARD_INSET),
-                    context,
+                    &key_events(context),
                 ),
                 context.callback(|()| Msg::EditorClosed(EditorClose::Revert)),
                 context.callback(|()| Msg::EditorClosed(EditorClose::Keep)),
