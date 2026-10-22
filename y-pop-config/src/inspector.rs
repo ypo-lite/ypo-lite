@@ -62,7 +62,7 @@ pub fn inspector_view(
     }
 
     // One key per item: switching to another starts every box fresh.
-    body = body.child(format!("fields-{}", id.get()), fields(settings, item, is_root, inner, context));
+    body = body.child(format!("fields-{}", id.get()), fields(settings, ui, item, is_root, inner, context));
     body = body.child("xml", xml_preview(item, ui, context));
 
     card().content(body)
@@ -189,7 +189,7 @@ fn confirm_delete(id: ItemId, context: &ViewContext<ConfigApp>) -> View {
 
 // ---- fields ----------------------------------------------------------
 
-fn fields(settings: &Settings, item: &Item, is_root: bool, viewport: Viewport, context: &ViewContext<ConfigApp>) -> View {
+fn fields(settings: &Settings, ui: &MenuUi<'_>, item: &Item, is_root: bool, viewport: Viewport, context: &ViewContext<ConfigApp>) -> View {
     let id = item.id;
     let text_of = move |field: TextField| context.callback(move |text: String| Msg::Menu(MenuMsg::Text(id, field, text)));
     let name = |placeholder: &str| {
@@ -216,15 +216,11 @@ fn fields(settings: &Settings, item: &Item, is_root: bool, viewport: Viewport, c
             .into(),
 
         ItemKind::App(app) => {
-            let target = field(
-                if app.browse { "Folder" } else { "Program or file" },
-                text_box(app.exe.clone().unwrap_or_default(), r"%programfiles%\App\app.exe", text_of(TextField::Target)),
-            );
             Stack::vertical(space::L)
-                .child("fields", grid(vec![("name", name("Name in the menu")), ("target", target), ("tooltip", tooltip()), ("icon", icon())]))
+                .child("fields", grid(vec![("name", name("Name in the menu")), ("tooltip", tooltip()), ("icon", icon())]))
+                .child("app", crate::app_form::sections(settings, ui, item, app, viewport, context))
                 .child("default", flag("Default item (shown in bold)", FlagField::Default, item.default))
                 .child("hotkeys", hotkeys_section(settings, item, context))
-                .child("more", text::caption("Arguments, the working folder and the launch options come with the full app form."))
                 .maybe("menu", is_root.then(|| turn_into_menu(id, context)))
                 .into()
         }

@@ -549,3 +549,34 @@ fn an_item_previews_as_the_xml_a_save_would_write() {
         assert!(whole.contains(line.trim_start()), "{line}");
     }
 }
+
+#[test]
+fn expand_text_uses_the_files_variables_builtins_and_leaves_the_clipboard() {
+    let settings = load(
+        r#"<y-pop><variables><var name="tools" value="%win%\tools"/><var name="git" value="%tools%\git"/></variables></y-pop>"#,
+    );
+    let mut lookup = builtins();
+    assert_eq!(settings.expand_text(r"%git%\git.exe %clipboard% %nope%", &mut lookup), r"C:\Windows\tools\git\git.exe %clipboard% %nope%");
+}
+
+#[test]
+fn launch_app_expands_and_settles_the_shell_choice() {
+    let settings = load(
+        r#"<y-pop shell-execute="true"><app name="A" exe="%win%\notepad.exe" param="-x %clipboard%" path="%win%" events="start"/>
+           <app name="B" exe="b.exe" shell="false" elevate="true"/></y-pop>"#,
+    );
+    let apps: Vec<_> = settings
+        .items()
+        .filter_map(|item| match &item.kind {
+            ItemKind::App(fields) => Some(fields.as_ref()),
+            _ => None,
+        })
+        .collect();
+    let a = settings.launch_app(apps[0], &mut builtins());
+    assert_eq!(a.exe.as_deref(), Some(r"C:\Windows\notepad.exe"));
+    assert_eq!(a.param.as_deref(), Some("-x %clipboard%"));
+    assert_eq!(a.path.as_deref(), Some(r"C:\Windows"));
+    assert!(a.shell && !a.elevate && a.events.contains(crate::model::EventMask::START));
+    let b = settings.launch_app(apps[1], &mut builtins());
+    assert!(!b.shell && b.elevate);
+}

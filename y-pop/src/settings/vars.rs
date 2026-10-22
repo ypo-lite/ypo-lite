@@ -8,7 +8,7 @@
 //! is not a use of anything here. Menu items see every variable, resolved to
 //! the last definition.
 
-use super::{Entry, Item, ItemId, ItemKind, Settings, Var, VarEntry};
+use super::{AppFields, Entry, Item, ItemId, ItemKind, Settings, Var, VarEntry};
 use crate::variables::{self, Lookup, Variable};
 
 /// Where a variable is referenced.
@@ -208,6 +208,45 @@ impl Settings {
             expanded.push(Variable { name: variable.name, value });
         }
         variables::expand(&var.value, &expanded, builtins)
+    }
+
+    /// `text` as y-pop would read it from an attribute: every `%name%`
+    /// replaced by a variable of the file (the last of that name wins) or a
+    /// builtin. `%clipboard%` and friends stay as written, as at load.
+    pub fn expand_text(&self, text: &str, builtins: &mut dyn Lookup) -> String {
+        let mut expanded: Vec<Variable> = Vec::new();
+        for entry in &self.variables {
+            if let VarEntry::Var(var) = entry {
+                let value = variables::expand(&var.value, &expanded, builtins);
+                expanded.push(Variable { name: var.name.clone(), value });
+            }
+        }
+        variables::expand(text, &expanded, builtins)
+    }
+
+    /// `fields` as y-pop would launch it: every attribute expanded, the shell
+    /// choice settled against the file's default. What "Run now" hands to
+    /// `y_pop::launch::launch`. A folder is opened, not listed.
+    pub fn launch_app(&self, fields: &AppFields, builtins: &mut dyn Lookup) -> crate::model::App {
+        use std::sync::Arc;
+        let mut expand = |text: &Option<String>| text.as_deref().map(|text| Arc::<str>::from(self.expand_text(text, builtins)));
+        let mut events = crate::model::EventMask::default();
+        if fields.on_start {
+            events.insert(crate::model::EventMask::START);
+        }
+        if fields.on_exit {
+            events.insert(crate::model::EventMask::EXIT);
+        }
+        crate::model::App {
+            exe: expand(&fields.exe),
+            app_id: fields.app_id.as_deref().map(Arc::<str>::from),
+            param: expand(&fields.param),
+            path: expand(&fields.path),
+            shell: fields.shell.or(self.globals.shell_execute).unwrap_or(false),
+            elevate: fields.elevate,
+            events,
+            browse: None,
+        }
     }
 
     /// Checks `name` for the variable at `index` (which may keep its own).

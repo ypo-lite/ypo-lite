@@ -6,9 +6,11 @@
 //! edit only marks the file as changed when the value really differs, because
 //! WinUI controls report a value when they are first shown.
 
+use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::Input::KeyboardAndMouse::{HOT_KEY_MODIFIERS, VIRTUAL_KEY};
 use y_core::hotkey::Hotkey;
-use y_pop::settings::{HotkeyEntry, ItemId, ItemKind, Renderer};
+use y_pop::model::OpenFolder;
+use y_pop::settings::{AppFields, HotkeyEntry, ItemId, ItemKind, Renderer};
 
 use crate::menu_view::HotkeyUi;
 use crate::roots;
@@ -24,6 +26,11 @@ pub enum TextField {
     Icon,
     /// An app's program, file or folder.
     Target,
+    /// A Store app's id.
+    AppId,
+    Param,
+    StartIn,
+    Filter,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -32,6 +39,65 @@ pub enum FlagField {
     Default,
     /// A tray menu that opens when the pointer rests on its icon.
     OpenOnHover,
+    Elevate,
+    OnStart,
+    OnExit,
+}
+
+/// What an app launches: a program or file, a folder listed as a submenu, or
+/// a Store app.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TargetMode {
+    Program,
+    Folder,
+    Store,
+}
+
+impl TargetMode {
+    pub const ALL: [Self; 3] = [Self::Program, Self::Folder, Self::Store];
+
+    pub fn of(app: &AppFields) -> Self {
+        if app.app_id.is_some() {
+            Self::Store
+        } else if app.browse {
+            Self::Folder
+        } else {
+            Self::Program
+        }
+    }
+}
+
+/// Moves `app` to `mode`. The value of the mode it leaves goes to `stash`
+/// (`(exe, app-id)`) and comes back when it is chosen again, so a click on
+/// the wrong choice loses nothing. Returns whether anything changed.
+pub(crate) fn set_target_mode(app: &mut AppFields, mode: TargetMode, stash: &mut (Option<String>, Option<String>)) -> bool {
+    let from = TargetMode::of(app);
+    if from == mode {
+        return false;
+    }
+    if from == TargetMode::Store {
+        stash.1 = app.app_id.take();
+        app.exe = stash.0.take();
+    }
+    match mode {
+        TargetMode::Store => {
+            stash.0 = app.exe.take();
+            app.app_id = Some(stash.1.take().unwrap_or_default());
+            app.browse = false;
+        }
+        TargetMode::Folder => app.browse = true,
+        TargetMode::Program => app.browse = false,
+    }
+    true
+}
+
+/// Depth 0–200 in words: what the number does to the listing.
+pub(crate) fn depth_words(depth: u32) -> String {
+    match depth {
+        0 => "files only, no subfolders".to_owned(),
+        1 => "1 level of subfolders".to_owned(),
+        n => format!("{n} levels of subfolders"),
+    }
 }
 
 pub enum MenuMsg {
@@ -54,6 +120,18 @@ pub enum MenuMsg {
     /// 0 inherit, 1 native, 2 overlay.
     PopupStyle(ItemId, usize),
     TurnIntoMenu(ItemId),
+    /// Launches the app as y-pop would.
+    RunNow(ItemId),
+
+    // An app.
+    TargetMode(ItemId, TargetMode),
+    /// 0 inherit, 1 on, 2 off.
+    ShellExecute(ItemId, usize),
+    Depth(ItemId, Option<f64>),
+    /// 0 only at the deepest level (the default), 1 in every submenu, 2 never.
+    OpenFolder(ItemId, usize),
+    /// Adds `%name%` to the end of a text.
+    InsertVariable(ItemId, TextField, String),
 
     // Hotkeys: `(item, position among its hotkeys)` addresses one.
     HotkeyAdd(ItemId),
@@ -132,6 +210,21 @@ impl ConfigApp {
         tree::item(settings, id)?.hotkeys.get(index).map(|entry| entry.key.clone())
     }
 
+    /// "Run now": launches the app as y-pop would — expanded, with the
+    /// current clipboard — and puts the outcome in the status bar.
+    fn run_now(&mut self, id: ItemId) {
+        let Ok(settings) = &self.settings else { return };
+        let Some(item) = tree::item(settings, id) else { return };
+        let ItemKind::App(fields) = &item.kind else { return };
+
+        let label = roots::label(item);
+        let app = settings.launch_app(fields, &mut *self.builtins.borrow_mut());
+        self.run_status = Some(match y_pop::launch::launch(HWND::default(), &app) {
+            Ok(()) => (format!("Ran {label}"), true),
+            Err(error) => (format!("Couldn't run {label}: {error}"), false),
+        });
+    }
+
     pub(crate) fn edit_menu(&mut self, message: MenuMsg) {
         let Some(root) = self.open_root() else { return };
 
@@ -155,6 +248,10 @@ impl ConfigApp {
                 self.show_xml = !self.show_xml;
                 return;
             }
+            MenuMsg::RunNow(id) => {
+                self.run_now(id);
+                return;
+            }
             MenuMsg::HotkeyEdit(id, index) => {
                 let raw = self.hotkey_text(id, index);
                 self.hotkeys = HotkeyUi {
@@ -175,6 +272,7 @@ impl ConfigApp {
             _ => {}
         }
 
+        self.run_status = None;
         let selected = self.selected(root);
         let Ok(settings) = &mut self.settings else { return };
         let mut changed = false;
@@ -256,11 +354,15 @@ impl ConfigApp {
             }
             MenuMsg::Flag(id, field, on) => {
                 if let Some(item) = tree::item_mut(settings, id) {
-                    let slot = match field {
-                        FlagField::Default => &mut item.default,
-                        FlagField::OpenOnHover => &mut item.auto_open,
+                    let slot = match (field, &mut item.kind) {
+                        (FlagField::Default, _) => Some(&mut item.default),
+                        (FlagField::OpenOnHover, _) => Some(&mut item.auto_open),
+                        (FlagField::Elevate, ItemKind::App(app)) => Some(&mut app.elevate),
+                        (FlagField::OnStart, ItemKind::App(app)) => Some(&mut app.on_start),
+                        (FlagField::OnExit, ItemKind::App(app)) => Some(&mut app.on_exit),
+                        _ => None,
                     };
-                    if *slot != on {
+                    if let Some(slot) = slot.filter(|slot| **slot != on) {
                         *slot = on;
                         changed = true;
                     }
@@ -290,6 +392,52 @@ impl ConfigApp {
                         item.popup = value;
                         changed = true;
                     }
+                }
+            }
+            MenuMsg::TargetMode(id, mode) => {
+                let stash = self.target_stash.entry(id).or_default();
+                if let Some(ItemKind::App(app)) = tree::item_mut(settings, id).map(|item| &mut item.kind) {
+                    changed = set_target_mode(app, mode, stash);
+                }
+            }
+            MenuMsg::ShellExecute(id, choice) => {
+                if let Some(ItemKind::App(app)) = tree::item_mut(settings, id).map(|item| &mut item.kind) {
+                    let value = match choice {
+                        1 => Some(true),
+                        2 => Some(false),
+                        _ => None,
+                    };
+                    changed = app.shell != value;
+                    app.shell = value;
+                }
+            }
+            MenuMsg::Depth(id, depth) => {
+                if let Some(ItemKind::App(app)) = tree::item_mut(settings, id).map(|item| &mut item.kind) {
+                    // An empty box is the default: no `depth` attribute.
+                    let value = depth.map(|depth| depth.clamp(0.0, 200.0) as u32);
+                    changed = app.depth != value;
+                    app.depth = value;
+                }
+            }
+            MenuMsg::OpenFolder(id, choice) => {
+                if let Some(ItemKind::App(app)) = tree::item_mut(settings, id).map(|item| &mut item.kind) {
+                    let value = match choice {
+                        1 => Some(OpenFolder::All),
+                        2 => Some(OpenFolder::Never),
+                        _ => None,
+                    };
+                    // The file may say `max-depth` outright: that is choice 0 too.
+                    let same = app.open_folder == value || (choice == 0 && app.open_folder == Some(OpenFolder::MaxDepth));
+                    if !same {
+                        app.open_folder = value;
+                        changed = true;
+                    }
+                }
+            }
+            MenuMsg::InsertVariable(id, field, name) => {
+                if let Some(item) = tree::item_mut(settings, id) {
+                    let current = text_of(item, field);
+                    changed = set_text(item, field, format!("{current}%{name}%"));
                 }
             }
             MenuMsg::TurnIntoMenu(id) => {
@@ -359,6 +507,7 @@ impl ConfigApp {
             | MenuMsg::MoreToggled
             | MenuMsg::XmlToggled
             | MenuMsg::HotkeyEdit(..)
+            | MenuMsg::RunNow(_)
             | MenuMsg::HotkeyCategory(_)
             | MenuMsg::HotkeySearch(_) => {}
         }
@@ -390,6 +539,25 @@ fn set_hotkey(
     changed
 }
 
+/// The raw text of one of `item`'s text fields ("" when absent).
+pub(crate) fn text_of(item: &y_pop::settings::Item, field: TextField) -> String {
+    let app = match &item.kind {
+        ItemKind::App(app) => Some(app),
+        _ => None,
+    };
+    let text = match field {
+        TextField::Name => item.name.as_deref(),
+        TextField::Tooltip => item.tooltip.as_deref(),
+        TextField::Icon => item.icon.as_deref(),
+        TextField::Target => app.and_then(|app| app.exe.as_deref()),
+        TextField::AppId => app.and_then(|app| app.app_id.as_deref()),
+        TextField::Param => app.and_then(|app| app.param.as_deref()),
+        TextField::StartIn => app.and_then(|app| app.path.as_deref()),
+        TextField::Filter => app.and_then(|app| app.filter.as_deref()),
+    };
+    text.unwrap_or_default().to_owned()
+}
+
 /// Sets one text of `item`. Whether an empty text means "the attribute is
 /// absent" depends on what the attribute is: a group or an app always has a
 /// name, but an empty title on a separator is a plain rule, and on About or
@@ -397,29 +565,30 @@ fn set_hotkey(
 fn set_text(item: &mut y_pop::settings::Item, field: TextField, text: String) -> bool {
     let absent_when_empty = |text: String| (!text.is_empty()).then_some(text);
 
-    let new = match field {
-        TextField::Name if matches!(item.kind, ItemKind::Group | ItemKind::App(_)) => Some(text),
-        TextField::Name => absent_when_empty(text),
-        TextField::Tooltip | TextField::Icon => absent_when_empty(text),
-        TextField::Target => {
-            let ItemKind::App(app) = &mut item.kind else { return false };
-            if app.exe.as_deref() == Some(text.as_str()) {
-                return false;
-            }
-            app.exe = Some(text);
-            return true;
+    // Set `slot` to `new` if it differs.
+    fn put(slot: &mut Option<String>, new: Option<String>) -> bool {
+        if *slot == new {
+            return false;
         }
-    };
-
-    let slot = match field {
-        TextField::Name => &mut item.name,
-        TextField::Tooltip => &mut item.tooltip,
-        TextField::Icon => &mut item.icon,
-        TextField::Target => return false,
-    };
-    if *slot == new {
-        return false;
+        *slot = new;
+        true
     }
-    *slot = new;
-    true
+
+    match field {
+        TextField::Name if matches!(item.kind, ItemKind::Group | ItemKind::App(_)) => put(&mut item.name, Some(text)),
+        TextField::Name => put(&mut item.name, absent_when_empty(text)),
+        TextField::Tooltip => put(&mut item.tooltip, absent_when_empty(text)),
+        TextField::Icon => put(&mut item.icon, absent_when_empty(text)),
+        // The target and the Store id are always present on an app, even empty.
+        TextField::Target | TextField::AppId | TextField::Param | TextField::StartIn | TextField::Filter => {
+            let ItemKind::App(app) = &mut item.kind else { return false };
+            match field {
+                TextField::Target => put(&mut app.exe, Some(text)),
+                TextField::AppId => put(&mut app.app_id, Some(text)),
+                TextField::Param => put(&mut app.param, absent_when_empty(text)),
+                TextField::StartIn => put(&mut app.path, absent_when_empty(text)),
+                _ => put(&mut app.filter, absent_when_empty(text)),
+            }
+        }
+    }
 }

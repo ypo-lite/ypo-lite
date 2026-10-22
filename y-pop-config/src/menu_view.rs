@@ -27,6 +27,8 @@ pub struct MenuUi<'a> {
     pub more_open: bool,
     pub show_xml: bool,
     pub show_comments: bool,
+    /// Resolves `%builtins%` for the target readout; filled lazily.
+    pub builtins: &'a std::cell::RefCell<y_pop::builtins::Builtins>,
     /// "Delete this tray menu?" is waiting for an answer.
     pub confirming_delete: bool,
 }

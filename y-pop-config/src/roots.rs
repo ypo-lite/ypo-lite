@@ -30,11 +30,38 @@ pub fn at_position(settings: &Settings, position: usize) -> Option<ItemId> {
     menus(settings).nth(position).map(|item| item.id)
 }
 
-/// What the navigation pane calls a root: its name, or what it is when it
+/// A menu name as it will read in the menu: `&F` is the mnemonic F, shown
+/// underlined, and `&&` is a literal `&`. A lone `&` at the end means
+/// nothing and is dropped, as Windows does.
+///
+/// The underline is U+0332, COMBINING LOW LINE, after the letter:
+/// `windows-reactor`'s `TextBlock` has no underline or inline runs, and a
+/// plain text is all a nav item, a tooltip or an ellipsized row can hold.
+pub fn mnemonic(name: &str) -> String {
+    let mut shown = String::with_capacity(name.len());
+    let mut chars = name.chars();
+    while let Some(c) = chars.next() {
+        if c != '&' {
+            shown.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('&') => shown.push('&'),
+            Some(next) => {
+                shown.push(next);
+                shown.push('\u{332}');
+            }
+            None => {}
+        }
+    }
+    shown
+}
+
+/// What the navigation pane calls a root: its name (see [`mnemonic`]), or what it is when it
 /// has none.
 pub fn label(item: &Item) -> String {
     match item.name.as_deref().filter(|name| !name.is_empty()) {
-        Some(name) => name.to_owned(),
+        Some(name) => mnemonic(name),
         None => match item.kind {
             ItemKind::Group => "Unnamed menu".to_owned(),
             ItemKind::App(_) => "Unnamed app".to_owned(),
@@ -153,5 +180,20 @@ mod tests {
         assert_eq!(settings.roots.len(), 1);
         assert!(!settings.to_xml().contains("about B"));
         assert!(delete(&mut settings, b).is_none());
+    }
+}
+
+#[cfg(test)]
+mod mnemonic_tests {
+    use super::mnemonic;
+
+    #[test]
+    fn an_ampersand_underlines_the_next_character_and_doubled_is_literal() {
+        assert_eq!(mnemonic("&File"), "F\u{332}ile");
+        assert_eq!(mnemonic("Save &As"), "Save A\u{332}s");
+        assert_eq!(mnemonic("R&&D"), "R&D");
+        assert_eq!(mnemonic("&&&x"), "&x\u{332}");
+        assert_eq!(mnemonic("End&"), "End");
+        assert_eq!(mnemonic("Plain"), "Plain");
     }
 }

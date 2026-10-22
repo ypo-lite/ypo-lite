@@ -308,3 +308,58 @@ fn cancelling_the_hotkey_dialog_restores_the_hotkey_and_drops_a_new_one() {
     app.edit_menu(MenuMsg::HotkeyClosed { accepted: false });
     assert_eq!(hotkeys_of(&app, "A")[0].0, "F5");
 }
+
+fn app_fields<'a>(app: &'a ConfigApp, name: &str) -> &'a y_pop::settings::AppFields {
+    match &tree::item(settings(app), id(app, name)).expect("an item").kind {
+        ItemKind::App(fields) => fields,
+        other => panic!("not an app: {other:?}"),
+    }
+}
+
+#[test]
+fn switching_the_target_mode_keeps_what_was_typed_in_the_other_one() {
+    use crate::menu_edit::TargetMode;
+
+    let mut app = app();
+    let a = id(&app, "A");
+    app.edit_menu(MenuMsg::TargetMode(a, TargetMode::Store));
+    assert_eq!(app_fields(&app, "A").exe, None);
+    assert_eq!(app_fields(&app, "A").app_id.as_deref(), Some(""));
+    app.edit_menu(MenuMsg::Text(a, TextField::AppId, "Pub.App_x!App".into()));
+
+    app.edit_menu(MenuMsg::TargetMode(a, TargetMode::Folder));
+    assert_eq!(app_fields(&app, "A").exe.as_deref(), Some("a.exe"));
+    assert!(app_fields(&app, "A").browse && app_fields(&app, "A").app_id.is_none());
+
+    app.edit_menu(MenuMsg::TargetMode(a, TargetMode::Store));
+    assert_eq!(app_fields(&app, "A").app_id.as_deref(), Some("Pub.App_x!App"));
+    assert!(!app_fields(&app, "A").browse);
+}
+
+#[test]
+fn launch_and_folder_fields_set_and_clear_their_attributes() {
+    let mut app = app();
+    let a = id(&app, "A");
+
+    app.edit_menu(MenuMsg::Text(a, TextField::Param, "--new".into()));
+    app.edit_menu(MenuMsg::InsertVariable(a, TextField::Param, "clipboard".into()));
+    assert_eq!(app_fields(&app, "A").param.as_deref(), Some("--new%clipboard%"));
+    app.edit_menu(MenuMsg::Text(a, TextField::Param, String::new()));
+    assert_eq!(app_fields(&app, "A").param, None);
+
+    app.edit_menu(MenuMsg::Flag(a, FlagField::Elevate, true));
+    app.edit_menu(MenuMsg::ShellExecute(a, 2));
+    assert!(app_fields(&app, "A").elevate);
+    assert_eq!(app_fields(&app, "A").shell, Some(false));
+    app.edit_menu(MenuMsg::ShellExecute(a, 0));
+    assert_eq!(app_fields(&app, "A").shell, None);
+
+    app.edit_menu(MenuMsg::Depth(a, Some(3.0)));
+    app.edit_menu(MenuMsg::OpenFolder(a, 1));
+    assert_eq!(app_fields(&app, "A").depth, Some(3));
+    assert_eq!(app_fields(&app, "A").open_folder, Some(y_pop::model::OpenFolder::All));
+    app.edit_menu(MenuMsg::Depth(a, None));
+    assert_eq!(app_fields(&app, "A").depth, None);
+    assert_eq!(crate::menu_edit::depth_words(0), "files only, no subfolders");
+    assert_eq!(crate::menu_edit::depth_words(1), "1 level of subfolders");
+}

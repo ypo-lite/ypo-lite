@@ -24,6 +24,7 @@
 #![windows_subsystem = "windows"]
 
 mod general;
+mod app_form;
 mod inspector;
 mod menu_edit;
 mod menu_view;
@@ -31,6 +32,7 @@ mod prefs;
 mod roots;
 mod tree;
 mod screens;
+mod target_check;
 mod variables;
 use ypo_ui as ui;
 use ui::shell;
@@ -106,6 +108,11 @@ struct ConfigApp {
     show_xml: bool,
     /// The hotkey picker under an item's hotkey, when one is open.
     hotkeys: menu_view::HotkeyUi,
+    /// What an app's target was before its mode changed, so switching back doesn't
+    /// lose what was typed: `(exe, app-id)`. Kept for the session only.
+    target_stash: HashMap<ItemId, (Option<String>, Option<String>)>,
+    /// What "Run now" last did, for the status bar: the text and whether it went well.
+    run_status: Option<(String, bool)>,
     /// Renders what is copied while the window is alive — see
     /// `y_core::shell::ClipboardFlusher`. Held only for its `Drop`.
     _clipboard: Option<y_core::shell::ClipboardFlusher>,
@@ -272,6 +279,8 @@ impl Component for ConfigApp {
             more_open: false,
             show_xml: false,
             hotkeys: menu_view::HotkeyUi::default(),
+            target_stash: HashMap::new(),
+            run_status: None,
             _clipboard: y_core::shell::ClipboardFlusher::start(),
             notes_ready: false,
             window_width: shell::INITIAL_WINDOW.0,
@@ -371,6 +380,7 @@ impl Component for ConfigApp {
                     show_xml: self.show_xml,
                     show_comments: self.prefs.show_comments,
                     confirming_delete: self.confirming_delete == Some(id),
+                    builtins: &self.builtins,
                 },
                 viewport,
                 context,
@@ -451,6 +461,7 @@ impl ConfigApp {
         self.screen = screen;
         self.confirming_delete = None;
         self.hotkeys = menu_view::HotkeyUi::default();
+        self.run_status = None;
         self.remember_screen();
     }
 
@@ -608,6 +619,7 @@ impl ConfigApp {
     fn delete_menu(&mut self, id: ItemId) {
         self.confirming_delete = None;
         self.hotkeys = menu_view::HotkeyUi::default();
+        self.run_status = None;
         let Ok(settings) = &mut self.settings else { return };
 
         let before = settings.clone();
@@ -647,6 +659,7 @@ impl ConfigApp {
         self.confirming_reload = false;
         self.confirming_delete = None;
         self.hotkeys = menu_view::HotkeyUi::default();
+        self.run_status = None;
         self.undo = None;
         // A menu that is gone from the file is a screen that is gone.
         if let (Ok(settings), Screen::Menu(id)) = (&self.settings, self.screen)
@@ -717,6 +730,7 @@ impl ConfigApp {
     fn status(&self, settings: &Settings) -> (String, bool) {
         match &self.save_error {
             Some(error) => (format!("Save failed: {error}"), false),
+            None if self.run_status.is_some() => self.run_status.clone().unwrap_or_default(),
             None if self.dirty => ("Unsaved changes".to_owned(), true),
             None => match self.applied {
                 Some(true) => ("Saved and applied — y-pop is reloading it".to_owned(), true),
@@ -846,6 +860,8 @@ fn test_app(settings: Settings) -> ConfigApp {
             more_open: false,
             show_xml: false,
             hotkeys: menu_view::HotkeyUi::default(),
+            target_stash: HashMap::new(),
+            run_status: None,
             _clipboard: None,
             notes_ready: true,
             window_width: 1000.0,
