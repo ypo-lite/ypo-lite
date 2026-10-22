@@ -36,18 +36,33 @@ pub struct ShellLayout {
 
 pub fn layout(window_width: f64) -> ShellLayout {
     let pane_expanded = window_width >= EXPANDED_PANE_MIN_WINDOW;
-    let pane = if pane_expanded { PANE_EXPANDED } else { PANE_COMPACT };
+    let pane = if pane_expanded {
+        PANE_EXPANDED
+    } else {
+        PANE_COMPACT
+    };
     let rest = Viewport::new(window_width - pane - CHROME_ALLOWANCE);
-    let page_padding = if rest.size_class() == SizeClass::Compact { space::L } else { space::XL };
-    ShellLayout { pane_expanded, page_padding, content: rest.inset(page_padding) }
+    let page_padding = if rest.size_class() == SizeClass::Compact {
+        space::L
+    } else {
+        space::XL
+    };
+    ShellLayout {
+        pane_expanded,
+        page_padding,
+        content: rest.inset(page_padding),
+    }
 }
 
 /// The pane's display-mode settings for `layout`.
 pub fn pane_mode(nav: NavigationView, layout: ShellLayout) -> NavigationView {
     if layout.pane_expanded {
-        nav.pane_display_mode(NavigationViewPaneDisplayMode::Left).open_pane_length(PANE_EXPANDED).is_pane_open(true)
+        nav.pane_display_mode(NavigationViewPaneDisplayMode::Left)
+            .open_pane_length(PANE_EXPANDED)
+            .is_pane_open(true)
     } else {
-        nav.pane_display_mode(NavigationViewPaneDisplayMode::LeftCompact).is_pane_open(false)
+        nav.pane_display_mode(NavigationViewPaneDisplayMode::LeftCompact)
+            .is_pane_open(false)
     }
     // Pinned in both modes: four peer sections don't need the hamburger to
     // open an overlay pane, nor a back button with nothing to go back to.
@@ -59,14 +74,20 @@ pub fn pane_mode(nav: NavigationView, layout: ShellLayout) -> NavigationView {
 /// A screen's view, padded and vertically scrolling. The horizontal axis
 /// never scrolls — screens reflow to the width they're given instead.
 pub fn page_frame(screen: View, layout: ShellLayout) -> View {
-    scroll_y(Border::new().padding(Thickness::xy(layout.page_padding, space::XL)).content(screen))
+    scroll_y(
+        Border::new()
+            .padding(Thickness::xy(layout.page_padding, space::XL))
+            .content(screen),
+    )
 }
 
 /// Like [`page_frame`], but without the scroll: for a screen that scrolls
 /// its own panes so the others stay in view. The screen gets the window's
 /// height and must give it to something (a `Star` row), or nothing scrolls.
 pub fn page_frame_pinned(screen: View, layout: ShellLayout) -> View {
-    Border::new().padding(Thickness::xy(layout.page_padding, space::XL)).content(screen)
+    Border::new()
+        .padding(Thickness::xy(layout.page_padding, space::XL))
+        .content(screen)
 }
 
 /// What [`action_bar`] shows besides the buttons every app has.
@@ -91,16 +112,37 @@ pub struct BarStatus<'a> {
 /// The status / Reload / Save bar along the bottom of the window — one for
 /// the whole app, so an edit on one screen can be saved from another.
 pub fn action_bar(bar: BarStatus<'_>, on_reload: Callback<()>, on_save: Callback<()>) -> View {
-    let BarStatus { text: status, detail: status_detail, healthy, dirty, save_tooltip, extra, tools } = bar;
+    let BarStatus {
+        text: status,
+        detail: status_detail,
+        healthy,
+        dirty,
+        save_tooltip,
+        extra,
+        tools,
+    } = bar;
     let status: View = Stack::horizontal(space::S)
-        .child("dot", dot(if healthy { ThemeBrush::Accent } else { ThemeBrush::SystemCritical }))
-        .child("text", text::single_line(status).vertical_alignment(VerticalAlignment::Center))
+        .child(
+            "dot",
+            dot(if healthy {
+                ThemeBrush::Accent
+            } else {
+                ThemeBrush::SystemCritical
+            }),
+        )
+        .child(
+            "text",
+            text::single_line(status).vertical_alignment(VerticalAlignment::Center),
+        )
         .into();
     let status = status.tooltip(status_detail);
 
     // A Grid, not a horizontal StackPanel: the status takes what's left
     // after the buttons and trims, instead of pushing them off the window.
-    let status_cell = Border::new().vertical_alignment(VerticalAlignment::Center).grid_column(0).content(status);
+    let status_cell = Border::new()
+        .vertical_alignment(VerticalAlignment::Center)
+        .grid_column(0)
+        .content(status);
     let mut cells: Vec<(&str, View)> = vec![("status", status_cell)];
     if let Some(tools) = tools {
         cells.push(("tools", cell(tools, 0, 1)));
@@ -108,11 +150,27 @@ pub fn action_bar(bar: BarStatus<'_>, on_reload: Callback<()>, on_save: Callback
     if let Some(extra) = extra {
         cells.push(("extra", cell(extra, 0, 2)));
     }
-    cells.push(("reload", cell(button("Reload from disk", false, true, on_reload), 0, 3)));
-    cells.push(("save", cell(button("Save", true, dirty, on_save).tooltip(save_tooltip), 0, 4)));
+    cells.push((
+        "reload",
+        cell(button("Reload from disk", false, true, on_reload), 0, 3),
+    ));
+    cells.push((
+        "save",
+        cell(
+            button("Save", true, dirty, on_save).tooltip(save_tooltip),
+            0,
+            4,
+        ),
+    ));
 
     let row: View = Grid::new()
-        .columns([GridLength::STAR, GridLength::Auto, GridLength::Auto, GridLength::Auto, GridLength::Auto])
+        .columns([
+            GridLength::STAR,
+            GridLength::Auto,
+            GridLength::Auto,
+            GridLength::Auto,
+            GridLength::Auto,
+        ])
         .column_spacing(space::S)
         .keyed_children(cells);
 
@@ -128,7 +186,12 @@ pub fn action_bar(bar: BarStatus<'_>, on_reload: Callback<()>, on_save: Callback
 /// is showing. `title` says how many and of what; `advice` is what the
 /// user should know before saving (whether a save keeps or drops what the
 /// problems describe) — saying so before the first save is the point.
-pub fn warnings_banner(title: String, advice: &str, warnings: &[String], on_close: Callback<()>) -> View {
+pub fn warnings_banner(
+    title: String,
+    advice: &str,
+    warnings: &[String],
+    on_close: Callback<()>,
+) -> View {
     const SHOWN: usize = 6;
     let mut lines: Vec<&str> = warnings.iter().take(SHOWN).map(String::as_str).collect();
     let more = warnings.len().saturating_sub(SHOWN);
@@ -160,8 +223,14 @@ mod tests {
     #[test]
     fn content_is_what_remains_after_pane_padding_and_chrome() {
         let wide = layout(1200.0);
-        assert_eq!(wide.content.width, 1200.0 - PANE_EXPANDED - CHROME_ALLOWANCE - 2.0 * space::XL);
+        assert_eq!(
+            wide.content.width,
+            1200.0 - PANE_EXPANDED - CHROME_ALLOWANCE - 2.0 * space::XL
+        );
         let narrow = layout(MIN_WINDOW.0);
-        assert_eq!(narrow.content.width, MIN_WINDOW.0 - PANE_COMPACT - CHROME_ALLOWANCE - 2.0 * space::L);
+        assert_eq!(
+            narrow.content.width,
+            MIN_WINDOW.0 - PANE_COMPACT - CHROME_ALLOWANCE - 2.0 * space::L
+        );
     }
 }

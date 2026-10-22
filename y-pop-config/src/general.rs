@@ -78,8 +78,24 @@ pub fn general_view(
         "Configuration file",
         &path.display().to_string(),
         Stack::horizontal(space::S)
-            .child("folder", button("Open folder", false, true, context.callback(|()| Msg::OpenConfigFolder)))
-            .child("edit", button("Edit XML…", false, true, context.callback(|()| Msg::EditConfigXml))),
+            .child(
+                "folder",
+                button(
+                    "Open folder",
+                    false,
+                    true,
+                    context.callback(|()| Msg::OpenConfigFolder),
+                ),
+            )
+            .child(
+                "edit",
+                button(
+                    "Edit XML…",
+                    false,
+                    true,
+                    context.callback(|()| Msg::EditConfigXml),
+                ),
+            ),
         viewport,
     );
 
@@ -91,7 +107,9 @@ pub fn general_view(
                 "menus",
                 section(
                     "Popup menus",
-                    Stack::vertical(space::M).child("style", menu_style).maybe("layout", layout),
+                    Stack::vertical(space::M)
+                        .child("style", menu_style)
+                        .maybe("layout", layout),
                 ),
             )
             .child("launching", section("Launching", launching))
@@ -105,14 +123,28 @@ pub fn general_view(
 /// `Settings::set_file_notes_text`); until then each stays where it was.
 /// `ready` is false on the box's first render: see `ConfigApp::notes_ready`.
 fn notes(settings: &Settings, ready: bool, context: &ViewContext<ConfigApp>) -> View {
-    let text = if ready { settings.file_notes_text() } else { String::new() };
+    let text = if ready {
+        settings.file_notes_text()
+    } else {
+        String::new()
+    };
 
     let mut body = Stack::vertical(space::S)
         .child("explanation", text::caption(NOTES_HELP))
-        .child("text", text_area(text.clone(), "Notes about this file", context.callback(Msg::NotesEdited)));
+        .child(
+            "text",
+            text_area(
+                text.clone(),
+                "Notes about this file",
+                context.callback(Msg::NotesEdited),
+            ),
+        );
     // C4: `--` can't be in an XML comment; the writer spells it `- -`.
     if text.contains("--") {
-        body = body.child("warning", text::caption("-- isn't allowed in an XML comment; it will be saved as - -."));
+        body = body.child(
+            "warning",
+            text::caption("-- isn't allowed in an XML comment; it will be saved as - -."),
+        );
     }
     if settings.file_notes_count() > 1 {
         body = body.child(
@@ -123,4 +155,5 @@ fn notes(settings: &Settings, ready: bool, context: &ViewContext<ConfigApp>) -> 
     section("Notes in the file", body)
 }
 
-const NOTES_HELP: &str = "Comments at the top and bottom of y-pop.xml. They are kept when you save.";
+const NOTES_HELP: &str =
+    "Comments at the top and bottom of y-pop.xml. They are kept when you save.";

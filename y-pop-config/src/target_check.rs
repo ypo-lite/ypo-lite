@@ -44,9 +44,12 @@ pub fn check(expanded: &str, folder: bool) -> Found {
 }
 
 fn on_path(name: &str) -> bool {
-    let Some(path) = std::env::var_os("PATH") else { return false };
+    let Some(path) = std::env::var_os("PATH") else {
+        return false;
+    };
     let with_exe = format!("{name}.exe");
-    std::env::split_paths(&path).any(|dir| dir.join(name).is_file() || dir.join(&with_exe).is_file())
+    std::env::split_paths(&path)
+        .any(|dir| dir.join(name).is_file() || dir.join(&with_exe).is_file())
 }
 
 #[cfg(test)]
@@ -79,8 +82,14 @@ mod tests {
     #[test]
     fn what_cannot_be_checked_says_so() {
         assert!(matches!(check("", false), Found::Unchecked(_)));
-        assert!(matches!(check(r"\\server\share\a.exe", false), Found::Unchecked(_)));
+        assert!(matches!(
+            check(r"\\server\share\a.exe", false),
+            Found::Unchecked(_)
+        ));
         assert!(matches!(check(r"%nope%\a.exe", false), Found::Unchecked(_)));
-        assert!(matches!(check("https://example.com", false), Found::Unchecked(_)));
+        assert!(matches!(
+            check("https://example.com", false),
+            Found::Unchecked(_)
+        ));
     }
 }

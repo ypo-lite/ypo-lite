@@ -102,15 +102,16 @@ pub fn product_version() -> Option<String> {
     // The root of the block, `\`, is the language-neutral fixed record.
     let mut fixed: *mut c_void = std::ptr::null_mut();
     let mut length = 0u32;
-    let found = unsafe {
-        VerQueryValueW(block.as_ptr().cast(), w!("\\"), &mut fixed, &mut length)
-    };
+    let found = unsafe { VerQueryValueW(block.as_ptr().cast(), w!("\\"), &mut fixed, &mut length) };
     if !found.as_bool() || fixed.is_null() || (length as usize) < size_of::<VS_FIXEDFILEINFO>() {
         return None;
     }
 
     let info = unsafe { &*fixed.cast::<VS_FIXEDFILEINFO>() };
-    Some(format_version(info.dwProductVersionMS, info.dwProductVersionLS))
+    Some(format_version(
+        info.dwProductVersionMS,
+        info.dwProductVersionLS,
+    ))
 }
 
 /// `VS_FIXEDFILEINFO`'s two 32-bit halves of a version, as text.

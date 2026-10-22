@@ -92,9 +92,9 @@ impl Refusal {
     pub fn message(self) -> Option<String> {
         match self {
             Self::Full => Some(format!("Too many hidden windows ({MAX_HIDDEN}).")),
-            Self::Elevated => Some(
-                "That window runs as administrator; y-snap would have to as well.".to_owned(),
-            ),
+            Self::Elevated => {
+                Some("That window runs as administrator; y-snap would have to as well.".to_owned())
+            }
             Self::Gone => None,
             Self::NoIcon => Some("Could not create the notification icon.".to_owned()),
         }
@@ -276,7 +276,11 @@ impl Hidden {
 
     /// Puts the notification icons back after Explorer restarted.
     pub fn restore_tray_icons(&mut self) {
-        for tray in self.entries.iter_mut().filter_map(|entry| entry.tray.as_mut()) {
+        for tray in self
+            .entries
+            .iter_mut()
+            .filter_map(|entry| entry.tray.as_mut())
+        {
             let _ = tray.restore();
         }
     }

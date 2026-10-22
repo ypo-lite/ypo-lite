@@ -59,18 +59,36 @@ const EXPAND_SLOT: f64 = size::ICON_BUTTON;
 const TREE_MIN: f64 = 300.0;
 const INSPECTOR_MIN: f64 = 320.0;
 
-pub fn menu_view(settings: &Settings, ui: &MenuUi<'_>, viewport: Viewport, context: &ViewContext<ConfigApp>) -> View {
+pub fn menu_view(
+    settings: &Settings,
+    ui: &MenuUi<'_>,
+    viewport: Viewport,
+    context: &ViewContext<ConfigApp>,
+) -> View {
     let Some(root) = tree::item(settings, ui.root) else {
-        return page("Tray menu", "This tray menu is no longer in the file.", View::empty());
+        return page(
+            "Tray menu",
+            "This tray menu is no longer in the file.",
+            View::empty(),
+        );
     };
 
-    let hotkeys: Vec<&str> = root.hotkeys.iter().map(|hotkey| hotkey.key.as_str()).collect();
-    let opened_by = if hotkeys.is_empty() { String::new() } else { format!(", also opened with {}", hotkeys.join(", ")) };
+    let hotkeys: Vec<&str> = root
+        .hotkeys
+        .iter()
+        .map(|hotkey| hotkey.key.as_str())
+        .collect();
+    let opened_by = if hotkeys.is_empty() {
+        String::new()
+    } else {
+        format!(", also opened with {}", hotkeys.join(", "))
+    };
 
     // An app (or anything that isn't a group) has no tree: its inspector is
     // the whole screen.
     if root.kind != ItemKind::Group {
-        let lede = format!("A tray icon{opened_by}. It has no menu: turn it into one to hold more items.");
+        let lede =
+            format!("A tray icon{opened_by}. It has no menu: turn it into one to hold more items.");
         return page(
             &roots::label(root),
             &lede,
@@ -99,23 +117,30 @@ pub fn menu_view(settings: &Settings, ui: &MenuUi<'_>, viewport: Viewport, conte
         return Grid::new()
             .rows([GridLength::Auto, GridLength::STAR])
             .row_spacing(space::XL)
-            .keyed_children([("header", cell(header, 0, 0)), ("panes", cell(split.build(outline, inspector), 1, 0))]);
+            .keyed_children([
+                ("header", cell(header, 0, 0)),
+                ("panes", cell(split.build(outline, inspector), 1, 0)),
+            ]);
     }
 
     let outline = outline_pane(settings, ui, split.primary(), false, context);
-    let inspector = crate::inspector::inspector_view(settings, ui, ui.selected, split.secondary(), context);
+    let inspector =
+        crate::inspector::inspector_view(settings, ui, ui.selected, split.secondary(), context);
     page(&roots::label(root), &lede, split.build(outline, inspector))
 }
 
 fn split(viewport: Viewport) -> Split {
-    Split::new(viewport).min_widths(TREE_MIN, INSPECTOR_MIN).weights(1.0, 1.0)
+    Split::new(viewport)
+        .min_widths(TREE_MIN, INSPECTOR_MIN)
+        .weights(1.0, 1.0)
 }
 
 /// Whether the screen shows the outline and the inspector side by side, each
 /// scrolling on its own — then the page around it must not scroll
 /// (`shell::page_frame_pinned`).
 pub fn is_pinned(settings: &Settings, root: ItemId, viewport: Viewport) -> bool {
-    tree::item(settings, root).is_some_and(|root| root.kind == ItemKind::Group) && split(viewport).is_side_by_side()
+    tree::item(settings, root).is_some_and(|root| root.kind == ItemKind::Group)
+        && split(viewport).is_side_by_side()
 }
 
 /// What a pane's scrollbar takes from its width, so it never covers a card.
@@ -126,7 +151,11 @@ fn pane_viewport(viewport: Viewport) -> Viewport {
 }
 
 fn pane_scroll(pane: View) -> View {
-    scroll_y(Border::new().padding(Thickness::new(0.0, 0.0, SCROLLBAR, 0.0)).content(pane))
+    scroll_y(
+        Border::new()
+            .padding(Thickness::new(0.0, 0.0, SCROLLBAR, 0.0))
+            .content(pane),
+    )
 }
 
 /// `pinned`: the pane has the window's height to itself, and scrolls its rows
@@ -148,15 +177,21 @@ fn outline_pane(
     for row in &rows {
         let indent = indent_of(row.depth);
         match &row.kind {
-            TreeRowKind::Item { id, hidden_comments } => {
+            TreeRowKind::Item {
+                id,
+                hidden_comments,
+            } => {
                 if let Some(item) = tree::item(settings, *id) {
                     let view = item_row(settings, item, row.depth, *hidden_comments, ui, context);
                     outline = outline.child(format!("i{}", id.get()), view);
                 }
             }
-            TreeRowKind::Comment { first_line, lines, .. } => {
+            TreeRowKind::Comment {
+                first_line, lines, ..
+            } => {
                 other += 1;
-                outline = outline.child(format!("c{other}"), comment_row(first_line, *lines, indent));
+                outline =
+                    outline.child(format!("c{other}"), comment_row(first_line, *lines, indent));
             }
             TreeRowKind::Marker => {
                 other += 1;
@@ -177,7 +212,11 @@ fn outline_pane(
     if pinned {
         // The toolbar stays put; only the rows scroll under it, so a new item
         // can be added wherever the selection is.
-        let rows = scroll_y(Border::new().padding(Thickness::new(0.0, 0.0, SCROLLBAR, 0.0)).content(outline));
+        let rows = scroll_y(
+            Border::new()
+                .padding(Thickness::new(0.0, 0.0, SCROLLBAR, 0.0))
+                .content(outline),
+        );
         return card().content(
             Grid::new()
                 .rows([GridLength::Auto, GridLength::STAR])
@@ -185,7 +224,11 @@ fn outline_pane(
                 .keyed_children([("toolbar", cell(toolbar, 0, 0)), ("rows", cell(rows, 1, 0))]),
         );
     }
-    card().content(Stack::vertical(space::M).child("toolbar", toolbar).child("rows", outline))
+    card().content(
+        Stack::vertical(space::M)
+            .child("toolbar", toolbar)
+            .child("rows", outline),
+    )
 }
 
 // ---- the toolbar -----------------------------------------------------
@@ -193,7 +236,11 @@ fn outline_pane(
 /// A toolbar button that fills its cell: an icon and a label.
 fn tool(symbol: Symbol, label: &str, accent: bool, on_click: Callback<()>) -> View {
     Button::new()
-        .style(if accent { ButtonStyle::Accent } else { ButtonStyle::Default })
+        .style(if accent {
+            ButtonStyle::Accent
+        } else {
+            ButtonStyle::Default
+        })
         .fill()
         .on_click(on_click)
         .content(
@@ -212,9 +259,23 @@ fn add_row(viewport: Viewport, context: &ViewContext<ConfigApp>) -> View {
             // Phase 8 turns this into the app picker; until then it adds an
             // empty app to fill in.
             ("app", tool(Symbol::AllApps, "App", true, add(NewKind::App))),
-            ("group", tool(Symbol::Folder, "Group", false, add(NewKind::Group))),
-            ("separator", tool(Symbol::Remove, "Separator", false, add(NewKind::Separator))),
-            ("more", tool(Symbol::More, "More", false, context.callback(|()| Msg::Menu(MenuMsg::MoreToggled)))),
+            (
+                "group",
+                tool(Symbol::Folder, "Group", false, add(NewKind::Group)),
+            ),
+            (
+                "separator",
+                tool(Symbol::Remove, "Separator", false, add(NewKind::Separator)),
+            ),
+            (
+                "more",
+                tool(
+                    Symbol::More,
+                    "More",
+                    false,
+                    context.callback(|()| Msg::Menu(MenuMsg::MoreToggled)),
+                ),
+            ),
         ])
         .build(viewport)
 }
@@ -225,12 +286,35 @@ fn more_row(viewport: Viewport, context: &ViewContext<ConfigApp>) -> View {
         .max_columns(3)
         .gap(space::S, space::S)
         .items([
-            ("titled", tool(Symbol::Tag, "Titled separator", false, add(NewKind::Titled))),
-            ("folder", tool(Symbol::Folder, "Folder (browse)", false, add(NewKind::Folder))),
-            ("break", tool(Symbol::ViewAll, "Column break", false, add(NewKind::Break))),
-            ("about", tool(Symbol::Help, "About", false, add(NewKind::About))),
-            ("quit", tool(Symbol::Cancel, "Quit", false, add(NewKind::Quit))),
-            ("settings", tool(Symbol::Setting, "Settings", false, add(NewKind::Settings))),
+            (
+                "titled",
+                tool(Symbol::Tag, "Titled separator", false, add(NewKind::Titled)),
+            ),
+            (
+                "folder",
+                tool(
+                    Symbol::Folder,
+                    "Folder (browse)",
+                    false,
+                    add(NewKind::Folder),
+                ),
+            ),
+            (
+                "break",
+                tool(Symbol::ViewAll, "Column break", false, add(NewKind::Break)),
+            ),
+            (
+                "about",
+                tool(Symbol::Help, "About", false, add(NewKind::About)),
+            ),
+            (
+                "quit",
+                tool(Symbol::Cancel, "Quit", false, add(NewKind::Quit)),
+            ),
+            (
+                "settings",
+                tool(Symbol::Setting, "Settings", false, add(NewKind::Settings)),
+            ),
         ])
         .build(viewport)
 }
@@ -270,7 +354,11 @@ fn item_row(
 
     let body = row_body(settings, item, ui);
     let row: View = Button::new()
-        .style(if selected { ButtonStyle::Accent } else { ButtonStyle::Subtle })
+        .style(if selected {
+            ButtonStyle::Accent
+        } else {
+            ButtonStyle::Subtle
+        })
         .fill()
         .horizontal_content_alignment(HorizontalAlignment::Stretch)
         .on_click(context.callback(move |()| Msg::Menu(MenuMsg::Select(id))))
@@ -279,7 +367,10 @@ fn item_row(
     let trailing: View = if hidden_comments > 0 {
         icon_button(
             Symbol::Comment,
-            &format!("{hidden_comments} hidden comment{} — click to show", if hidden_comments == 1 { "" } else { "s" }),
+            &format!(
+                "{hidden_comments} hidden comment{} — click to show",
+                if hidden_comments == 1 { "" } else { "s" }
+            ),
             context.callback(|()| Msg::ShowCommentsToggled(true)),
         )
     } else {
@@ -289,7 +380,16 @@ fn item_row(
     Grid::new()
         .columns([GridLength::Auto, GridLength::STAR, GridLength::Auto])
         .keyed_children([
-            ("expand", cell(Border::new().margin(Thickness::new(indent, 0.0, 0.0, 0.0)).content(expand), 0, 0)),
+            (
+                "expand",
+                cell(
+                    Border::new()
+                        .margin(Thickness::new(indent, 0.0, 0.0, 0.0))
+                        .content(expand),
+                    0,
+                    0,
+                ),
+            ),
             ("row", cell(row, 0, 1)),
             ("trailing", cell(trailing, 0, 2)),
         ])
@@ -311,7 +411,15 @@ fn row_body(settings: &Settings, item: &Item, ui: &MenuUi<'_>) -> View {
                     .columns([GridLength::Auto, GridLength::STAR])
                     .column_spacing(space::S)
                     .keyed_children([
-                        ("title", cell(text::caption(title.to_owned()).vertical_alignment(VerticalAlignment::Center), 0, 0)),
+                        (
+                            "title",
+                            cell(
+                                text::caption(title.to_owned())
+                                    .vertical_alignment(VerticalAlignment::Center),
+                                0,
+                                0,
+                            ),
+                        ),
                         ("rule", cell(rule, 0, 1)),
                     ]),
                 None => rule,
@@ -320,7 +428,10 @@ fn row_body(settings: &Settings, item: &Item, ui: &MenuUi<'_>) -> View {
         ItemKind::Break => text::caption("— column break —").into(),
         kind => {
             let mut parts = Stack::horizontal(space::S)
-                .child("icon", ui.item_icon(settings, item, crate::app_icons::SHOWN))
+                .child(
+                    "icon",
+                    ui.item_icon(settings, item, crate::app_icons::SHOWN),
+                )
                 .child("name", text::single_line(roots::label(item)));
 
             if let ItemKind::App(app) = kind {
@@ -332,10 +443,16 @@ fn row_body(settings: &Settings, item: &Item, ui: &MenuUi<'_>) -> View {
                 }
             }
             if item.kind == ItemKind::Group && ui.collapsed.contains(&item.id) {
-                parts = parts.child("count", text::caption(tree::count_inside(settings, item.id).to_string()));
+                parts = parts.child(
+                    "count",
+                    text::caption(tree::count_inside(settings, item.id).to_string()),
+                );
             }
             for (index, hotkey) in item.hotkeys.iter().enumerate() {
-                parts = parts.child(format!("key{index}"), keycaps(std::slice::from_ref(&hotkey.key), false));
+                parts = parts.child(
+                    format!("key{index}"),
+                    keycaps(std::slice::from_ref(&hotkey.key), false),
+                );
             }
             parts.into()
         }
@@ -358,8 +475,16 @@ pub fn symbol_of(kind: &ItemKind) -> Symbol {
 /// A comment, read-only: muted, one line, with how many lines it really has.
 fn comment_row(first_line: &str, lines: usize, indent: f64) -> View {
     let mut parts = Stack::horizontal(space::S)
-        .child("icon", SymbolIcon::new().symbol(Symbol::Comment).opacity(emphasis::SUBTLE))
-        .child("text", text::single_line(first_line.to_owned()).opacity(emphasis::MUTED));
+        .child(
+            "icon",
+            SymbolIcon::new()
+                .symbol(Symbol::Comment)
+                .opacity(emphasis::SUBTLE),
+        )
+        .child(
+            "text",
+            text::single_line(first_line.to_owned()).opacity(emphasis::MUTED),
+        );
     if lines > 1 {
         parts = parts.child("lines", text::caption(format!("{lines} lines")));
     }
@@ -377,21 +502,33 @@ fn marker_row(indent: f64) -> View {
         .background(ThemeBrush::Accent)
         .vertical_alignment(VerticalAlignment::Center)
         .into();
-    Border::new().margin(Thickness::new(indent + EXPAND_SLOT, 0.0, 0.0, 0.0)).padding(Thickness::xy(space::M, 0.0)).content(
-        Stack::horizontal(space::S).child("bar", bar).child("text", text::caption("next item goes here")),
-    )
+    Border::new()
+        .margin(Thickness::new(indent + EXPAND_SLOT, 0.0, 0.0, 0.0))
+        .padding(Thickness::xy(space::M, 0.0))
+        .content(
+            Stack::horizontal(space::S)
+                .child("bar", bar)
+                .child("text", text::caption("next item goes here")),
+        )
 }
 
 /// Comments with no item after them to hang a marker on.
 fn hidden_row(count: usize, indent: f64, context: &ViewContext<ConfigApp>) -> View {
     let marker = icon_button(
         Symbol::Comment,
-        &format!("{count} hidden comment{} — click to show", if count == 1 { "" } else { "s" }),
+        &format!(
+            "{count} hidden comment{} — click to show",
+            if count == 1 { "" } else { "s" }
+        ),
         context.callback(|()| Msg::ShowCommentsToggled(true)),
     );
     Border::new()
         .margin(Thickness::new(indent + EXPAND_SLOT, 0.0, 0.0, 0.0))
-        .content(Stack::horizontal(space::S).child("marker", marker).child("text", text::caption("hidden at the end")))
+        .content(
+            Stack::horizontal(space::S)
+                .child("marker", marker)
+                .child("text", text::caption("hidden at the end")),
+        )
 }
 
 impl MenuUi<'_> {
@@ -399,6 +536,10 @@ impl MenuUi<'_> {
     /// its symbol until then (and where it has none).
     pub fn item_icon(&self, settings: &Settings, item: &Item, size: f64) -> View {
         let spec = crate::app_icons::spec_for(settings, item, &mut *self.builtins.borrow_mut());
-        crate::app_icons::icon_or_symbol(self.icons.image(spec.as_ref(), size), symbol_of(&item.kind), size)
+        crate::app_icons::icon_or_symbol(
+            self.icons.image(spec.as_ref(), size),
+            symbol_of(&item.kind),
+            size,
+        )
     }
 }

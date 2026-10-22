@@ -72,7 +72,11 @@ impl Prefs {
     }
 
     fn write_to(&self, config: &mut Config) {
-        config.set(SECTION, "show-comments", if self.show_comments { "true" } else { "false" });
+        config.set(
+            SECTION,
+            "show-comments",
+            if self.show_comments { "true" } else { "false" },
+        );
         config.set(SECTION, "screen", &self.last_screen.format());
     }
 }
@@ -142,12 +146,16 @@ mod tests {
     #[test]
     fn the_file_sits_next_to_the_configuration() {
         let path = path_for(Path::new(r"C:\Users\me\AppData\Roaming\Ypo-Lite\y-pop.xml"));
-        assert_eq!(path, Path::new(r"C:\Users\me\AppData\Roaming\Ypo-Lite\y-pop-config.ini"));
+        assert_eq!(
+            path,
+            Path::new(r"C:\Users\me\AppData\Roaming\Ypo-Lite\y-pop-config.ini")
+        );
     }
 
     #[test]
     fn saving_creates_the_file_and_loading_reads_it() {
-        let directory = std::env::temp_dir().join(format!("y-pop-config-prefs-{}", std::process::id()));
+        let directory =
+            std::env::temp_dir().join(format!("y-pop-config-prefs-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&directory);
         std::fs::create_dir_all(&directory).expect("temp dir");
         let path = directory.join(FILE_NAME);

@@ -338,9 +338,11 @@ impl Settings {
             .chain(&self.epilog)
             .map(|comment| comment.text.as_str())
             .collect();
-        notes.join("
+        notes.join(
+            "
 
-")
+",
+        )
     }
 
     /// How many separate notes [`Settings::file_notes_text`] joins.
@@ -362,7 +364,11 @@ impl Settings {
         if text == self.file_notes_text() {
             return false;
         }
-        self.prolog = if text.trim().is_empty() { Vec::new() } else { vec![Comment::new(text)] };
+        self.prolog = if text.trim().is_empty() {
+            Vec::new()
+        } else {
+            vec![Comment::new(text)]
+        };
         self.intro.clear();
         self.epilog.clear();
         true

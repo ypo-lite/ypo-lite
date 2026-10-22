@@ -129,8 +129,15 @@ const MARKS: &[Entry] = &[
 ];
 
 impl IconCategory {
-    pub const ALL: [Self; 7] =
-        [Self::Windows, Self::Arrows, Self::Tray, Self::Pin, Self::Desktops, Self::Pointer, Self::Marks];
+    pub const ALL: [Self; 7] = [
+        Self::Windows,
+        Self::Arrows,
+        Self::Tray,
+        Self::Pin,
+        Self::Desktops,
+        Self::Pointer,
+        Self::Marks,
+    ];
 
     pub fn title(self) -> &'static str {
         match self {
@@ -145,7 +152,9 @@ impl IconCategory {
     }
 
     pub fn from_title(title: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|category| category.title() == title)
+        Self::ALL
+            .into_iter()
+            .find(|category| category.title() == title)
     }
 
     fn entries(self) -> &'static [Entry] {
@@ -166,7 +175,9 @@ impl IconCategory {
 
     /// The category `icon` is listed under, if it's in the catalog.
     pub fn of(icon: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|category| category.icons().any(|i| i == icon))
+        Self::ALL
+            .into_iter()
+            .find(|category| category.icons().any(|i| i == icon))
     }
 }
 
@@ -180,7 +191,11 @@ pub fn search(query: &str) -> Vec<&'static str> {
     IconCategory::ALL
         .into_iter()
         .flat_map(IconCategory::entries)
-        .filter(|(_, keywords)| words.iter().all(|word| keywords.split(' ').any(|k| k.starts_with(word.as_str()))))
+        .filter(|(_, keywords)| {
+            words
+                .iter()
+                .all(|word| keywords.split(' ').any(|k| k.starts_with(word.as_str())))
+        })
         .map(|(icon, _)| *icon)
         .collect()
 }
@@ -224,7 +239,11 @@ pub fn default_for(action: Action) -> &'static str {
 /// The icon a tile should have after its action changes from `previous`
 /// to `next`: `next`'s default if the current icon is empty or was just
 /// `previous`'s default, otherwise unchanged (someone picked it).
-pub fn after_action_change(current: Option<&str>, previous: Action, next: Action) -> Option<String> {
+pub fn after_action_change(
+    current: Option<&str>,
+    previous: Action,
+    next: Action,
+) -> Option<String> {
     match current {
         None => Some(default_for(next).to_owned()),
         Some(icon) if icon == default_for(previous) => Some(default_for(next).to_owned()),
@@ -241,7 +260,10 @@ mod tests {
         let mut seen = Vec::new();
         for category in IconCategory::ALL {
             for icon in category.icons() {
-                assert!(!seen.contains(&icon), "{icon} in {category:?} is listed twice");
+                assert!(
+                    !seen.contains(&icon),
+                    "{icon} in {category:?} is listed twice"
+                );
                 seen.push(icon);
             }
         }
@@ -251,7 +273,10 @@ mod tests {
     fn every_suggestion_is_in_the_catalog() {
         for action in crate::overlay::OVERLAY_ACTIONS {
             for icon in suggestions(action) {
-                assert!(IconCategory::of(icon).is_some(), "{icon} suggested for {action} isn't in the catalog");
+                assert!(
+                    IconCategory::of(icon).is_some(),
+                    "{icon} suggested for {action} isn't in the catalog"
+                );
             }
         }
     }
@@ -266,8 +291,17 @@ mod tests {
     #[test]
     fn a_hand_picked_icon_survives_an_action_change() {
         let minimize = default_for(Action::Minimize);
-        assert_eq!(after_action_change(None, Action::Minimize, Action::Close).as_deref(), Some("❌"));
-        assert_eq!(after_action_change(Some(minimize), Action::Minimize, Action::Close).as_deref(), Some("❌"));
-        assert_eq!(after_action_change(Some("⭐"), Action::Minimize, Action::Close).as_deref(), Some("⭐"));
+        assert_eq!(
+            after_action_change(None, Action::Minimize, Action::Close).as_deref(),
+            Some("❌")
+        );
+        assert_eq!(
+            after_action_change(Some(minimize), Action::Minimize, Action::Close).as_deref(),
+            Some("❌")
+        );
+        assert_eq!(
+            after_action_change(Some("⭐"), Action::Minimize, Action::Close).as_deref(),
+            Some("⭐")
+        );
     }
 }

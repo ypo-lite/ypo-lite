@@ -23,21 +23,21 @@
 
 #![windows_subsystem = "windows"]
 
-mod general;
 mod app_form;
 mod app_icons;
+mod general;
 mod icon_picker;
 mod inspector;
 mod menu_edit;
 mod menu_view;
 mod prefs;
 mod roots;
-mod tree;
 mod screens;
 mod target_check;
+mod tree;
 mod variables;
-use ypo_ui as ui;
 use ui::shell;
+use ypo_ui as ui;
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -53,8 +53,8 @@ use y_pop::settings::{ItemId, PopupStyle, Renderer, Settings, VarEntry};
 use menu_edit::MenuMsg;
 use menu_view::MenuUi;
 use prefs::{LastScreen, Prefs};
-use variables::VariablesUi;
 use ui::prelude::*;
+use variables::VariablesUi;
 
 fn main() {
     // One editor at a time: two windows over one file would overwrite each
@@ -227,7 +227,10 @@ enum Msg {
     VarNameChanged(usize, String),
     VarValueChanged(usize, String),
     VarAdded,
-    VarMoved { index: usize, up: bool },
+    VarMoved {
+        index: usize,
+        up: bool,
+    },
     VarDeleteAsked(usize),
     VarDeleteConfirmed(usize),
     VarDeleteCancelled,
@@ -352,9 +355,14 @@ impl Component for ConfigApp {
         let (width, height) = shell::INITIAL_WINDOW;
         let (min_width, min_height) = shell::MIN_WINDOW;
         context.window_visuals(
-            WindowVisuals::new().backdrop(WindowBackdrop::Mica).client_size(width, height).constraints(
-                WindowConstraints { min_width: Some(min_width), min_height: Some(min_height), ..Default::default() },
-            ),
+            WindowVisuals::new()
+                .backdrop(WindowBackdrop::Mica)
+                .client_size(width, height)
+                .constraints(WindowConstraints {
+                    min_width: Some(min_width),
+                    min_height: Some(min_height),
+                    ..Default::default()
+                }),
         );
         context.on_window_size(context.callback(Msg::WindowResized));
 
@@ -368,7 +376,10 @@ impl Component for ConfigApp {
                 let bar = self.bar("y-pop.xml couldn't be loaded", false, None, context);
                 return Grid::new()
                     .rows([GridLength::STAR, GridLength::Auto])
-                    .keyed_children([("page", cell(shell::page_frame(screen, layout), 0, 0)), ("bar", bar)]);
+                    .keyed_children([
+                        ("page", cell(shell::page_frame(screen, layout), 0, 0)),
+                        ("bar", bar),
+                    ]);
             }
         };
 
@@ -378,7 +389,9 @@ impl Component for ConfigApp {
         }
         let viewport = layout.content;
         let screen = match self.screen {
-            Screen::General => general::general_view(settings, &self.path, self.notes_ready, viewport, context),
+            Screen::General => {
+                general::general_view(settings, &self.path, self.notes_ready, viewport, context)
+            }
             Screen::Skin => screens::skin(settings),
             Screen::Variables => variables::variables_view(
                 settings,
@@ -408,19 +421,30 @@ impl Component for ConfigApp {
 
         // Above every screen, not just one: what y-pop would warn about can
         // be anywhere in the file.
-        let banner = (!settings.warnings.is_empty() && !self.warnings_dismissed)
-            .then(|| warnings_banner(&settings.warnings, context.callback(|()| Msg::WarningsDismissed)));
+        let banner = (!settings.warnings.is_empty() && !self.warnings_dismissed).then(|| {
+            warnings_banner(
+                &settings.warnings,
+                context.callback(|()| Msg::WarningsDismissed),
+            )
+        });
         // A tray menu shown as two panes scrolls them itself: the page stays
         // put, and gives the screen the window's height.
-        let pinned = matches!(self.screen, Screen::Menu(id) if menu_view::is_pinned(settings, id, viewport));
+        let pinned =
+            matches!(self.screen, Screen::Menu(id) if menu_view::is_pinned(settings, id, viewport));
         let page: View = if pinned {
-            let screen = Grid::new().rows([GridLength::Auto, GridLength::STAR]).row_spacing(space::L).keyed_children([
-                ("warnings", cell(banner.unwrap_or_else(View::empty), 0, 0)),
-                ("screen", cell(screen, 1, 0)),
-            ]);
+            let screen = Grid::new()
+                .rows([GridLength::Auto, GridLength::STAR])
+                .row_spacing(space::L)
+                .keyed_children([
+                    ("warnings", cell(banner.unwrap_or_else(View::empty), 0, 0)),
+                    ("screen", cell(screen, 1, 0)),
+                ]);
             shell::page_frame_pinned(screen, layout)
         } else {
-            let screen: View = Stack::vertical(space::L).maybe("warnings", banner).child("screen", screen).into();
+            let screen: View = Stack::vertical(space::L)
+                .maybe("warnings", banner)
+                .child("screen", screen)
+                .into();
             shell::page_frame(screen, layout)
         };
 
@@ -433,10 +457,15 @@ impl Component for ConfigApp {
         if layout.pane_expanded {
             let footer = Stack::vertical(space::XXS)
                 .child("caption", text::caption("Loaded from"))
-                .child("path", text::caption(self.path.display().to_string()).opacity(emphasis::SUBTLE));
+                .child(
+                    "path",
+                    text::caption(self.path.display().to_string()).opacity(emphasis::SUBTLE),
+                );
             slots.push(SlotView::new(
                 NavigationViewSlot::PaneFooter,
-                Border::new().padding(Thickness::uniform(space::M)).content(footer),
+                Border::new()
+                    .padding(Thickness::uniform(space::M))
+                    .content(footer),
             ));
         }
 
@@ -449,19 +478,22 @@ impl Component for ConfigApp {
         let bar = self.bar(&status, healthy, Some(settings), context);
 
         // Nav takes the height the bar doesn't (`Star` over `Auto`).
-        let app: View = Grid::new().rows([GridLength::STAR, GridLength::Auto]).keyed_children([("nav", nav), ("bar", bar)]);
+        let app: View = Grid::new()
+            .rows([GridLength::STAR, GridLength::Auto])
+            .keyed_children([("nav", nav), ("bar", bar)]);
         // A picker covers the whole window, bar included.
         let window = Viewport::new(self.window_width);
-        let modal = inspector::hotkey_modal(settings, &self.hotkeys, window, context).or_else(|| {
-            icon_picker::icon_modal(
-                settings,
-                &self.icon_picker,
-                &mut *self.builtins.borrow_mut(),
-                &self.icons,
-                window,
-                context,
-            )
-        });
+        let modal =
+            inspector::hotkey_modal(settings, &self.hotkeys, window, context).or_else(|| {
+                icon_picker::icon_modal(
+                    settings,
+                    &self.icon_picker,
+                    &mut *self.builtins.borrow_mut(),
+                    &self.icons,
+                    window,
+                    context,
+                )
+            });
         // Always the same wrapper, the app always its first child: if the root
         // changed shape when a picker opened, the reactor would rebuild the
         // whole app under it and every scroll position would be lost.
@@ -491,8 +523,10 @@ impl ConfigApp {
         let Ok(settings) = &self.settings else { return };
         let wanted: Vec<app_icons::IconSpec> = {
             let mut builtins = self.builtins.borrow_mut();
-            let mut wanted: Vec<_> =
-                settings.items().filter_map(|item| app_icons::spec_for(settings, item, &mut *builtins)).collect();
+            let mut wanted: Vec<_> = settings
+                .items()
+                .filter_map(|item| app_icons::spec_for(settings, item, &mut *builtins))
+                .collect();
             wanted.extend(self.icon_picker.visible());
             wanted
         };
@@ -534,7 +568,9 @@ impl ConfigApp {
             Screen::General => LastScreen::General,
             Screen::Skin => LastScreen::Skin,
             Screen::Variables => LastScreen::Variables,
-            Screen::Menu(id) => roots::position(settings, id).map_or(LastScreen::General, LastScreen::Menu),
+            Screen::Menu(id) => {
+                roots::position(settings, id).map_or(LastScreen::General, LastScreen::Menu)
+            }
         };
         self.prefs.save(&prefs::path_for(&self.path));
     }
@@ -573,12 +609,18 @@ impl ConfigApp {
             _ => {}
         }
 
-        let Ok(settings) = &mut self.settings else { return };
+        let Ok(settings) = &mut self.settings else {
+            return;
+        };
         let mut changed = false;
 
         match message {
             Msg::RendererChosen(choice) => {
-                let renderer = if choice == 0 { Renderer::Native } else { Renderer::Overlay };
+                let renderer = if choice == 0 {
+                    Renderer::Native
+                } else {
+                    Renderer::Overlay
+                };
                 if settings.globals.popup.unwrap_or(Renderer::Native) != renderer {
                     settings.globals.popup = Some(renderer);
                     changed = true;
@@ -591,11 +633,15 @@ impl ConfigApp {
                 settings.globals.popup_style = Some(PopupStyle::List);
                 changed = true;
             }
-            Msg::ShellExecuteToggled(on) if settings.globals.shell_execute.unwrap_or(false) != on => {
+            Msg::ShellExecuteToggled(on)
+                if settings.globals.shell_execute.unwrap_or(false) != on =>
+            {
                 settings.globals.shell_execute = Some(on);
                 changed = true;
             }
-            Msg::ShowShortcutsToggled(on) if settings.globals.show_shortcuts.unwrap_or(true) != on => {
+            Msg::ShowShortcutsToggled(on)
+                if settings.globals.show_shortcuts.unwrap_or(true) != on =>
+            {
                 settings.globals.show_shortcuts = Some(on);
                 changed = true;
             }
@@ -607,7 +653,10 @@ impl ConfigApp {
                 let before = merging.then(|| settings.clone());
                 if settings.set_file_notes_text(&text) {
                     if let Some(before) = before {
-                        self.undo = Some(Undo { label: "Merged the file notes".to_owned(), settings: before });
+                        self.undo = Some(Undo {
+                            label: "Merged the file notes".to_owned(),
+                            settings: before,
+                        });
                     }
                     changed = true;
                 }
@@ -644,7 +693,8 @@ impl ConfigApp {
             }
             Msg::VarDeleteAsked(index) => {
                 if settings.variable_users(index).is_empty() {
-                    changed = delete_variable(settings, index, &mut self.undo, &mut self.variables_ui);
+                    changed =
+                        delete_variable(settings, index, &mut self.undo, &mut self.variables_ui);
                 } else {
                     self.variables_ui.confirming_delete = Some(index);
                 }
@@ -663,7 +713,9 @@ impl ConfigApp {
     }
 
     fn add_menu(&mut self) {
-        let Ok(settings) = &mut self.settings else { return };
+        let Ok(settings) = &mut self.settings else {
+            return;
+        };
         let id = roots::add_menu(settings);
         self.dirty = true;
         self.go(Screen::Menu(id));
@@ -673,11 +725,18 @@ impl ConfigApp {
         self.confirming_delete = None;
         self.hotkeys = menu_view::HotkeyUi::default();
         self.run_status = None;
-        let Ok(settings) = &mut self.settings else { return };
+        let Ok(settings) = &mut self.settings else {
+            return;
+        };
 
         let before = settings.clone();
-        let Some(removed) = roots::delete(settings, id) else { return };
-        self.undo = Some(Undo { label: format!("Deleted {}", roots::label(&removed)), settings: before });
+        let Some(removed) = roots::delete(settings, id) else {
+            return;
+        };
+        self.undo = Some(Undo {
+            label: format!("Deleted {}", roots::label(&removed)),
+            settings: before,
+        });
         self.dirty = true;
         if self.screen == Screen::Menu(id) {
             self.go(Screen::General);
@@ -685,7 +744,9 @@ impl ConfigApp {
     }
 
     fn save(&mut self) {
-        let Ok(settings) = &mut self.settings else { return };
+        let Ok(settings) = &mut self.settings else {
+            return;
+        };
         match settings.save_to(&self.path) {
             Ok(()) => {
                 self.dirty = false;
@@ -730,18 +791,32 @@ impl ConfigApp {
         let current = self.screen;
         let entry = |target: Target, symbol: Symbol, content: View| -> View {
             let selected = target == Target::Screen(current);
-            NavigationViewItem::new().tag(target.tag()).is_selected(selected).slots([
-                SlotView::new(NavigationViewItemSlot::Icon, SymbolIcon::new().symbol(symbol)),
-                SlotView::new(NavigationViewItemSlot::Content, content),
-            ])
+            NavigationViewItem::new()
+                .tag(target.tag())
+                .is_selected(selected)
+                .slots([
+                    SlotView::new(
+                        NavigationViewItemSlot::Icon,
+                        SymbolIcon::new().symbol(symbol),
+                    ),
+                    SlotView::new(NavigationViewItemSlot::Content, content),
+                ])
         };
-        let group = |tag: &str, title: &str, symbol: Symbol, children: Vec<(String, View)>| -> View {
-            NavigationViewItem::new().tag(tag).selects_on_invoked(false).is_expanded(true).slots([
-                SlotView::new(NavigationViewItemSlot::Icon, SymbolIcon::new().symbol(symbol)),
-                SlotView::new(NavigationViewItemSlot::Content, title),
-                SlotView::collection(NavigationViewItemSlot::MenuItems, children),
-            ])
-        };
+        let group =
+            |tag: &str, title: &str, symbol: Symbol, children: Vec<(String, View)>| -> View {
+                NavigationViewItem::new()
+                    .tag(tag)
+                    .selects_on_invoked(false)
+                    .is_expanded(true)
+                    .slots([
+                        SlotView::new(
+                            NavigationViewItemSlot::Icon,
+                            SymbolIcon::new().symbol(symbol),
+                        ),
+                        SlotView::new(NavigationViewItemSlot::Content, title),
+                        SlotView::collection(NavigationViewItemSlot::MenuItems, children),
+                    ])
+            };
 
         let general = [
             (Screen::General, Symbol::Setting, "General"),
@@ -752,29 +827,45 @@ impl ConfigApp {
             .into_iter()
             .map(|(screen, symbol, title)| {
                 let target = Target::Screen(screen);
-                (target.tag(), entry(target, symbol, text::body(title).into()))
+                (
+                    target.tag(),
+                    entry(target, symbol, text::body(title).into()),
+                )
             })
             .collect();
 
         let menus: Vec<(String, View)> = roots::menus(settings)
             .map(|item| {
                 let target = Target::Screen(Screen::Menu(item.id));
-                let mut label = Stack::horizontal(space::S).child("name", text::body(roots::label(item)));
+                let mut label =
+                    Stack::horizontal(space::S).child("name", text::body(roots::label(item)));
                 if let Some(key) = roots::first_hotkey(item) {
                     label = label.child("hotkey", text::caption(key).opacity(emphasis::SUBTLE));
                 }
-                (target.tag(), entry(target, menu_view::symbol_of(&item.kind), label.into()))
+                (
+                    target.tag(),
+                    entry(target, menu_view::symbol_of(&item.kind), label.into()),
+                )
             })
             .collect();
 
         let new_menu: View = NavigationViewItem::new().tag(Target::NewMenu.tag()).slots([
-            SlotView::new(NavigationViewItemSlot::Icon, SymbolIcon::new().symbol(Symbol::Add)),
+            SlotView::new(
+                NavigationViewItemSlot::Icon,
+                SymbolIcon::new().symbol(Symbol::Add),
+            ),
             SlotView::new(NavigationViewItemSlot::Content, "New tray menu"),
         ]);
 
         vec![
-            ("settings".to_owned(), group("group-settings", "Settings", Symbol::Setting, general)),
-            ("menus".to_owned(), group("group-menus", "Tray menus", Symbol::Home, menus)),
+            (
+                "settings".to_owned(),
+                group("group-settings", "Settings", Symbol::Setting, general),
+            ),
+            (
+                "menus".to_owned(),
+                group("group-menus", "Tray menus", Symbol::Home, menus),
+            ),
             ("new".to_owned(), new_menu),
         ]
     }
@@ -787,7 +878,11 @@ impl ConfigApp {
             None if self.dirty => ("Unsaved changes".to_owned(), true),
             None => match self.applied {
                 Some(true) => ("Saved and applied — y-pop is reloading it".to_owned(), true),
-                Some(false) => ("Saved — y-pop isn't running; it'll use these settings when it starts".to_owned(), true),
+                Some(false) => (
+                    "Saved — y-pop isn't running; it'll use these settings when it starts"
+                        .to_owned(),
+                    true,
+                ),
                 None if self.missing => ("No y-pop.xml yet — Save creates it".to_owned(), true),
                 None => (summary(settings), true),
             },
@@ -815,20 +910,45 @@ impl ConfigApp {
 
     /// The bar along the bottom: status, an inline question or an Undo
     /// beside the buttons, Reload, Save.
-    fn bar(&self, status: &str, healthy: bool, settings: Option<&Settings>, context: &ViewContext<Self>) -> View {
+    fn bar(
+        &self,
+        status: &str,
+        healthy: bool,
+        settings: Option<&Settings>,
+        context: &ViewContext<Self>,
+    ) -> View {
         let extra: Option<View> = if self.confirming_reload {
             Some(
                 Stack::horizontal(space::S)
                     .child("ask", text::body("Discard unsaved changes?"))
-                    .child("yes", button("Discard", true, true, context.callback(|()| Msg::ReloadConfirmed)))
-                    .child("no", button("Keep editing", false, true, context.callback(|()| Msg::ReloadCancelled)))
+                    .child(
+                        "yes",
+                        button(
+                            "Discard",
+                            true,
+                            true,
+                            context.callback(|()| Msg::ReloadConfirmed),
+                        ),
+                    )
+                    .child(
+                        "no",
+                        button(
+                            "Keep editing",
+                            false,
+                            true,
+                            context.callback(|()| Msg::ReloadCancelled),
+                        ),
+                    )
                     .into(),
             )
         } else {
             self.undo.as_ref().map(|undo| {
                 Stack::horizontal(space::S)
                     .child("what", text::body(undo.label.clone()))
-                    .child("undo", button("Undo", false, true, context.callback(|()| Msg::Undo)))
+                    .child(
+                        "undo",
+                        button("Undo", false, true, context.callback(|()| Msg::Undo)),
+                    )
                     .into()
             })
         };
@@ -863,7 +983,10 @@ fn delete_variable(
     let Some(VarEntry::Var(var)) = settings.variables.get(index) else {
         return false;
     };
-    *undo = Some(Undo { label: format!("Deleted variable {}", var.name), settings: settings.clone() });
+    *undo = Some(Undo {
+        label: format!("Deleted variable {}", var.name),
+        settings: settings.clone(),
+    });
     settings.variables.remove(index);
     *ui = VariablesUi::default();
     true
@@ -872,7 +995,11 @@ fn delete_variable(
 /// "3 tray menus · 21 items" — the status line when nothing's pending.
 fn summary(settings: &Settings) -> String {
     let menus = roots::menus(settings).count();
-    format!("{menus} tray menu{} · {} items", if menus == 1 { "" } else { "s" }, settings.items().count())
+    format!(
+        "{menus} tray menu{} · {} items",
+        if menus == 1 { "" } else { "s" },
+        settings.items().count()
+    )
 }
 
 /// The load-warnings banner in y-pop's words: unlike y-snap's, a save keeps
@@ -881,7 +1008,10 @@ fn summary(settings: &Settings) -> String {
 fn warnings_banner(warnings: &[String], on_close: Callback<()>) -> View {
     let count = warnings.len();
     shell::warnings_banner(
-        format!("y-pop would report {count} problem{} in y-pop.xml", if count == 1 { "" } else { "s" }),
+        format!(
+            "y-pop would report {count} problem{} in y-pop.xml",
+            if count == 1 { "" } else { "s" }
+        ),
         "Entries y-pop can't load are kept in the file as comments, and unknown attributes are written back, so \
          saving loses nothing — but those parts do nothing until they're fixed.",
         warnings,
@@ -894,32 +1024,34 @@ fn warnings_banner(warnings: &[String], on_close: Callback<()>) -> View {
 #[cfg(test)]
 fn test_app(settings: Settings) -> ConfigApp {
     ConfigApp {
-            settings: Ok(settings),
-            path: std::env::temp_dir().join("y-pop-config-tests").join("y-pop.xml"),
-            missing: false,
-            prefs: Prefs::default(),
-            screen: Screen::General,
-            dirty: false,
-            save_error: None,
-            warnings_dismissed: false,
-            applied: None,
-            confirming_reload: false,
-            confirming_delete: None,
-            undo: None,
-            builtins: RefCell::new(Builtins::new(Path::new(""), Path::new(""))),
-            variables_ui: VariablesUi::default(),
-            selection: HashMap::new(),
-            collapsed: HashSet::new(),
-            more_open: false,
-            show_xml: false,
-            hotkeys: menu_view::HotkeyUi::default(),
-            target_stash: HashMap::new(),
-            run_status: None,
-            icons: app_icons::IconStore::default(),
-            icon_picker: icon_picker::IconPickerUi::default(),
-            _clipboard: None,
-            notes_ready: true,
-            window_width: 1000.0,
+        settings: Ok(settings),
+        path: std::env::temp_dir()
+            .join("y-pop-config-tests")
+            .join("y-pop.xml"),
+        missing: false,
+        prefs: Prefs::default(),
+        screen: Screen::General,
+        dirty: false,
+        save_error: None,
+        warnings_dismissed: false,
+        applied: None,
+        confirming_reload: false,
+        confirming_delete: None,
+        undo: None,
+        builtins: RefCell::new(Builtins::new(Path::new(""), Path::new(""))),
+        variables_ui: VariablesUi::default(),
+        selection: HashMap::new(),
+        collapsed: HashSet::new(),
+        more_open: false,
+        show_xml: false,
+        hotkeys: menu_view::HotkeyUi::default(),
+        target_stash: HashMap::new(),
+        run_status: None,
+        icons: app_icons::IconStore::default(),
+        icon_picker: icon_picker::IconPickerUi::default(),
+        _clipboard: None,
+        notes_ready: true,
+        window_width: 1000.0,
     }
 }
 
@@ -978,13 +1110,20 @@ mod tests {
         // The truncated first line a single-line `TextBox` keeps.
         app.edit(Msg::NotesEdited("one".into()));
         assert!(!app.dirty);
-        assert_eq!(settings(&app).file_notes_count(), 2, "nothing merged or lost");
+        assert_eq!(
+            settings(&app).file_notes_count(),
+            2,
+            "nothing merged or lost"
+        );
 
         app.edit(Msg::NotesReady);
         assert!(app.notes_ready);
-        app.edit(Msg::NotesEdited("one
+        app.edit(Msg::NotesEdited(
+            "one
 
-two!".into()));
+two!"
+                .into(),
+        ));
         assert!(app.dirty);
     }
 
@@ -1006,12 +1145,18 @@ two!".into()));
         app.edit(Msg::NotesEdited(shown));
         assert!(!app.dirty && app.undo.is_none());
 
-        app.edit(Msg::NotesEdited("one
+        app.edit(Msg::NotesEdited(
+            "one
 
-two, changed".into()));
+two, changed"
+                .into(),
+        ));
         assert!(app.dirty);
         assert_eq!(settings(&app).file_notes_count(), 1);
-        assert_eq!(app.undo.as_ref().map(|undo| undo.label.as_str()), Some("Merged the file notes"));
+        assert_eq!(
+            app.undo.as_ref().map(|undo| undo.label.as_str()),
+            Some("Merged the file notes")
+        );
 
         app.update_undo_for_test();
         assert_eq!(settings(&app).file_notes_count(), 2);
@@ -1034,7 +1179,10 @@ two, changed".into()));
         app.dirty = false;
         app.edit(Msg::VarNameChanged(0, "b".into()));
         assert!(!app.dirty, "a refused name is not an edit");
-        assert_eq!(app.variables_ui.name_error, Some((0, y_pop::settings::NameError::Taken)));
+        assert_eq!(
+            app.variables_ui.name_error,
+            Some((0, y_pop::settings::NameError::Taken))
+        );
 
         app.edit(Msg::VarNameChanged(0, "second".into()));
         assert_eq!(app.variables_ui.name_error, None);
@@ -1054,7 +1202,10 @@ two, changed".into()));
         app.edit(Msg::VarDeleteConfirmed(0));
         assert_eq!(settings(&app).variables.len(), 1);
         assert!(app.dirty);
-        assert_eq!(app.undo.as_ref().map(|undo| undo.label.as_str()), Some("Deleted variable a"));
+        assert_eq!(
+            app.undo.as_ref().map(|undo| undo.label.as_str()),
+            Some("Deleted variable a")
+        );
 
         app.update_undo_for_test();
         assert_eq!(settings(&app).variables.len(), 2);
@@ -1088,8 +1239,11 @@ two, changed".into()));
 
     #[test]
     fn a_tag_names_its_target_and_back() {
-        let settings = Settings::load_str(r#"<y-pop><group name="A"/></y-pop>"#, &mut Vec::<Variable>::new())
-            .expect("valid");
+        let settings = Settings::load_str(
+            r#"<y-pop><group name="A"/></y-pop>"#,
+            &mut Vec::<Variable>::new(),
+        )
+        .expect("valid");
         let menu = roots::menus(&settings).next().expect("one").id;
 
         for target in [

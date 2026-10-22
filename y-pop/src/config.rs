@@ -480,11 +480,18 @@ mod tests {
 
     #[test]
     fn settings_is_a_leaf_that_defaults_to_a_readable_name() {
-        let tree = load_str(r#"<y-pop><settings/><settings name="Prefs"/></y-pop>"#, &mut builtins())
-            .expect("valid");
+        let tree = load_str(
+            r#"<y-pop><settings/><settings name="Prefs"/></y-pop>"#,
+            &mut builtins(),
+        )
+        .expect("valid");
         assert!(tree.warnings.is_empty(), "{:?}", tree.warnings);
 
-        let names: Vec<&str> = tree.roots.iter().map(|&id| tree.node(id).name.as_ref()).collect();
+        let names: Vec<&str> = tree
+            .roots
+            .iter()
+            .map(|&id| tree.node(id).name.as_ref())
+            .collect();
         assert_eq!(names, ["Settings…", "Prefs"]);
         assert!(matches!(tree.node(tree.roots[0]).kind, NodeKind::Settings));
     }

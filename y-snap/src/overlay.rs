@@ -393,7 +393,20 @@ impl ActionOverlay {
             let hovered = implemented && self.hovered == Some(index);
             let (back, text) = tile_colors(palette, implemented, hovered, active);
 
-            draw_tile(canvas, tile, item, &fonts, TileState { current, active, back, text }, tile_radius, panel_back)?;
+            draw_tile(
+                canvas,
+                tile,
+                item,
+                &fonts,
+                TileState {
+                    current,
+                    active,
+                    back,
+                    text,
+                },
+                tile_radius,
+                panel_back,
+            )?;
         }
 
         draw_panel_border(canvas, bounds, &self.config);
@@ -424,7 +437,11 @@ impl TileFonts {
             key: Font::new("Segoe UI", config.key_font_size as i32, true)?,
             label: Font::new("Segoe UI", config.label_font_size as i32, false)?,
             icon: Font::new(&config.icon_font, config.icon_font_size as i32, false)?,
-            badge: Font::new("Segoe UI", (config.key_font_size * 3 / 4).max(11) as i32, true)?,
+            badge: Font::new(
+                "Segoe UI",
+                (config.key_font_size * 3 / 4).max(11) as i32,
+                true,
+            )?,
         })
     }
 }
@@ -433,7 +450,12 @@ impl TileFonts {
 /// active combination — pure lookup, no drawing, so [`paint`](ActionOverlay::
 /// paint)'s own loop stays about *which* tile, not which colour that
 /// implies.
-fn tile_colors(palette: &Palette, implemented: bool, hovered: bool, active: bool) -> (Color, Color) {
+fn tile_colors(
+    palette: &Palette,
+    implemented: bool,
+    hovered: bool,
+    active: bool,
+) -> (Color, Color) {
     match (implemented, hovered, active) {
         (false, _, _) => (palette.disabled_back, palette.disabled_text),
         (_, true, _) => (palette.hover_back, palette.hover_text),
@@ -468,7 +490,12 @@ fn draw_tile(
     tile_radius: i32,
     panel_back: Color,
 ) -> Result<()> {
-    let TileState { current, active, back, text } = state;
+    let TileState {
+        current,
+        active,
+        back,
+        text,
+    } = state;
     canvas.fill_rect(tile.rect, back);
 
     let glyph_height = (tile.rect.bottom - tile.rect.top) * 6 / 10;
@@ -502,7 +529,13 @@ fn draw_tile(
                     right: tile.rect.left + (tile.rect.right - tile.rect.left) * 2 / 5,
                     bottom: tile.rect.top + (tile.rect.bottom - tile.rect.top) * 2 / 5,
                 };
-                canvas.draw_text(&key_name(key), badge_rect, &fonts.badge, badge_color, TextAlign::Left)?;
+                canvas.draw_text(
+                    &key_name(key),
+                    badge_rect,
+                    &fonts.badge,
+                    badge_color,
+                    TextAlign::Left,
+                )?;
             }
         }
         None => {

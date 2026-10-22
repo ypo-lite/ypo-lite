@@ -178,7 +178,10 @@ impl<'b> Reader<'b> {
             Some(raw) => match raw.trim().parse::<u32>() {
                 Ok(depth) => depth,
                 Err(_) => {
-                    self.warn(element, format!("depth={raw:?} is not a non-negative integer"));
+                    self.warn(
+                        element,
+                        format!("depth={raw:?} is not a non-negative integer"),
+                    );
                     return 0;
                 }
             },
@@ -186,7 +189,9 @@ impl<'b> Reader<'b> {
         if depth > u32::from(MAX_DEPTH) {
             self.warn(
                 element,
-                format!("depth={depth} is more than the {MAX_DEPTH} levels y-pop supports — clamped"),
+                format!(
+                    "depth={depth} is more than the {MAX_DEPTH} levels y-pop supports — clamped"
+                ),
             );
             return MAX_DEPTH;
         }
@@ -283,9 +288,7 @@ impl<'b> Reader<'b> {
                 "separator" => children.push(self.read_leaf(child, NodeKind::Separator, "")),
                 "about" => children.push(self.read_leaf(child, NodeKind::About, "About")),
                 "quit" => children.push(self.read_leaf(child, NodeKind::Quit, "Quit")),
-                "settings" => {
-                    children.push(self.read_leaf(child, NodeKind::Settings, "Settings…"))
-                }
+                "settings" => children.push(self.read_leaf(child, NodeKind::Settings, "Settings…")),
                 "break" => children.push(self.read_break(child)),
                 other => self.warn(child, format!("unknown element <{other}>, skipping")),
             }

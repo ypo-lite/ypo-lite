@@ -198,7 +198,9 @@ impl KeyCategory {
     }
 
     pub fn from_title(title: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|category| category.title() == title)
+        Self::ALL
+            .into_iter()
+            .find(|category| category.title() == title)
     }
 
     fn entries(self) -> &'static [Entry] {
@@ -216,20 +218,29 @@ impl KeyCategory {
 
     /// This category's keys, as `(label, key)`.
     pub fn keys(self) -> impl Iterator<Item = (&'static str, VIRTUAL_KEY)> {
-        self.entries().iter().filter_map(|&(label, name)| Some((label, key_from_name(name)?)))
+        self.entries()
+            .iter()
+            .filter_map(|&(label, name)| Some((label, key_from_name(name)?)))
     }
 
     /// Narrowest a key button of this category can be and still show its
     /// longest label — every button in one category gets the same width, so
     /// a grid of them stays a grid.
     pub fn min_button_width(self) -> f64 {
-        let longest = self.entries().iter().map(|(label, _)| label.chars().count()).max().unwrap_or(1);
+        let longest = self
+            .entries()
+            .iter()
+            .map(|(label, _)| label.chars().count())
+            .max()
+            .unwrap_or(1);
         (longest as f64 * 8.0 + 24.0).max(44.0)
     }
 
     /// The category `key` is listed under, if any.
     pub fn of(key: VIRTUAL_KEY) -> Option<Self> {
-        Self::ALL.into_iter().find(|category| category.keys().any(|(_, k)| k == key))
+        Self::ALL
+            .into_iter()
+            .find(|category| category.keys().any(|(_, k)| k == key))
     }
 }
 
@@ -255,8 +266,15 @@ pub fn search(query: &str) -> Vec<String> {
     }
     KeyCategory::ALL
         .into_iter()
-        .flat_map(|category| category.entries().iter().map(move |entry| (category, entry)))
-        .filter(|(_, (label, name))| label.to_lowercase().contains(&query) || name.to_lowercase().contains(&query))
+        .flat_map(|category| {
+            category
+                .entries()
+                .iter()
+                .map(move |entry| (category, entry))
+        })
+        .filter(|(_, (label, name))| {
+            label.to_lowercase().contains(&query) || name.to_lowercase().contains(&query)
+        })
         .map(|(category, (label, _))| suggestion(label, category))
         .take(12)
         .collect()
@@ -266,7 +284,11 @@ pub fn search(query: &str) -> Vec<String> {
 pub fn from_suggestion(text: &str) -> Option<VIRTUAL_KEY> {
     KeyCategory::ALL
         .into_iter()
-        .flat_map(|category| category.keys().map(move |(label, key)| (category, label, key)))
+        .flat_map(|category| {
+            category
+                .keys()
+                .map(move |(label, key)| (category, label, key))
+        })
         .find(|&(category, label, _)| suggestion(label, category) == text)
         .map(|(_, _, key)| key)
 }
@@ -283,7 +305,10 @@ mod tests {
     fn every_catalog_name_resolves() {
         for category in KeyCategory::ALL {
             for (label, name) in category.entries() {
-                assert!(key_from_name(name).is_some(), "{label:?} ({name}) in {category:?}");
+                assert!(
+                    key_from_name(name).is_some(),
+                    "{label:?} ({name}) in {category:?}"
+                );
             }
         }
     }
@@ -293,7 +318,10 @@ mod tests {
         let mut seen = Vec::new();
         for category in KeyCategory::ALL {
             for (label, key) in category.keys() {
-                assert!(!seen.contains(&key.0), "{label:?} in {category:?} duplicates another entry");
+                assert!(
+                    !seen.contains(&key.0),
+                    "{label:?} in {category:?} duplicates another entry"
+                );
                 seen.push(key.0);
             }
         }

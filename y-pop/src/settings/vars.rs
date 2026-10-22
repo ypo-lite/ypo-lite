@@ -58,7 +58,9 @@ fn pieces(text: &str) -> Vec<Piece<'_>> {
         let after = &rest[start + 1..];
         let Some(end) = after.find('%') else { break };
         pieces.push(Piece::Text(&rest[..start]));
-        pieces.push(Piece::Reference { name: &after[..end] });
+        pieces.push(Piece::Reference {
+            name: &after[..end],
+        });
         rest = &after[end + 1..];
     }
     pieces.push(Piece::Text(rest));
@@ -103,8 +105,11 @@ pub fn rename_references(text: &str, old: &str, new: &str) -> Option<String> {
 
 /// Every attribute of `item` the reader expands variables in.
 fn texts<'a>(item: &'a Item) -> Vec<(&'static str, &'a str)> {
-    let mut fields: Vec<(&'static str, &'a Option<String>)> =
-        vec![("name", &item.name), ("icon", &item.icon), ("tooltip", &item.tooltip)];
+    let mut fields: Vec<(&'static str, &'a Option<String>)> = vec![
+        ("name", &item.name),
+        ("icon", &item.icon),
+        ("tooltip", &item.tooltip),
+    ];
     if let ItemKind::App(app) = &item.kind {
         fields.extend([
             ("exe", &app.exe),
@@ -195,7 +200,10 @@ impl Settings {
         let above: Vec<Variable> = self.variables[..index]
             .iter()
             .filter_map(|entry| match entry {
-                VarEntry::Var(var) => Some(Variable { name: var.name.clone(), value: var.value.clone() }),
+                VarEntry::Var(var) => Some(Variable {
+                    name: var.name.clone(),
+                    value: var.value.clone(),
+                }),
                 VarEntry::Comment(_) => None,
             })
             .collect();
@@ -205,7 +213,10 @@ impl Settings {
         let mut expanded: Vec<Variable> = Vec::with_capacity(above.len());
         for variable in above {
             let value = variables::expand(&variable.value, &expanded, builtins);
-            expanded.push(Variable { name: variable.name, value });
+            expanded.push(Variable {
+                name: variable.name,
+                value,
+            });
         }
         variables::expand(&var.value, &expanded, builtins)
     }
@@ -218,7 +229,10 @@ impl Settings {
         for entry in &self.variables {
             if let VarEntry::Var(var) = entry {
                 let value = variables::expand(&var.value, &expanded, builtins);
-                expanded.push(Variable { name: var.name.clone(), value });
+                expanded.push(Variable {
+                    name: var.name.clone(),
+                    value,
+                });
             }
         }
         variables::expand(text, &expanded, builtins)
@@ -229,7 +243,10 @@ impl Settings {
     /// `y_pop::launch::launch`. A folder is opened, not listed.
     pub fn launch_app(&self, fields: &AppFields, builtins: &mut dyn Lookup) -> crate::model::App {
         use std::sync::Arc;
-        let mut expand = |text: &Option<String>| text.as_deref().map(|text| Arc::<str>::from(self.expand_text(text, builtins)));
+        let mut expand = |text: &Option<String>| {
+            text.as_deref()
+                .map(|text| Arc::<str>::from(self.expand_text(text, builtins)))
+        };
         let mut events = crate::model::EventMask::default();
         if fields.on_start {
             events.insert(crate::model::EventMask::START);
@@ -257,11 +274,9 @@ impl Settings {
         if name.contains('%') || name != name.trim() {
             return Err(NameError::Invalid);
         }
-        let taken = self
-            .variables
-            .iter()
-            .enumerate()
-            .any(|(other, entry)| other != index && matches!(entry, VarEntry::Var(var) if var.name == name));
+        let taken = self.variables.iter().enumerate().any(|(other, entry)| {
+            other != index && matches!(entry, VarEntry::Var(var) if var.name == name)
+        });
         if taken { Err(NameError::Taken) } else { Ok(()) }
     }
 
@@ -310,9 +325,19 @@ impl Settings {
 
     /// A name no variable has: `variable`, `variable2`, …
     pub fn unused_variable_name(&self) -> String {
-        let taken = |name: &str| self.variables.iter().any(|entry| matches!(entry, VarEntry::Var(var) if var.name == name));
+        let taken = |name: &str| {
+            self.variables
+                .iter()
+                .any(|entry| matches!(entry, VarEntry::Var(var) if var.name == name))
+        };
         (1..)
-            .map(|n| if n == 1 { "variable".to_owned() } else { format!("variable{n}") })
+            .map(|n| {
+                if n == 1 {
+                    "variable".to_owned()
+                } else {
+                    format!("variable{n}")
+                }
+            })
             .find(|name| !taken(name))
             .unwrap_or_default()
     }
@@ -332,7 +357,11 @@ impl Settings {
     /// Swaps the entry at `index` with its neighbour above (`up`) or below.
     /// `false`, and nothing changes, when there's none that way.
     pub fn move_variable_entry(&mut self, index: usize, up: bool) -> bool {
-        let other = if up { index.checked_sub(1) } else { index.checked_add(1) };
+        let other = if up {
+            index.checked_sub(1)
+        } else {
+            index.checked_add(1)
+        };
         match other {
             Some(other) if index < self.variables.len() && other < self.variables.len() => {
                 self.variables.swap(index, other);
@@ -352,7 +381,10 @@ mod tests {
     }
 
     fn builtins() -> Vec<Variable> {
-        vec![Variable { name: "win".into(), value: r"C:\Windows".into() }]
+        vec![Variable {
+            name: "win".into(),
+            value: r"C:\Windows".into(),
+        }]
     }
 
     fn var(settings: &Settings, index: usize) -> &Var {
@@ -387,7 +419,10 @@ mod tests {
 
     #[test]
     fn renaming_a_reference_rewrites_only_that_name() {
-        assert_eq!(rename_references(r"%docs%\x;%docsx%", "docs", "d").as_deref(), Some(r"%d%\x;%docsx%"));
+        assert_eq!(
+            rename_references(r"%docs%\x;%docsx%", "docs", "d").as_deref(),
+            Some(r"%d%\x;%docsx%")
+        );
         assert_eq!(rename_references("100% %docs", "docs", "d"), None);
         assert_eq!(rename_references("none", "docs", "d"), None);
     }
@@ -400,8 +435,16 @@ mod tests {
         assert_eq!(users.len(), 4, "{users:?}");
         assert!(users.contains(&UsedIn::Variable { index: 1 }));
         assert!(users.contains(&UsedIn::Variable { index: 2 }));
-        assert!(users.iter().any(|u| matches!(u, UsedIn::Item { field: "name", .. })));
-        assert!(users.iter().any(|u| matches!(u, UsedIn::Item { field: "param", .. })));
+        assert!(
+            users
+                .iter()
+                .any(|u| matches!(u, UsedIn::Item { field: "name", .. }))
+        );
+        assert!(
+            users
+                .iter()
+                .any(|u| matches!(u, UsedIn::Item { field: "param", .. }))
+        );
 
         assert_eq!(settings.variable_users(1).len(), 1);
         assert!(settings.variable_users(2).is_empty());
@@ -427,9 +470,18 @@ mod tests {
     #[test]
     fn a_value_is_resolved_against_the_builtins_and_what_is_above() {
         let settings = load(FILE);
-        let mut builtins = vec![Variable { name: "mydocs".into(), value: r"C:\Users\me\Documents".into() }];
-        assert_eq!(settings.resolved_value(0, &mut builtins), r"C:\Users\me\Documents");
-        assert_eq!(settings.resolved_value(1, &mut builtins), r"C:\Users\me\Documents\notes");
+        let mut builtins = vec![Variable {
+            name: "mydocs".into(),
+            value: r"C:\Users\me\Documents".into(),
+        }];
+        assert_eq!(
+            settings.resolved_value(0, &mut builtins),
+            r"C:\Users\me\Documents"
+        );
+        assert_eq!(
+            settings.resolved_value(1, &mut builtins),
+            r"C:\Users\me\Documents\notes"
+        );
         assert_eq!(
             settings.resolved_value(2, &mut builtins),
             r"C:\Users\me\Documents\again;C:\Users\me\Documents"
@@ -438,7 +490,9 @@ mod tests {
 
     #[test]
     fn a_reference_to_something_below_is_left_as_written() {
-        let settings = load(r#"<y-pop><variables><var name="a" value="%b%"/><var name="b" value="x"/></variables></y-pop>"#);
+        let settings = load(
+            r#"<y-pop><variables><var name="a" value="%b%"/><var name="b" value="x"/></variables></y-pop>"#,
+        );
         assert_eq!(settings.resolved_value(0, &mut builtins()), "%b%");
         assert!(settings.variable_users(1).is_empty());
     }
@@ -460,10 +514,26 @@ mod tests {
         assert!(!written.contains("%docs%"));
 
         // y-pop reads the renamed file to the same menus.
-        let before = crate::config::load_str(FILE, &mut vec![Variable { name: "mydocs".into(), value: "D".into() }]).expect("ok");
-        let after = crate::config::load_str(&written, &mut vec![Variable { name: "mydocs".into(), value: "D".into() }]).expect("ok");
+        let before = crate::config::load_str(
+            FILE,
+            &mut vec![Variable {
+                name: "mydocs".into(),
+                value: "D".into(),
+            }],
+        )
+        .expect("ok");
+        let after = crate::config::load_str(
+            &written,
+            &mut vec![Variable {
+                name: "mydocs".into(),
+                value: "D".into(),
+            }],
+        )
+        .expect("ok");
         let dump = |tree: &crate::model::ConfigTree| -> Vec<String> {
-            tree.all_nodes().map(|id| format!("{:?}", tree.node(id))).collect()
+            tree.all_nodes()
+                .map(|id| format!("{:?}", tree.node(id)))
+                .collect()
         };
         assert_eq!(dump(&before), dump(&after));
     }
@@ -477,7 +547,11 @@ mod tests {
         assert_eq!(settings.rename_variable(0, "a%b"), Err(NameError::Invalid));
         assert_eq!(settings.rename_variable(0, " a"), Err(NameError::Invalid));
         assert_eq!(settings.rename_variable(0, "notes"), Err(NameError::Taken));
-        assert_eq!(settings.rename_variable(0, "docs"), Ok(0), "its own name is fine");
+        assert_eq!(
+            settings.rename_variable(0, "docs"),
+            Ok(0),
+            "its own name is fine"
+        );
         assert_eq!(settings.to_xml(), before);
     }
 

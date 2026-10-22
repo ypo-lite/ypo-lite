@@ -261,7 +261,9 @@ impl Theme {
     }
 
     pub fn from_name(name: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|theme| theme.name() == name.trim())
+        Self::ALL
+            .into_iter()
+            .find(|theme| theme.name() == name.trim())
     }
 
     /// The palette this theme stands for right now.
@@ -446,7 +448,12 @@ fn write_overlay(out: &mut String, overlay: &Overlay) {
     if overlay.focus_border {
         out.push_str(" focus-border=\"true\"");
     }
-    write_u32_if_changed(out, "border-width", overlay.border_width, defaults.border_width);
+    write_u32_if_changed(
+        out,
+        "border-width",
+        overlay.border_width,
+        defaults.border_width,
+    );
     write_u32_if_changed(
         out,
         "corner-radius",
@@ -493,10 +500,22 @@ fn write_overlay(out: &mut String, overlay: &Overlay) {
         ("hover-text-color", palette.hover_text, base.hover_text),
         ("active-back-color", palette.active_back, base.active_back),
         ("active-text-color", palette.active_text, base.active_text),
-        ("disabled-back-color", palette.disabled_back, base.disabled_back),
-        ("disabled-text-color", palette.disabled_text, base.disabled_text),
+        (
+            "disabled-back-color",
+            palette.disabled_back,
+            base.disabled_back,
+        ),
+        (
+            "disabled-text-color",
+            palette.disabled_text,
+            base.disabled_text,
+        ),
         ("border-color", palette.border, base.border),
-        ("panel-border-color", palette.panel_border, base.panel_border),
+        (
+            "panel-border-color",
+            palette.panel_border,
+            base.panel_border,
+        ),
     ] {
         if color != from_theme {
             let _ = write!(out, " {name}=\"{}\"", color_hex(color));

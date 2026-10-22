@@ -26,8 +26,16 @@ pub fn row_actions(
         move_buttons(
             index,
             count,
-            context.callback(move |()| Msg::Moved { list, index, up: true }),
-            context.callback(move |()| Msg::Moved { list, index, up: false }),
+            context.callback(move |()| Msg::Moved {
+                list,
+                index,
+                up: true,
+            }),
+            context.callback(move |()| Msg::Moved {
+                list,
+                index,
+                up: false,
+            }),
         )
     } else {
         actions()
@@ -43,7 +51,14 @@ pub fn list_footer(
     reordering: bool,
     context: &ViewContext<ConfigApp>,
 ) -> View {
-    let toggle = (count > 1 || reordering)
-        .then(|| reorder_toggle(reordering, context.callback(move |()| Msg::ReorderToggled(list))));
-    Stack::horizontal(space::S).child("add", add).maybe("reorder", toggle).into()
+    let toggle = (count > 1 || reordering).then(|| {
+        reorder_toggle(
+            reordering,
+            context.callback(move |()| Msg::ReorderToggled(list)),
+        )
+    });
+    Stack::horizontal(space::S)
+        .child("add", add)
+        .maybe("reorder", toggle)
+        .into()
 }

@@ -23,13 +23,27 @@ pub fn combo<S: Into<String>>(
     selected: Option<usize>,
     on_change: Callback<Option<usize>>,
 ) -> ComboBox {
-    ComboBox::new().items_source(items).selected_index(selected).on_selection_changed(on_change).fill()
+    ComboBox::new()
+        .items_source(items)
+        .selected_index(selected)
+        .on_selection_changed(on_change)
+        .fill()
 }
 
 /// A numeric field. `value: None` shows an empty box — what a group's
 /// "inherit the default" override looks like.
-pub fn number_box(value: Option<f64>, minimum: f64, maximum: f64, on_change: Callback<Option<f64>>) -> NumberBox {
-    NumberBox::new().minimum(minimum).maximum(maximum).value(value).on_value_changed(on_change).fill()
+pub fn number_box(
+    value: Option<f64>,
+    minimum: f64,
+    maximum: f64,
+    on_change: Callback<Option<f64>>,
+) -> NumberBox {
+    NumberBox::new()
+        .minimum(minimum)
+        .maximum(maximum)
+        .value(value)
+        .on_value_changed(on_change)
+        .fill()
 }
 
 /// A slider for feel plus a number box for an exact value, side by side —
@@ -60,7 +74,10 @@ pub fn range_input(
         .column_spacing(space::M)
         .keyed_children([
             ("slider", cell(slider, 0, 0)),
-            ("number", cell(number_box(Some(value), minimum, maximum, on_type), 0, 1)),
+            (
+                "number",
+                cell(number_box(Some(value), minimum, maximum, on_type), 0, 1),
+            ),
         ])
 }
 
@@ -69,8 +86,16 @@ pub fn range_input(
 const RANGE_NUMBER_WIDTH: f64 = 96.0;
 
 /// A single-line text field.
-pub fn text_box(text: impl Into<String>, placeholder: &str, on_change: Callback<String>) -> TextBox {
-    TextBox::new().text(text).placeholder_text(placeholder).on_text_changed(on_change).fill()
+pub fn text_box(
+    text: impl Into<String>,
+    placeholder: &str,
+    on_change: Callback<String>,
+) -> TextBox {
+    TextBox::new()
+        .text(text)
+        .placeholder_text(placeholder)
+        .on_text_changed(on_change)
+        .fill()
 }
 
 /// An on/off switch without WinUI's built-in "On"/"Off" caption, and
@@ -83,20 +108,30 @@ pub fn text_box(text: impl Into<String>, placeholder: &str, on_change: Callback<
 /// localized default text ("Activé"/"Désactivé"), which then got cropped.
 pub fn switch(is_on: bool, on_toggle: Callback<bool>) -> View {
     let nothing = || -> View { Border::new().width(0.0).height(0.0).into() };
-    ToggleSwitch::new().is_on(is_on).on_toggled(on_toggle).min_width(0.0).fill().slots([
-        SlotView::new(ToggleSwitchSlot::OnContent, nothing()),
-        SlotView::new(ToggleSwitchSlot::OffContent, nothing()),
-    ])
+    ToggleSwitch::new()
+        .is_on(is_on)
+        .on_toggled(on_toggle)
+        .min_width(0.0)
+        .fill()
+        .slots([
+            SlotView::new(ToggleSwitchSlot::OnContent, nothing()),
+            SlotView::new(ToggleSwitchSlot::OffContent, nothing()),
+        ])
 }
 
 /// A switch with its description beside it — clicking the text toggles it
 /// too, which a separate `TextBlock` next to a [`switch`] wouldn't do.
 pub fn labeled_switch(label: &str, is_on: bool, on_toggle: Callback<bool>) -> View {
     let label = || -> View { text::body(label).into() };
-    ToggleSwitch::new().is_on(is_on).on_toggled(on_toggle).min_width(0.0).fill().slots([
-        SlotView::new(ToggleSwitchSlot::OnContent, label()),
-        SlotView::new(ToggleSwitchSlot::OffContent, label()),
-    ])
+    ToggleSwitch::new()
+        .is_on(is_on)
+        .on_toggled(on_toggle)
+        .min_width(0.0)
+        .fill()
+        .slots([
+            SlotView::new(ToggleSwitchSlot::OnContent, label()),
+            SlotView::new(ToggleSwitchSlot::OffContent, label()),
+        ])
 }
 
 /// A two-state chip (a modifier: Win/Ctrl/Alt/Shift; a key on the key
@@ -122,7 +157,12 @@ pub fn chip(label: &str, checked: bool, enabled: bool, on_toggle: Callback<bool>
 /// cropped it. Sized by its content instead, it comes out about
 /// [`size::ICON_BUTTON`] wide; columns holding one reserve that much.
 pub fn icon_button(symbol: Symbol, tooltip: &str, on_click: Callback<()>) -> View {
-    subtle_icon_button(SymbolIcon::new().symbol(symbol).into(), tooltip, true, on_click)
+    subtle_icon_button(
+        SymbolIcon::new().symbol(symbol).into(),
+        tooltip,
+        true,
+        on_click,
+    )
 }
 
 /// [`icon_button`]'s body, for any icon view and with an enabled state.
@@ -150,27 +190,60 @@ const GLYPH_DOWN: &str = "\u{E74B}";
 /// column doesn't change size between modes. The first row can't go up
 /// and the last can't go down; those buttons are disabled, not hidden, so
 /// the pair stays aligned down the column.
-pub fn move_buttons(index: usize, count: usize, on_up: Callback<()>, on_down: Callback<()>) -> View {
+pub fn move_buttons(
+    index: usize,
+    count: usize,
+    on_up: Callback<()>,
+    on_down: Callback<()>,
+) -> View {
     Stack::horizontal(space::XS)
-        .child("up", subtle_icon_button(FontIcon::new().glyph(GLYPH_UP).into(), "Move up", index > 0, on_up))
+        .child(
+            "up",
+            subtle_icon_button(
+                FontIcon::new().glyph(GLYPH_UP).into(),
+                "Move up",
+                index > 0,
+                on_up,
+            ),
+        )
         .child(
             "down",
-            subtle_icon_button(FontIcon::new().glyph(GLYPH_DOWN).into(), "Move down", index + 1 < count, on_down),
+            subtle_icon_button(
+                FontIcon::new().glyph(GLYPH_DOWN).into(),
+                "Move down",
+                index + 1 < count,
+                on_down,
+            ),
         )
         .into()
 }
 
 /// [`icon_button`] that can be switched off — for a row of actions where some
 /// don't apply right now. The tooltip is also the place to say why not.
-pub fn icon_button_enabled(symbol: Symbol, tooltip: &str, enabled: bool, on_click: Callback<()>) -> View {
-    subtle_icon_button(SymbolIcon::new().symbol(symbol).into(), tooltip, enabled, on_click)
+pub fn icon_button_enabled(
+    symbol: Symbol,
+    tooltip: &str,
+    enabled: bool,
+    on_click: Callback<()>,
+) -> View {
+    subtle_icon_button(
+        SymbolIcon::new().symbol(symbol).into(),
+        tooltip,
+        enabled,
+        on_click,
+    )
 }
 
 /// One ↑ or ↓ button, for a move bar whose directions are enabled
 /// independently (an item can often go up but not down).
 pub fn arrow_button(up: bool, tooltip: &str, enabled: bool, on_click: Callback<()>) -> View {
     let glyph = if up { GLYPH_UP } else { GLYPH_DOWN };
-    subtle_icon_button(FontIcon::new().glyph(glyph).into(), tooltip, enabled, on_click)
+    subtle_icon_button(
+        FontIcon::new().glyph(glyph).into(),
+        tooltip,
+        enabled,
+        on_click,
+    )
 }
 
 /// Width an actions column reserves for [`move_buttons`] (or any two
@@ -186,30 +259,44 @@ pub const THREE_ICON_BUTTONS: f64 = 3.0 * size::ICON_BUTTON + 2.0 * space::XS;
 /// and the label says how to leave it.
 pub fn reorder_toggle(on: bool, on_toggle: Callback<()>) -> View {
     Button::new()
-        .style(if on { ButtonStyle::Accent } else { ButtonStyle::Default })
+        .style(if on {
+            ButtonStyle::Accent
+        } else {
+            ButtonStyle::Default
+        })
         .horizontal_alignment(HorizontalAlignment::Left)
         .on_click(on_toggle)
         .content(
             Stack::horizontal(space::S)
                 .child("icon", SymbolIcon::new().symbol(Symbol::Sort))
-                .child("label", text::body(if on { "Done reordering" } else { "Reorder" })),
+                .child(
+                    "label",
+                    text::body(if on { "Done reordering" } else { "Reorder" }),
+                ),
         )
 }
 
 /// "+ Add hotkey" — the add-a-row action under a list.
 pub fn add_button(label: &str, on_click: Callback<()>) -> View {
-    Button::new().on_click(on_click).horizontal_alignment(HorizontalAlignment::Left).content(
-        Stack::horizontal(space::S)
-            .child("icon", SymbolIcon::new().symbol(Symbol::Add))
-            .child("label", text::body(label)),
-    )
+    Button::new()
+        .on_click(on_click)
+        .horizontal_alignment(HorizontalAlignment::Left)
+        .content(
+            Stack::horizontal(space::S)
+                .child("icon", SymbolIcon::new().symbol(Symbol::Add))
+                .child("label", text::body(label)),
+        )
 }
 
 /// A plain push button. `accent` marks the one primary action of its area
 /// (Save, Done) — at most one per area.
 pub fn button(label: &str, accent: bool, enabled: bool, on_click: Callback<()>) -> View {
     Button::new()
-        .style(if accent { ButtonStyle::Accent } else { ButtonStyle::Default })
+        .style(if accent {
+            ButtonStyle::Accent
+        } else {
+            ButtonStyle::Default
+        })
         .is_enabled(enabled)
         .vertical_alignment(VerticalAlignment::Center)
         .on_click(on_click)
@@ -218,7 +305,10 @@ pub fn button(label: &str, accent: bool, enabled: bool, on_click: Callback<()>) 
 
 /// A label above a control — every form field.
 pub fn field(label: &str, control: impl Into<View>) -> View {
-    Stack::vertical(space::XS).child("label", text::caption(label)).child("control", control).into()
+    Stack::vertical(space::XS)
+        .child("label", text::caption(label))
+        .child("control", control)
+        .into()
 }
 
 /// A key combination as keycaps: `[Ctrl] [Alt] [F5]`. `large` is the
@@ -236,10 +326,20 @@ pub fn keycaps(keys: &[String], large: bool) -> View {
             let cap: View = Border::new()
                 .padding(padding.clone())
                 .corner_radius(CornerRadius::uniform(radius::CONTROL))
-                .border_thickness(Thickness::new(size::STROKE, size::STROKE, size::STROKE, 2.0 * size::STROKE))
+                .border_thickness(Thickness::new(
+                    size::STROKE,
+                    size::STROKE,
+                    size::STROKE,
+                    2.0 * size::STROKE,
+                ))
                 .border_brush(ThemeBrush::CardStroke)
                 .background(ThemeBrush::CardBackground)
-                .content(TextBlock::new().text(key.clone()).font_size(font_size).font_weight(FontWeight::SEMI_BOLD));
+                .content(
+                    TextBlock::new()
+                        .text(key.clone())
+                        .font_size(font_size)
+                        .font_weight(FontWeight::SEMI_BOLD),
+                );
             (index, cap)
         }))
         .into()
@@ -266,13 +366,21 @@ pub struct Choice<'a> {
 
 impl<'a> Choice<'a> {
     pub fn new(label: &'a str) -> Self {
-        Self { label, enabled: true, tooltip: None }
+        Self {
+            label,
+            enabled: true,
+            tooltip: None,
+        }
     }
 
     /// Shown but not choosable, with the reason as its tooltip ("coming
     /// later") — better than hiding what the app will offer.
     pub fn disabled(label: &'a str, why: &'a str) -> Self {
-        Self { label, enabled: false, tooltip: Some(why) }
+        Self {
+            label,
+            enabled: false,
+            tooltip: Some(why),
+        }
     }
 }
 
@@ -282,12 +390,20 @@ impl<'a> Choice<'a> {
 /// trap table: a checked toggle unchecks itself natively while the model
 /// says nothing changed. Re-selecting the chosen one reports its index
 /// again; the handler should treat an unchanged value as nothing.
-pub fn segmented(choices: &[Choice<'_>], selected: Option<usize>, on_select: Callback<usize>) -> View {
+pub fn segmented(
+    choices: &[Choice<'_>],
+    selected: Option<usize>,
+    on_select: Callback<usize>,
+) -> View {
     Stack::horizontal(space::XS)
         .children(choices.iter().enumerate().map(|(index, choice)| {
             let on_select = on_select.clone();
             let button = Button::new()
-                .style(if selected == Some(index) { ButtonStyle::Accent } else { ButtonStyle::Default })
+                .style(if selected == Some(index) {
+                    ButtonStyle::Accent
+                } else {
+                    ButtonStyle::Default
+                })
                 .is_enabled(choice.enabled)
                 .min_width(0.0)
                 .vertical_alignment(VerticalAlignment::Center)
@@ -318,7 +434,11 @@ pub fn segmented(choices: &[Choice<'_>], selected: Option<usize>, on_select: Cal
 /// line with `\r` and shows a lone `\n` as no break at all (a three-line
 /// note rendered as its first line), so the text is converted on the way in
 /// and the reported text on the way out.
-pub fn text_area(text: impl Into<String>, placeholder: &str, on_change: Callback<String>) -> TextBox {
+pub fn text_area(
+    text: impl Into<String>,
+    placeholder: &str,
+    on_change: Callback<String>,
+) -> TextBox {
     let on_change = Callback::new(move |text: String| {
         let _ = on_change.call(text.replace("\r\n", "\n").replace('\r', "\n"));
     });

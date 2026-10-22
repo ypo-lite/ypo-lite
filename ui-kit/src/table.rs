@@ -44,12 +44,18 @@ pub struct Column {
 impl Column {
     /// Exactly `width` DIPs — icons, switches, short numbers.
     pub const fn fixed(header: &'static str, width: f64) -> Self {
-        Self { header, width: Width::Fixed(width) }
+        Self {
+            header,
+            width: Width::Fixed(width),
+        }
     }
 
     /// At least `min` DIPs, growing with the table — anything with text.
     pub const fn flex(header: &'static str, min: f64) -> Self {
-        Self { header, width: Width::Flex(min) }
+        Self {
+            header,
+            width: Width::Flex(min),
+        }
     }
 
     /// A headerless trailing column for row actions (delete, edit). In card
@@ -88,14 +94,24 @@ pub struct Row {
 
 impl Row {
     pub fn new(key: impl Into<String>, cells: Vec<View>) -> Self {
-        Self { key: key.into(), cells, detail: None, spanning: None }
+        Self {
+            key: key.into(),
+            cells,
+            detail: None,
+            spanning: None,
+        }
     }
 
     /// A row that is one view across every column instead of a cell per
     /// column — a comment between records, a section label. In card layout
     /// it is the view alone, not a card. It has no detail.
     pub fn spanning(key: impl Into<String>, view: impl Into<View>) -> Self {
-        Self { key: key.into(), cells: Vec::new(), detail: None, spanning: Some(view.into()) }
+        Self {
+            key: key.into(),
+            cells: Vec::new(),
+            detail: None,
+            spanning: Some(view.into()),
+        }
     }
 
     /// A view spanning the whole row, directly beneath it — an open editor.
@@ -114,7 +130,12 @@ pub struct Table<'a> {
 
 impl<'a> Table<'a> {
     pub fn new(columns: &'a [Column]) -> Self {
-        Self { columns, rows: Vec::new(), column_gap: space::M, empty: "Nothing here yet." }
+        Self {
+            columns,
+            rows: Vec::new(),
+            column_gap: space::M,
+            empty: "Nothing here yet.",
+        }
     }
 
     pub fn rows(mut self, rows: impl IntoIterator<Item = Row>) -> Self {
@@ -139,14 +160,22 @@ impl<'a> Table<'a> {
     /// The viewport a [`Row::detail`] gets, for a detail whose own layout
     /// is responsive (the key picker). Ask before building rows.
     pub fn detail_viewport(&self, viewport: Viewport) -> Viewport {
-        if viewport.fits(self.min_width()) { viewport } else { viewport.inset(CARD_INSET) }
+        if viewport.fits(self.min_width()) {
+            viewport
+        } else {
+            viewport.inset(CARD_INSET)
+        }
     }
 
     pub fn build(self, viewport: Viewport) -> View {
         if self.rows.is_empty() {
             return text::caption(self.empty).into();
         }
-        if viewport.fits(self.min_width()) { self.grid() } else { self.cards() }
+        if viewport.fits(self.min_width()) {
+            self.grid()
+        } else {
+            self.cards()
+        }
     }
 
     fn grid(self) -> View {
@@ -183,7 +212,10 @@ impl<'a> Table<'a> {
             children.push((format!("{}/rule", row.key), rule(line, spans, column_count)));
             debug_assert_eq!(row.cells.len(), column_count, "one cell per column");
             for (column, view) in row.cells.into_iter().enumerate() {
-                children.push((format!("{}/{column}", row.key), centred_cell(view, line, column)));
+                children.push((
+                    format!("{}/{column}", row.key),
+                    centred_cell(view, line, column),
+                ));
             }
             if let Some(detail) = row.detail {
                 let detail = Border::new()
@@ -197,7 +229,11 @@ impl<'a> Table<'a> {
         }
 
         let columns: Vec<GridLength> = self.columns.iter().map(|column| column.track()).collect();
-        Grid::new().columns(columns).rows(tracks).column_spacing(self.column_gap).keyed_children(children)
+        Grid::new()
+            .columns(columns)
+            .rows(tracks)
+            .column_spacing(self.column_gap)
+            .keyed_children(children)
     }
 
     fn cards(self) -> View {

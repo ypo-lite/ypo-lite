@@ -68,7 +68,11 @@ fn crc32(data: &[u8]) -> u32 {
     for &byte in data {
         crc ^= u32::from(byte);
         for _ in 0..8 {
-            crc = if crc & 1 != 0 { (crc >> 1) ^ 0xEDB8_8320 } else { crc >> 1 };
+            crc = if crc & 1 != 0 {
+                (crc >> 1) ^ 0xEDB8_8320
+            } else {
+                crc >> 1
+            };
         }
     }
     !crc
@@ -102,7 +106,8 @@ mod tests {
         while at < png.len() {
             let length = u32::from_be_bytes(png[at..at + 4].try_into().unwrap()) as usize;
             let body = &png[at + 4..at + 8 + length];
-            let crc = u32::from_be_bytes(png[at + 8 + length..at + 12 + length].try_into().unwrap());
+            let crc =
+                u32::from_be_bytes(png[at + 8 + length..at + 12 + length].try_into().unwrap());
             assert_eq!(crc32(body), crc, "CRC of {:?}", &body[..4]);
             match &body[..4] {
                 b"IHDR" => {
@@ -131,7 +136,10 @@ mod tests {
                 break;
             }
         }
-        assert_eq!(u32::from_be_bytes(idat[at..at + 4].try_into().unwrap()), adler32(&raw));
+        assert_eq!(
+            u32::from_be_bytes(idat[at..at + 4].try_into().unwrap()),
+            adler32(&raw)
+        );
         assert_eq!(at + 4, idat.len());
         (size.0, size.1, raw)
     }
@@ -141,7 +149,10 @@ mod tests {
         let rgba: Vec<u8> = (0..2 * 3 * 4).map(|n| n as u8).collect();
         let (width, height, raw) = read_back(&encode_rgba(2, 3, &rgba));
         assert_eq!((width, height), (2, 3));
-        let expected: Vec<u8> = rgba.chunks(8).flat_map(|line| std::iter::once(0).chain(line.iter().copied())).collect();
+        let expected: Vec<u8> = rgba
+            .chunks(8)
+            .flat_map(|line| std::iter::once(0).chain(line.iter().copied()))
+            .collect();
         assert_eq!(raw, expected);
     }
 

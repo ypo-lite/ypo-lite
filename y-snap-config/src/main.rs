@@ -35,8 +35,8 @@ mod mouse;
 mod overlay;
 mod reorder;
 
-use ypo_ui as ui;
 use ui::shell;
+use ypo_ui as ui;
 use ypo_ui::keys;
 
 use windows::Win32::UI::Input::KeyboardAndMouse::{HOT_KEY_MODIFIERS, VIRTUAL_KEY};
@@ -45,16 +45,18 @@ use y_core::hotkey::Hotkey;
 use y_core::overlay::Color as CoreColor;
 use y_core::single_instance;
 use y_snap::action::{Action, Target};
-use y_snap::config::{Binding, Button as MouseButton, Gesture, Group, Item, LoadError, QuickAction, Settings, Theme};
+use y_snap::config::{
+    Binding, Button as MouseButton, Gesture, Group, Item, LoadError, QuickAction, Settings, Theme,
+};
 use y_snap::ipc;
 
 use icon_picker::IconPickerUi;
 use icons::IconCategory;
-use ui::key_picker::{KeyPickerEvents, KeyPickerUi};
 use keys::KeyCategory;
 use mouse::GestureKind;
 use overlay::OverlaySection;
 use overlay::palette::PaletteField;
+use ui::key_picker::{KeyPickerEvents, KeyPickerUi};
 use ui::prelude::*;
 
 fn main() {
@@ -119,10 +121,22 @@ struct ConfigApp {
 /// What the open inline editor edits, and the value to restore on Cancel.
 #[derive(Clone, Debug)]
 enum Editing {
-    Hotkey { index: usize, original: Hotkey },
-    Tile { index: usize, original: Item },
-    QuickAction { index: usize, original: QuickAction },
-    Palette { field: PaletteField, original: CoreColor },
+    Hotkey {
+        index: usize,
+        original: Hotkey,
+    },
+    Tile {
+        index: usize,
+        original: Item,
+    },
+    QuickAction {
+        index: usize,
+        original: QuickAction,
+    },
+    Palette {
+        field: PaletteField,
+        original: CoreColor,
+    },
 }
 
 /// A reorderable list — what [`Msg::ReorderToggled`] and [`Msg::Moved`] are
@@ -314,9 +328,14 @@ impl Component for ConfigApp {
         let (width, height) = shell::INITIAL_WINDOW;
         let (min_width, min_height) = shell::MIN_WINDOW;
         context.window_visuals(
-            WindowVisuals::new().backdrop(WindowBackdrop::Mica).client_size(width, height).constraints(
-                WindowConstraints { min_width: Some(min_width), min_height: Some(min_height), ..Default::default() },
-            ),
+            WindowVisuals::new()
+                .backdrop(WindowBackdrop::Mica)
+                .client_size(width, height)
+                .constraints(WindowConstraints {
+                    min_width: Some(min_width),
+                    min_height: Some(min_height),
+                    ..Default::default()
+                }),
         );
         context.on_window_size(context.callback(Msg::WindowResized));
 
@@ -325,7 +344,14 @@ impl Component for ConfigApp {
             Ok(settings) => settings,
             // Nothing to edit if the file can't be read — say why, plainly.
             Err(error) => {
-                return shell::page_frame(page("Couldn't load y-snap.xml", &error.to_string(), View::empty()), layout);
+                return shell::page_frame(
+                    page(
+                        "Couldn't load y-snap.xml",
+                        &error.to_string(),
+                        View::empty(),
+                    ),
+                    layout,
+                );
             }
         };
 
@@ -337,7 +363,14 @@ impl Component for ConfigApp {
                     _ => None,
                 };
                 let reordering = self.reordering == Some(ListKind::Hotkeys);
-                hotkeys::hotkeys_view(&settings.hotkeys, editing, reordering, &self.key_picker, viewport, context)
+                hotkeys::hotkeys_view(
+                    &settings.hotkeys,
+                    editing,
+                    reordering,
+                    &self.key_picker,
+                    viewport,
+                    context,
+                )
             }
             Section::Mouse => mouse::mouse_view(&settings.mouse, viewport, context),
             Section::Overlay => {
@@ -379,38 +412,63 @@ impl Component for ConfigApp {
         };
         // Above every screen, not just one: what was skipped can be in any
         // section, and Save drops it whichever screen it's pressed from.
-        let banner = (!settings.warnings.is_empty() && !self.warnings_dismissed)
-            .then(|| warnings_banner(&settings.warnings, context.callback(|()| Msg::WarningsDismissed)));
-        let screen: View = Stack::vertical(space::L).maybe("warnings", banner).child("screen", screen).into();
+        let banner = (!settings.warnings.is_empty() && !self.warnings_dismissed).then(|| {
+            warnings_banner(
+                &settings.warnings,
+                context.callback(|()| Msg::WarningsDismissed),
+            )
+        });
+        let screen: View = Stack::vertical(space::L)
+            .maybe("warnings", banner)
+            .child("screen", screen)
+            .into();
 
         let current = self.section;
         let items = Section::ALL.map(|section| {
-            let view: View = NavigationViewItem::new().tag(section.tag()).is_selected(section == current).slots([
-                SlotView::new(NavigationViewItemSlot::Icon, SymbolIcon::new().symbol(section.icon())),
-                SlotView::new(NavigationViewItemSlot::Content, section.title()),
-            ]);
+            let view: View = NavigationViewItem::new()
+                .tag(section.tag())
+                .is_selected(section == current)
+                .slots([
+                    SlotView::new(
+                        NavigationViewItemSlot::Icon,
+                        SymbolIcon::new().symbol(section.icon()),
+                    ),
+                    SlotView::new(NavigationViewItemSlot::Content, section.title()),
+                ]);
             (section.tag(), view)
         });
 
         let mut slots = vec![
             SlotView::collection(NavigationViewSlot::MenuItems, items),
-            SlotView::new(NavigationViewSlot::Content, shell::page_frame(screen, layout)),
+            SlotView::new(
+                NavigationViewSlot::Content,
+                shell::page_frame(screen, layout),
+            ),
         ];
         // The file path only fits a labelled pane; on the icon rail it's in
         // the status tooltip instead.
         if layout.pane_expanded {
             let footer = Stack::vertical(space::XXS)
                 .child("caption", text::caption("Loaded from"))
-                .child("path", text::caption(settings.path.display().to_string()).opacity(emphasis::SUBTLE));
+                .child(
+                    "path",
+                    text::caption(settings.path.display().to_string()).opacity(emphasis::SUBTLE),
+                );
             slots.push(SlotView::new(
                 NavigationViewSlot::PaneFooter,
-                Border::new().padding(Thickness::uniform(space::M)).content(footer),
+                Border::new()
+                    .padding(Thickness::uniform(space::M))
+                    .content(footer),
             ));
         }
 
         let nav = shell::pane_mode(NavigationView::new().pane_title("y-snap"), layout)
             .on_selected_tag_changed(context.callback(move |tag: Option<String>| {
-                Msg::SelectSection(tag.as_deref().and_then(Section::from_tag).unwrap_or(current))
+                Msg::SelectSection(
+                    tag.as_deref()
+                        .and_then(Section::from_tag)
+                        .unwrap_or(current),
+                )
             }))
             .grid_row(0)
             .slots(slots);
@@ -427,10 +485,15 @@ impl Component for ConfigApp {
             ),
             None if self.dirty => ("Unsaved changes".to_owned(), true),
             None => match self.applied {
-                Some(true) => ("Saved and applied — y-snap is reloading it".to_owned(), true),
-                Some(false) => {
-                    ("Saved — y-snap isn't running; it'll use these settings when it starts".to_owned(), true)
-                }
+                Some(true) => (
+                    "Saved and applied — y-snap is reloading it".to_owned(),
+                    true,
+                ),
+                Some(false) => (
+                    "Saved — y-snap isn't running; it'll use these settings when it starts"
+                        .to_owned(),
+                    true,
+                ),
                 None => (summary(settings), true),
             },
         };
@@ -451,7 +514,9 @@ impl Component for ConfigApp {
         );
 
         // Nav takes the height the bar doesn't (`Star` over `Auto`).
-        Grid::new().rows([GridLength::STAR, GridLength::Auto]).keyed_children([("nav", nav), ("bar", bar)])
+        Grid::new()
+            .rows([GridLength::STAR, GridLength::Auto])
+            .keyed_children([("nav", nav), ("bar", bar)])
     }
 }
 
@@ -460,7 +525,10 @@ impl Component for ConfigApp {
 fn warnings_banner(warnings: &[String], on_close: Callback<()>) -> View {
     let count = warnings.len();
     shell::warnings_banner(
-        format!("{count} part{} of y-snap.xml couldn't be read", if count == 1 { "" } else { "s" }),
+        format!(
+            "{count} part{} of y-snap.xml couldn't be read",
+            if count == 1 { "" } else { "s" }
+        ),
         "They were skipped, and saving will leave them out of the file — fix them in the file first if you need \
          them, then Reload.",
         warnings,
@@ -470,7 +538,11 @@ fn warnings_banner(warnings: &[String], on_close: Callback<()>) -> View {
 
 /// "5 hotkeys · 16 overlay tiles" — the status line when nothing's pending.
 fn summary(settings: &Settings) -> String {
-    format!("Saved — {} hotkeys · {} overlay tiles", settings.hotkeys.len(), settings.overlay.items.len())
+    format!(
+        "Saved — {} hotkeys · {} overlay tiles",
+        settings.hotkeys.len(),
+        settings.overlay.items.len()
+    )
 }
 
 impl ConfigApp {
@@ -526,9 +598,15 @@ impl ConfigApp {
             Msg::EditorClosed(close) => {
                 if let (Some(editing), EditorClose::Revert) = (self.editing.take(), close) {
                     match editing {
-                        Editing::Hotkey { index, original } => settings.hotkeys[index].hotkey = original,
-                        Editing::Tile { index, original } => settings.overlay.items[index] = original,
-                        Editing::QuickAction { index, original } => settings.min_button.items[index] = original,
+                        Editing::Hotkey { index, original } => {
+                            settings.hotkeys[index].hotkey = original
+                        }
+                        Editing::Tile { index, original } => {
+                            settings.overlay.items[index] = original
+                        }
+                        Editing::QuickAction { index, original } => {
+                            settings.min_button.items[index] = original
+                        }
                         Editing::Palette { field, original } => {
                             *field.get_mut(&mut settings.overlay.palette) = original
                         }
@@ -554,7 +632,8 @@ impl ConfigApp {
             }
             Msg::ModifierToggled(modifier) => {
                 if let Some(Editing::Hotkey { index, .. }) = self.editing {
-                    settings.hotkeys[index].hotkey = settings.hotkeys[index].hotkey.toggled(modifier);
+                    settings.hotkeys[index].hotkey =
+                        settings.hotkeys[index].hotkey.toggled(modifier);
                     self.dirty = true;
                 }
             }
@@ -600,8 +679,10 @@ impl ConfigApp {
             }
 
             Msg::GestureToggled(kind, on) => {
-                *kind.get_mut(&mut settings.mouse) =
-                    on.then_some(Gesture { button: MouseButton::Left, modifiers: HOT_KEY_MODIFIERS(0) });
+                *kind.get_mut(&mut settings.mouse) = on.then_some(Gesture {
+                    button: MouseButton::Left,
+                    modifiers: HOT_KEY_MODIFIERS(0),
+                });
                 self.dirty = true;
             }
             Msg::GestureButtonChanged(kind, Some(choice)) => {
@@ -673,7 +754,8 @@ impl ConfigApp {
             }
             Msg::OverlayPaletteColorChanged(color) => {
                 if let Some(Editing::Palette { field, .. }) = self.editing {
-                    *field.get_mut(&mut settings.overlay.palette) = overlay::palette::from_ui_color(color);
+                    *field.get_mut(&mut settings.overlay.palette) =
+                        overlay::palette::from_ui_color(color);
                     self.dirty = true;
                 }
             }
@@ -706,11 +788,13 @@ impl ConfigApp {
                 self.dirty = true;
             }
             Msg::OverlayGroupTileWidthChanged(index, width) => {
-                settings.overlay.groups[index].tile_width = width.map(|value| value.max(1.0) as u32);
+                settings.overlay.groups[index].tile_width =
+                    width.map(|value| value.max(1.0) as u32);
                 self.dirty = true;
             }
             Msg::OverlayGroupTileHeightChanged(index, height) => {
-                settings.overlay.groups[index].tile_height = height.map(|value| value.max(1.0) as u32);
+                settings.overlay.groups[index].tile_height =
+                    height.map(|value| value.max(1.0) as u32);
                 self.dirty = true;
             }
             Msg::OverlayItemActionChanged(index, Some(choice)) => {
@@ -735,8 +819,9 @@ impl ConfigApp {
             }
             Msg::OverlayItemGroupChanged(index, Some(choice)) => {
                 // Choice 0 is always "(none)" — see `overlay::tiles`.
-                settings.overlay.items[index].group =
-                    choice.checked_sub(1).map(|group| settings.overlay.groups[group].id.clone());
+                settings.overlay.items[index].group = choice
+                    .checked_sub(1)
+                    .map(|group| settings.overlay.groups[group].id.clone());
                 self.dirty = true;
             }
             Msg::OverlayItemDesktopChanged(index, Some(desktop)) => {
@@ -770,8 +855,12 @@ impl ConfigApp {
                     self.icon_picker.open = false;
                 } else {
                     let current = match self.editing {
-                        Some(Editing::Tile { index, .. }) => settings.overlay.items[index].icon.as_deref(),
-                        Some(Editing::QuickAction { index, .. }) => settings.min_button.items[index].icon.as_deref(),
+                        Some(Editing::Tile { index, .. }) => {
+                            settings.overlay.items[index].icon.as_deref()
+                        }
+                        Some(Editing::QuickAction { index, .. }) => {
+                            settings.min_button.items[index].icon.as_deref()
+                        }
                         _ => None,
                     };
                     self.icon_picker = IconPickerUi::opening_on(current);
@@ -779,8 +868,12 @@ impl ConfigApp {
             }
             Msg::IconPicked(icon) => {
                 let target = match self.editing {
-                    Some(Editing::Tile { index, .. }) => Some(&mut settings.overlay.items[index].icon),
-                    Some(Editing::QuickAction { index, .. }) => Some(&mut settings.min_button.items[index].icon),
+                    Some(Editing::Tile { index, .. }) => {
+                        Some(&mut settings.overlay.items[index].icon)
+                    }
+                    Some(Editing::QuickAction { index, .. }) => {
+                        Some(&mut settings.min_button.items[index].icon)
+                    }
                     _ => None,
                 };
                 if let Some(target) = target {
@@ -801,7 +894,9 @@ impl ConfigApp {
             }
             Msg::MinButtonRightClickChanged(Some(choice)) => {
                 // Choice 0 is "(off)" — see `min_button::settings`.
-                let action = choice.checked_sub(1).map(|index| min_button::actions()[index]);
+                let action = choice
+                    .checked_sub(1)
+                    .map(|index| min_button::actions()[index]);
                 if action != settings.min_button.right_click_action {
                     settings.min_button.right_click_action = action;
                     self.dirty = true;
@@ -854,14 +949,24 @@ impl ConfigApp {
                 // An editor's index would go stale as rows move; reordering
                 // and editing are separate modes.
                 self.editing = None;
-                self.reordering = if self.reordering == Some(list) { None } else { Some(list) };
+                self.reordering = if self.reordering == Some(list) {
+                    None
+                } else {
+                    Some(list)
+                };
             }
             Msg::Moved { list, index, up } => {
                 let swapped = match list {
                     ListKind::Hotkeys => swap_neighbour(&mut settings.hotkeys, index, up),
-                    ListKind::OverlayGroups => swap_neighbour(&mut settings.overlay.groups, index, up),
-                    ListKind::OverlayTiles => swap_neighbour(&mut settings.overlay.items, index, up),
-                    ListKind::PopupTiles => swap_neighbour(&mut settings.min_button.items, index, up),
+                    ListKind::OverlayGroups => {
+                        swap_neighbour(&mut settings.overlay.groups, index, up)
+                    }
+                    ListKind::OverlayTiles => {
+                        swap_neighbour(&mut settings.overlay.items, index, up)
+                    }
+                    ListKind::PopupTiles => {
+                        swap_neighbour(&mut settings.min_button.items, index, up)
+                    }
                 };
                 if swapped {
                     self.dirty = true;
@@ -908,7 +1013,11 @@ impl ConfigApp {
 /// and nothing changes, when there's no neighbour that way — a stale click
 /// on a button that should already have been disabled.
 fn swap_neighbour<T>(items: &mut [T], index: usize, up: bool) -> bool {
-    let other = if up { index.checked_sub(1) } else { index.checked_add(1) };
+    let other = if up {
+        index.checked_sub(1)
+    } else {
+        index.checked_add(1)
+    };
     match other {
         Some(other) if index < items.len() && other < items.len() => {
             items.swap(index, other);

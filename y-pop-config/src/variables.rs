@@ -16,7 +16,11 @@ use windows_reactor::*;
 
 /// How many comments the variables list holds, shown or not.
 pub fn count_comments(settings: &Settings) -> usize {
-    settings.variables.iter().filter(|entry| matches!(entry, VarEntry::Comment(_))).count()
+    settings
+        .variables
+        .iter()
+        .filter(|entry| matches!(entry, VarEntry::Comment(_)))
+        .count()
 }
 
 /// What the screen remembers between renders.
@@ -36,7 +40,10 @@ const COLUMNS: [Column; 5] = [
     Column::actions(THREE_ICON_BUTTONS),
 ];
 
-const BUILTIN_COLUMNS: [Column; 2] = [Column::fixed("Name", 150.0), Column::flex("On this PC", 240.0)];
+const BUILTIN_COLUMNS: [Column; 2] = [
+    Column::fixed("Name", 150.0),
+    Column::flex("On this PC", 240.0),
+];
 
 /// How many places a tooltip lists before "…and N more".
 const USAGE_LINES: usize = 8;
@@ -59,7 +66,12 @@ pub fn variables_view(
             VarEntry::Comment(comment) => {
                 if show_comments {
                     let line: View = Stack::horizontal(space::S)
-                        .child("icon", SymbolIcon::new().symbol(Symbol::Comment).opacity(emphasis::SUBTLE))
+                        .child(
+                            "icon",
+                            SymbolIcon::new()
+                                .symbol(Symbol::Comment)
+                                .opacity(emphasis::SUBTLE),
+                        )
                         .child("text", text::caption(comment.text.clone()))
                         .into();
                     rows.push(Row::spanning(format!("c{index}"), line));
@@ -71,7 +83,11 @@ pub fn variables_view(
                 let users = settings.variable_users(index);
                 let resolved = settings.resolved_value(index, builtins);
 
-                let name = text_box(var.name.clone(), "name", context.callback(move |text| Msg::VarNameChanged(index, text)));
+                let name = text_box(
+                    var.name.clone(),
+                    "name",
+                    context.callback(move |text| Msg::VarNameChanged(index, text)),
+                );
                 let name_cell: View = if hidden > 0 {
                     Grid::new()
                         .columns([GridLength::STAR, GridLength::Auto])
@@ -85,8 +101,14 @@ pub fn variables_view(
                 };
                 hidden = 0;
 
-                let value = text_box(var.value.clone(), "value", context.callback(move |text| Msg::VarValueChanged(index, text)));
-                let resolves: View = text::single_line(resolved.clone()).opacity(emphasis::MUTED).tooltip(resolved);
+                let value = text_box(
+                    var.value.clone(),
+                    "value",
+                    context.callback(move |text| Msg::VarValueChanged(index, text)),
+                );
+                let resolves: View = text::single_line(resolved.clone())
+                    .opacity(emphasis::MUTED)
+                    .tooltip(resolved);
 
                 let used: View = if users.is_empty() {
                     text::placeholder().into()
@@ -106,18 +128,34 @@ pub fn variables_view(
                     )
                     .child(
                         "delete",
-                        icon_button(Symbol::Delete, "Delete variable", context.callback(move |()| Msg::VarDeleteAsked(index))),
+                        icon_button(
+                            Symbol::Delete,
+                            "Delete variable",
+                            context.callback(move |()| Msg::VarDeleteAsked(index)),
+                        ),
                     )
                     .into();
 
                 let detail = row_detail(settings, index, &users, ui, context);
-                rows.push(Row::new(format!("v{index}"), vec![name_cell, value.into(), resolves, used, actions]).detail(detail));
+                rows.push(
+                    Row::new(
+                        format!("v{index}"),
+                        vec![name_cell, value.into(), resolves, used, actions],
+                    )
+                    .detail(detail),
+                );
             }
         }
     }
     if hidden > 0 {
         let line: View = Stack::horizontal(space::S)
-            .child("text", text::caption(format!("{hidden} comment{} hidden at the end.", if hidden == 1 { "" } else { "s" })))
+            .child(
+                "text",
+                text::caption(format!(
+                    "{hidden} comment{} hidden at the end.",
+                    if hidden == 1 { "" } else { "s" }
+                )),
+            )
             .child("show", hidden_marker(hidden, context))
             .into();
         rows.push(Row::spanning("hidden-end", line));
@@ -129,7 +167,10 @@ pub fn variables_view(
         .build(viewport);
 
     let toolbar: View = Stack::horizontal(space::L)
-        .child("add", add_button("Add variable", context.callback(|()| Msg::VarAdded)))
+        .child(
+            "add",
+            add_button("Add variable", context.callback(|()| Msg::VarAdded)),
+        )
         .into();
 
     page(
@@ -139,9 +180,17 @@ pub fn variables_view(
         Stack::vertical(space::XL)
             .child(
                 "mine",
-                section("Your variables", Stack::vertical(space::L).child("table", table).child("toolbar", toolbar)),
+                section(
+                    "Your variables",
+                    Stack::vertical(space::L)
+                        .child("table", table)
+                        .child("toolbar", toolbar),
+                ),
             )
-            .child("builtin", section("Built in", builtin_table(builtins, viewport))),
+            .child(
+                "builtin",
+                section("Built in", builtin_table(builtins, viewport)),
+            ),
     )
 }
 
@@ -149,7 +198,10 @@ pub fn variables_view(
 fn hidden_marker(count: usize, context: &ViewContext<ConfigApp>) -> View {
     icon_button(
         Symbol::Comment,
-        &format!("{count} comment{} hidden — click to show", if count == 1 { "" } else { "s" }),
+        &format!(
+            "{count} comment{} hidden — click to show",
+            if count == 1 { "" } else { "s" }
+        ),
         context.callback(|()| Msg::ShowCommentsToggled(true)),
     )
 }
@@ -181,8 +233,24 @@ fn row_detail(
                 .child(
                     "buttons",
                     Stack::horizontal(space::S)
-                        .child("yes", button("Delete anyway", true, true, context.callback(move |()| Msg::VarDeleteConfirmed(index))))
-                        .child("no", button("Keep it", false, true, context.callback(|()| Msg::VarDeleteCancelled))),
+                        .child(
+                            "yes",
+                            button(
+                                "Delete anyway",
+                                true,
+                                true,
+                                context.callback(move |()| Msg::VarDeleteConfirmed(index)),
+                            ),
+                        )
+                        .child(
+                            "no",
+                            button(
+                                "Keep it",
+                                false,
+                                true,
+                                context.callback(|()| Msg::VarDeleteCancelled),
+                            ),
+                        ),
                 )
                 .into(),
         );
@@ -226,7 +294,9 @@ fn builtin_table(builtins: &mut dyn Lookup, viewport: Viewport) -> View {
                 *name,
                 vec![
                     text::body(format!("%{name}%")).into(),
-                    text::single_line(value.clone()).opacity(emphasis::MUTED).tooltip(value),
+                    text::single_line(value.clone())
+                        .opacity(emphasis::MUTED)
+                        .tooltip(value),
                 ],
             )
         })

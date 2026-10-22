@@ -79,7 +79,12 @@ impl IconPickerUi {
         }
         let first = self.page * PAGE;
         let last = (first + PAGE).min(self.count as usize);
-        (first..last).map(|index| IconSpec::File { path: self.path.clone(), index: Some(index as i32) }).collect()
+        (first..last)
+            .map(|index| IconSpec::File {
+                path: self.path.clone(),
+                index: Some(index as i32),
+            })
+            .collect()
     }
 }
 
@@ -92,7 +97,9 @@ pub enum IconMsg {
     Page(isize),
     /// The icon at this position of the source; `None`: from the target.
     Pick(Option<u32>),
-    Closed { accepted: bool },
+    Closed {
+        accepted: bool,
+    },
 }
 
 impl ConfigApp {
@@ -103,10 +110,14 @@ impl ConfigApp {
             IconMsg::OtherFile => {
                 let options = y_core::dialog::OpenOptions {
                     title: Some("Choose a file with icons"),
-                    filters: &[("Icon files", "*.exe;*.dll;*.ico;*.lnk;*.icl"), ("All files", "*.*")],
+                    filters: &[
+                        ("Icon files", "*.exe;*.dll;*.ico;*.lnk;*.icl"),
+                        ("All files", "*.*"),
+                    ],
                     ..Default::default()
                 };
-                let owner = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
+                let owner =
+                    unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
                 if let Ok(picked) = y_core::dialog::open_files(Some(owner), &options)
                     && let Some(path) = picked.into_iter().next()
                 {
@@ -135,8 +146,12 @@ impl ConfigApp {
     }
 
     fn set_icon_text(&mut self, text: String) {
-        let Some(id) = self.icon_picker.open else { return };
-        let Ok(settings) = &mut self.settings else { return };
+        let Some(id) = self.icon_picker.open else {
+            return;
+        };
+        let Ok(settings) = &mut self.settings else {
+            return;
+        };
         if let Some(item) = tree::item_mut(settings, id)
             && set_text(item, TextField::Icon, text)
         {
@@ -146,34 +161,59 @@ impl ConfigApp {
 
     fn open_icon_picker(&mut self, id: ItemId) {
         let Ok(settings) = &self.settings else { return };
-        let Some(item) = tree::item(settings, id) else { return };
+        let Some(item) = tree::item(settings, id) else {
+            return;
+        };
         let original = item.icon.clone().filter(|icon| !icon.is_empty());
 
         // Open on the source the icon already comes from, else on the item's
         // own program, else on shell32.
-        let current = original.as_deref().map(|icon| split_icon_text(icon).0.to_ascii_lowercase());
+        let current = original
+            .as_deref()
+            .map(|icon| split_icon_text(icon).0.to_ascii_lowercase());
         let source = NAMED
             .iter()
             .position(|(_, raw)| current.as_deref() == Some(&raw.to_ascii_lowercase()))
             .map(Source::Named)
-            .or_else(|| current.clone().map(|path| Source::Other(split_icon_text(&path).0)))
+            .or_else(|| {
+                current
+                    .clone()
+                    .map(|path| Source::Other(split_icon_text(&path).0))
+            })
             .or_else(|| own_program(item).map(|_| Source::Own))
             .unwrap_or(Source::Named(0));
 
-        self.icon_picker = IconPickerUi { open: Some(id), original, ..IconPickerUi::default() };
+        self.icon_picker = IconPickerUi {
+            open: Some(id),
+            original,
+            ..IconPickerUi::default()
+        };
         self.set_icon_source(source);
     }
 
     fn set_icon_source(&mut self, source: Source) {
-        let Some(id) = self.icon_picker.open else { return };
+        let Some(id) = self.icon_picker.open else {
+            return;
+        };
         let Ok(settings) = &self.settings else { return };
-        let Some(item) = tree::item(settings, id) else { return };
-        let Some(raw) = source_raw(item, &source) else { return };
+        let Some(item) = tree::item(settings, id) else {
+            return;
+        };
+        let Some(raw) = source_raw(item, &source) else {
+            return;
+        };
 
         let path = settings.expand_text(&raw, &mut *self.builtins.borrow_mut());
         let path = path.trim().trim_matches('"').to_owned();
         let count = y_core::icon::count_in_file(&path);
-        self.icon_picker = IconPickerUi { source: Some(source), raw, path, count, page: 0, ..std::mem::take(&mut self.icon_picker) };
+        self.icon_picker = IconPickerUi {
+            source: Some(source),
+            raw,
+            path,
+            count,
+            page: 0,
+            ..std::mem::take(&mut self.icon_picker)
+        };
     }
 }
 
@@ -213,14 +253,35 @@ pub fn icon_modal(
     let used = crate::app_icons::spec_for(settings, item, builtins);
     let current = item.icon.clone().filter(|icon| !icon.is_empty());
     let now: View = Stack::horizontal(space::M)
-        .child("icon", icon_or_symbol(icons.image(used.as_ref(), CELL), Symbol::Placeholder, CELL))
+        .child(
+            "icon",
+            icon_or_symbol(icons.image(used.as_ref(), CELL), Symbol::Placeholder, CELL),
+        )
         .child(
             "value",
             Stack::vertical(space::XXS)
-                .child("title", text::strong(if current.is_some() { "Chosen icon" } else { "From target" }))
-                .child("text", text::caption(current.clone().unwrap_or_else(|| default_words(item)))),
+                .child(
+                    "title",
+                    text::strong(if current.is_some() {
+                        "Chosen icon"
+                    } else {
+                        "From target"
+                    }),
+                )
+                .child(
+                    "text",
+                    text::caption(current.clone().unwrap_or_else(|| default_words(item))),
+                ),
         )
-        .child("clear", button("From target", current.is_none(), current.is_some(), context.callback(|()| Msg::Icon(IconMsg::Pick(None)))))
+        .child(
+            "clear",
+            button(
+                "From target",
+                current.is_none(),
+                current.is_some(),
+                context.callback(|()| Msg::Icon(IconMsg::Pick(None))),
+            ),
+        )
         .into();
 
     let selected = picker.source.as_ref();
@@ -228,23 +289,49 @@ pub fn icon_modal(
     // names this source.
     let chosen_index = current.as_deref().and_then(|icon| {
         let (path, index) = split_icon_text(&settings.expand_text(icon, builtins));
-        path.trim().trim_matches('"').eq_ignore_ascii_case(&picker.path).then_some(index).flatten()
+        path.trim()
+            .trim_matches('"')
+            .eq_ignore_ascii_case(&picker.path)
+            .then_some(index)
+            .flatten()
     });
 
-    let source_button = |key: String, label: &str, source: Source, enabled: bool| -> (String, View) {
-        let chosen = selected == Some(&source);
-        (key, button(label, chosen, enabled, send(IconMsg::Source(source))))
-    };
-    let mut sources: Vec<(String, View)> =
-        vec![source_button("own".into(), "Its program", Source::Own, own_program(item).is_some())];
+    let source_button =
+        |key: String, label: &str, source: Source, enabled: bool| -> (String, View) {
+            let chosen = selected == Some(&source);
+            (
+                key,
+                button(label, chosen, enabled, send(IconMsg::Source(source))),
+            )
+        };
+    let mut sources: Vec<(String, View)> = vec![source_button(
+        "own".into(),
+        "Its program",
+        Source::Own,
+        own_program(item).is_some(),
+    )];
     for (index, (label, _)) in NAMED.iter().enumerate() {
-        sources.push(source_button(format!("named{index}"), label, Source::Named(index), true));
+        sources.push(source_button(
+            format!("named{index}"),
+            label,
+            Source::Named(index),
+            true,
+        ));
     }
     let other_chosen = matches!(selected, Some(Source::Other(_)));
-    sources.push(("other".into(), button("Other file…", other_chosen, true, send(IconMsg::OtherFile))));
+    sources.push((
+        "other".into(),
+        button("Other file…", other_chosen, true, send(IconMsg::OtherFile)),
+    ));
 
-    let body_width = Viewport::new(window.width.min(crate::ui::editor::MODAL_MAX_WIDTH) - 2.0 * space::XL).inset(CARD_INSET);
-    let source_row = AutoGrid::new(110.0).max_columns(6).gap(space::XS, space::XS).items(sources).build(body_width);
+    let body_width =
+        Viewport::new(window.width.min(crate::ui::editor::MODAL_MAX_WIDTH) - 2.0 * space::XL)
+            .inset(CARD_INSET);
+    let source_row = AutoGrid::new(110.0)
+        .max_columns(6)
+        .gap(space::XS, space::XS)
+        .items(sources)
+        .build(body_width);
 
     Some(modal(
         window,
@@ -287,10 +374,17 @@ fn grid(
     let last = (first + PAGE).min(picker.count as usize);
 
     let cells = (first..last).map(|index| {
-        let spec = IconSpec::File { path: picker.path.clone(), index: Some(index as i32) };
+        let spec = IconSpec::File {
+            path: picker.path.clone(),
+            index: Some(index as i32),
+        };
         let face = icon_or_symbol(icons.image(Some(&spec), CELL), Symbol::Placeholder, CELL);
         let button = Button::new()
-            .style(if chosen_index == Some(index as i32) { ButtonStyle::Accent } else { ButtonStyle::Default })
+            .style(if chosen_index == Some(index as i32) {
+                ButtonStyle::Accent
+            } else {
+                ButtonStyle::Default
+            })
             .min_width(0.0)
             .fill()
             .on_click(context.callback(move |()| Msg::Icon(IconMsg::Pick(Some(index as u32)))))
@@ -298,19 +392,48 @@ fn grid(
         let button: View = button.tooltip(format!("Icon {index}"));
         (index, button)
     });
-    let grid = AutoGrid::new(CELL + 20.0).max_columns(16).gap(space::XS, space::XS).items(cells).build(viewport);
+    let grid = AutoGrid::new(CELL + 20.0)
+        .max_columns(16)
+        .gap(space::XS, space::XS)
+        .items(cells)
+        .build(viewport);
 
     let pages = picker.pages();
     let mut column = Stack::vertical(space::M).child(
         "caption",
-        text::caption(format!("{} · {} icon{}", picker.path, picker.count, if picker.count == 1 { "" } else { "s" })),
+        text::caption(format!(
+            "{} · {} icon{}",
+            picker.path,
+            picker.count,
+            if picker.count == 1 { "" } else { "s" }
+        )),
     );
     column = column.child(format!("page{}", picker.page), grid);
     if pages > 1 {
         let pager = Stack::horizontal(space::S)
-            .child("prev", button("Previous", false, picker.page > 0, context.callback(|()| Msg::Icon(IconMsg::Page(-1)))))
-            .child("where", text::caption(format!("Page {} of {pages}", picker.page + 1)).vertical_alignment(VerticalAlignment::Center))
-            .child("next", button("Next", false, picker.page + 1 < pages, context.callback(|()| Msg::Icon(IconMsg::Page(1)))));
+            .child(
+                "prev",
+                button(
+                    "Previous",
+                    false,
+                    picker.page > 0,
+                    context.callback(|()| Msg::Icon(IconMsg::Page(-1))),
+                ),
+            )
+            .child(
+                "where",
+                text::caption(format!("Page {} of {pages}", picker.page + 1))
+                    .vertical_alignment(VerticalAlignment::Center),
+            )
+            .child(
+                "next",
+                button(
+                    "Next",
+                    false,
+                    picker.page + 1 < pages,
+                    context.callback(|()| Msg::Icon(IconMsg::Page(1))),
+                ),
+            );
         column = column.child("pager", pager);
     }
     column.into()

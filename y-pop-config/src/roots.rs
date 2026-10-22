@@ -82,9 +82,17 @@ pub fn first_hotkey(item: &Item) -> Option<&str> {
 /// Appends an empty menu named "New menu" (or "New menu 2", …, so two are
 /// never confused in the pane) and returns its id.
 pub fn add_menu(settings: &mut Settings) -> ItemId {
-    let taken: Vec<String> = menus(settings).filter_map(|item| item.name.clone()).collect();
+    let taken: Vec<String> = menus(settings)
+        .filter_map(|item| item.name.clone())
+        .collect();
     let name = (1..)
-        .map(|n| if n == 1 { "New menu".to_owned() } else { format!("New menu {n}") })
+        .map(|n| {
+            if n == 1 {
+                "New menu".to_owned()
+            } else {
+                format!("New menu {n}")
+            }
+        })
         .find(|candidate| !taken.contains(candidate))
         .unwrap_or_default();
 
@@ -132,7 +140,10 @@ mod tests {
     fn a_root_is_found_by_id_and_by_position() {
         let settings = load(r#"<y-pop><group name="A"/><group name="B"/></y-pop>"#);
         let b = menus(&settings).nth(1).expect("two menus").id;
-        assert_eq!(find(&settings, b).and_then(|item| item.name.as_deref()), Some("B"));
+        assert_eq!(
+            find(&settings, b).and_then(|item| item.name.as_deref()),
+            Some("B")
+        );
         assert_eq!(position(&settings, b), Some(1));
         assert_eq!(at_position(&settings, 1), Some(b));
         assert_eq!(at_position(&settings, 2), None);
@@ -147,8 +158,13 @@ mod tests {
 
     #[test]
     fn the_first_hotkey_is_the_hint() {
-        let settings = load(r#"<y-pop><group name="A"><hotkey key="Win+Y"/><hotkey key="Win+U"/></group></y-pop>"#);
-        assert_eq!(first_hotkey(menus(&settings).next().expect("one")), Some("Win+Y"));
+        let settings = load(
+            r#"<y-pop><group name="A"><hotkey key="Win+Y"/><hotkey key="Win+U"/></group></y-pop>"#,
+        );
+        assert_eq!(
+            first_hotkey(menus(&settings).next().expect("one")),
+            Some("Win+Y")
+        );
     }
 
     #[test]
@@ -170,9 +186,8 @@ mod tests {
 
     #[test]
     fn deleting_a_root_takes_its_attached_comment_with_it() {
-        let mut settings = load(
-            r#"<y-pop><group name="A"/><!-- about B --><group name="B"/></y-pop>"#,
-        );
+        let mut settings =
+            load(r#"<y-pop><group name="A"/><!-- about B --><group name="B"/></y-pop>"#);
         let b = menus(&settings).nth(1).expect("two").id;
 
         let removed = delete(&mut settings, b).expect("there");

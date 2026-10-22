@@ -9,7 +9,10 @@ use windows_reactor::*;
 
 /// A page title.
 pub fn title(text: impl Into<String>) -> TextBlock {
-    TextBlock::new().text(text).font_size(font::SUBTITLE).font_weight(FontWeight::SEMI_BOLD)
+    TextBlock::new()
+        .text(text)
+        .font_size(font::SUBTITLE)
+        .font_weight(FontWeight::SEMI_BOLD)
 }
 
 /// The sentence under a page title. Wraps.
@@ -23,12 +26,18 @@ pub fn lede(text: impl Into<String>) -> TextBlock {
 
 /// Ordinary text. Wraps.
 pub fn body(text: impl Into<String>) -> TextBlock {
-    TextBlock::new().text(text).font_size(font::BODY).text_wrapping(TextWrapping::WrapWholeWords)
+    TextBlock::new()
+        .text(text)
+        .font_size(font::BODY)
+        .text_wrapping(TextWrapping::WrapWholeWords)
 }
 
 /// Emphasised body text — a card's title.
 pub fn strong(text: impl Into<String>) -> TextBlock {
-    TextBlock::new().text(text).font_size(font::BODY).font_weight(FontWeight::SEMI_BOLD)
+    TextBlock::new()
+        .text(text)
+        .font_size(font::BODY)
+        .font_weight(FontWeight::SEMI_BOLD)
 }
 
 /// A field label, column header or secondary note. Wraps on whole words
@@ -44,7 +53,11 @@ pub fn caption(text: impl Into<String>) -> TextBlock {
 
 /// A section heading inside a page ("Layout", "Palette").
 pub fn section_title(text: impl Into<String>) -> TextBlock {
-    TextBlock::new().text(text).font_size(font::CAPTION).font_weight(FontWeight::SEMI_BOLD).opacity(emphasis::MUTED)
+    TextBlock::new()
+        .text(text)
+        .font_size(font::CAPTION)
+        .font_weight(FontWeight::SEMI_BOLD)
+        .opacity(emphasis::MUTED)
 }
 
 /// Single-line text that ends in "…" rather than wrapping or overflowing —

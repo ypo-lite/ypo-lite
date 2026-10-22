@@ -104,10 +104,15 @@ pub fn palette_tab(
     viewport: Viewport,
     context: &ViewContext<ConfigApp>,
 ) -> View {
-    let swatches = AutoGrid::new(96.0).max_columns(5).gap(space::S, space::S).items(
-        PaletteField::ALL
-            .map(|field| (field.title(), swatch(field, &overlay.palette, editing == Some(field), context))),
-    );
+    let swatches = AutoGrid::new(96.0)
+        .max_columns(5)
+        .gap(space::S, space::S)
+        .items(PaletteField::ALL.map(|field| {
+            (
+                field.title(),
+                swatch(field, &overlay.palette, editing == Some(field), context),
+            )
+        }));
 
     let editor = editing.map(|field| {
         let picker: View = ColorPicker::new()
@@ -147,12 +152,20 @@ fn theme_row(overlay: &Overlay, viewport: Viewport, context: &ViewContext<Config
     let selected = Theme::ALL.iter().position(|&theme| theme == overlay.theme);
     let theme = field(
         "Theme — switching resets the colours to it",
-        combo(Theme::ALL.map(theme_title), selected, context.callback(Msg::OverlayThemeChanged)),
+        combo(
+            Theme::ALL.map(theme_title),
+            selected,
+            context.callback(Msg::OverlayThemeChanged),
+        ),
     );
 
     let customised = customised(overlay);
     let status: View = if customised == 0 {
-        text::caption(format!("All colours come from the {} theme.", overlay.theme.name())).into()
+        text::caption(format!(
+            "All colours come from the {} theme.",
+            overlay.theme.name()
+        ))
+        .into()
     } else {
         Stack::vertical(space::XS)
             .child(
@@ -163,24 +176,47 @@ fn theme_row(overlay: &Overlay, viewport: Viewport, context: &ViewContext<Config
                     overlay.theme.name()
                 )),
             )
-            .child("reset", button("Reset to theme", false, true, context.callback(|()| Msg::OverlayPaletteReset)))
+            .child(
+                "reset",
+                button(
+                    "Reset to theme",
+                    false,
+                    true,
+                    context.callback(|()| Msg::OverlayPaletteReset),
+                ),
+            )
             .into()
     };
 
-    AutoGrid::new(240.0).max_columns(2).item("theme", theme).item("status", status).build(viewport)
+    AutoGrid::new(240.0)
+        .max_columns(2)
+        .item("theme", theme)
+        .item("status", status)
+        .build(viewport)
 }
 
 /// How many palette colours differ from what the theme gives.
 fn customised(overlay: &Overlay) -> usize {
-    PaletteField::ALL.iter().filter(|field| field.get(&overlay.palette) != field.get(&overlay.theme_palette)).count()
+    PaletteField::ALL
+        .iter()
+        .filter(|field| field.get(&overlay.palette) != field.get(&overlay.theme_palette))
+        .count()
 }
 
 /// One swatch: title, colour chip, hex — a button that opens the editor.
 /// The open one is drawn with the Accent style, so it's clear which colour
 /// the editor below is changing.
-fn swatch(field: PaletteField, palette: &Palette, open: bool, context: &ViewContext<ConfigApp>) -> View {
+fn swatch(
+    field: PaletteField,
+    palette: &Palette,
+    open: bool,
+    context: &ViewContext<ConfigApp>,
+) -> View {
     let color = field.get(palette);
-    let hex = format!("#{:02X}{:02X}{:02X}{:02X}", color.r, color.g, color.b, color.a);
+    let hex = format!(
+        "#{:02X}{:02X}{:02X}{:02X}",
+        color.r, color.g, color.b, color.a
+    );
 
     let chip: View = Border::new()
         .height(size::SWATCH_HEIGHT)
@@ -201,7 +237,11 @@ fn swatch(field: PaletteField, palette: &Palette, open: bool, context: &ViewCont
         .child("hex", text::caption(hex).opacity(emphasis::SUBTLE));
 
     Button::new()
-        .style(if open { ButtonStyle::Accent } else { ButtonStyle::Default })
+        .style(if open {
+            ButtonStyle::Accent
+        } else {
+            ButtonStyle::Default
+        })
         .fill()
         .horizontal_content_alignment(HorizontalAlignment::Stretch)
         .on_click(context.callback(move |()| Msg::EditPalette(field)))

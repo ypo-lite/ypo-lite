@@ -89,7 +89,6 @@ use y_pop::skins::resolve_design;
 /// First id handed to a discovered (browsed) file — see the module doc.
 const DISCOVERED_ID_BASE: u32 = 1_000_000;
 
-
 /// Extra runtime state for one open popup — the parts a `ConfigTree` alone
 /// can't answer, because they only exist once a `browse` folder is actually
 /// listed, or an icon actually loaded. Built alongside the [`PopupMenu`] in
@@ -211,7 +210,9 @@ fn shortcut_text(defaults: &Defaults, node: &NodeData) -> Option<String> {
     if !node.show_shortcut.unwrap_or(defaults.show_shortcuts) {
         return None;
     }
-    node.hotkeys.first().map(|binding| binding.hotkey.to_string())
+    node.hotkeys
+        .first()
+        .map(|binding| binding.hotkey.to_string())
 }
 
 /// What a native menu's `track()` result turned out to mean.
@@ -254,14 +255,17 @@ fn append_children(tree: &ConfigTree, parent: NodeId, menu: &mut PopupMenu, sess
 
         match &node.kind {
             NodeKind::Group => {
-                let mut submenu = PopupMenu::new_maybe_themed(session.design).expect("CreatePopupMenu");
+                let mut submenu =
+                    PopupMenu::new_maybe_themed(session.design).expect("CreatePopupMenu");
                 append_children(tree, child, &mut submenu, session);
 
                 let icon = resolve_icon(&mut session.icons, node);
                 let shortcut = shortcut_text(&tree.defaults, node);
                 let _ = menu.add_submenu_with_shortcut(&node.name, submenu, shortcut.as_deref());
                 let position = menu.item_count().saturating_sub(1);
-                session.attach_icon(icon, |bitmap| menu.set_item_icon_by_position(position, bitmap));
+                session.attach_icon(icon, |bitmap| {
+                    menu.set_item_icon_by_position(position, bitmap)
+                });
             }
             NodeKind::App(app) if app.browse.is_some() => {
                 let submenu = PopupMenu::new_maybe_themed(session.design).expect("CreatePopupMenu");
@@ -280,7 +284,9 @@ fn append_children(tree: &ConfigTree, parent: NodeId, menu: &mut PopupMenu, sess
                 let shortcut = shortcut_text(&tree.defaults, node);
                 let _ = menu.add_submenu_with_shortcut(&node.name, submenu, shortcut.as_deref());
                 let position = menu.item_count().saturating_sub(1);
-                session.attach_icon(icon, |bitmap| menu.set_item_icon_by_position(position, bitmap));
+                session.attach_icon(icon, |bitmap| {
+                    menu.set_item_icon_by_position(position, bitmap)
+                });
             }
             // Draws as a thin rule when untitled, its own title text when
             // titled — themed or not, `add_titled_separator` picks the
@@ -516,7 +522,8 @@ mod tests {
     /// A tree with one root `<group>` containing one plain `<app>` — the
     /// shape the icon tests need, distinct from `tree_with_browse`'s.
     fn tree_with_app(exe: &str) -> (ConfigTree, NodeId) {
-        let xml = format!(r#"<y-pop><group name="Root"><app name="App" exe="{exe}"/></group></y-pop>"#);
+        let xml =
+            format!(r#"<y-pop><group name="Root"><app name="App" exe="{exe}"/></group></y-pop>"#);
         let tree = config::load_str(&xml, &mut Vec::<Variable>::new()).expect("valid XML");
         assert!(tree.warnings.is_empty(), "{:?}", tree.warnings);
         let root = tree.roots[0];
@@ -707,7 +714,11 @@ mod tests {
         let top = only_pending_handle(&session);
         on_init_menu_popup(&mut session, top);
         assert_eq!(item_text(top, 0), "Sub");
-        assert_eq!(session.pending.len(), 1, "Sub is still browsable at level 1");
+        assert_eq!(
+            session.pending.len(),
+            1,
+            "Sub is still browsable at level 1"
+        );
 
         let sub = HMENU(*session.pending.keys().next().unwrap() as *mut _);
         on_init_menu_popup(&mut session, sub);
@@ -810,10 +821,7 @@ mod tests {
         let app_id = tree.children(root).next().expect("one child");
 
         let (popup, _session) = build(&tree, root);
-        assert!(item_has_icon(
-            popup.handle(),
-            IDM_FIRST + app_id.as_u32()
-        ));
+        assert!(item_has_icon(popup.handle(), IDM_FIRST + app_id.as_u32()));
     }
 
     #[test]
@@ -946,7 +954,11 @@ mod tests {
         let root = tree.roots[0];
 
         let (popup, _session) = build(&tree, root);
-        assert_eq!(item_count(popup.handle()), 2, "<break/> adds no item of its own");
+        assert_eq!(
+            item_count(popup.handle()),
+            2,
+            "<break/> adds no item of its own"
+        );
         assert_eq!(item_text(popup.handle(), 0), "Before");
         assert_eq!(item_text(popup.handle(), 1), "After");
         assert!(!item_starts_new_column(popup.handle(), 0));

@@ -80,7 +80,9 @@ impl OverlaySection {
     }
 
     pub fn from_title(title: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|section| section.title() == title)
+        Self::ALL
+            .into_iter()
+            .find(|section| section.title() == title)
     }
 
     /// The narrowest the editor pane can be with this tab showing.
@@ -117,13 +119,19 @@ pub fn overlay_view(
     viewport: Viewport,
     context: &ViewContext<ConfigApp>,
 ) -> View {
-    let split = Split::new(viewport).min_widths(state.section.min_width(), PREVIEW_MIN_WIDTH).weights(1.2, 1.0);
+    let split = Split::new(viewport)
+        .min_widths(state.section.min_width(), PREVIEW_MIN_WIDTH)
+        .weights(1.2, 1.0);
     let editor_viewport = split.primary();
 
     let tab = match state.section {
         OverlaySection::Layout => layout::layout_tab(overlay, editor_viewport, context),
-        OverlaySection::Palette => palette::palette_tab(overlay, state.editing_palette, editor_viewport, context),
-        OverlaySection::Groups => groups::groups_tab(overlay, state.reordering_groups, editor_viewport, context),
+        OverlaySection::Palette => {
+            palette::palette_tab(overlay, state.editing_palette, editor_viewport, context)
+        }
+        OverlaySection::Groups => {
+            groups::groups_tab(overlay, state.reordering_groups, editor_viewport, context)
+        }
         OverlaySection::Tiles => tiles::tiles_tab(
             overlay,
             state.editing_tile,
@@ -153,13 +161,20 @@ pub fn overlay_view(
 
 fn tabs(current: OverlaySection, context: &ViewContext<ConfigApp>) -> View {
     let items = OverlaySection::ALL.map(|section| {
-        let view: View = SelectorBarItem::new().text(section.title()).is_selected(section == current).into();
+        let view: View = SelectorBarItem::new()
+            .text(section.title())
+            .is_selected(section == current)
+            .into();
         (section.title(), view)
     });
 
     SelectorBar::new()
         .on_selected_text_changed(context.callback(move |text: Option<String>| {
-            Msg::OverlaySectionSelected(text.as_deref().and_then(OverlaySection::from_title).unwrap_or(current))
+            Msg::OverlaySectionSelected(
+                text.as_deref()
+                    .and_then(OverlaySection::from_title)
+                    .unwrap_or(current),
+            )
         }))
         .slots([SlotView::collection(SelectorBarSlot::Items, items)])
 }

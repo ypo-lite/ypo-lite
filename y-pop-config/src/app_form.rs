@@ -30,10 +30,22 @@ pub fn sections(
     context: &ViewContext<ConfigApp>,
 ) -> View {
     let mut form = Stack::vertical(space::L)
-        .child("target", section("Target", target(settings, ui, item.id, app, viewport, context)))
-        .child("launch", section("Launch", launch(settings, item.id, app, viewport, context)));
+        .child(
+            "target",
+            section(
+                "Target",
+                target(settings, ui, item.id, app, viewport, context),
+            ),
+        )
+        .child(
+            "launch",
+            section("Launch", launch(settings, item.id, app, viewport, context)),
+        );
     if TargetMode::of(app) == TargetMode::Folder {
-        form = form.child("folder", section("Folder listing", folder(item.id, app, viewport, context)));
+        form = form.child(
+            "folder",
+            section("Folder listing", folder(item.id, app, viewport, context)),
+        );
     }
     let id = item.id;
     form = form.child(
@@ -79,14 +91,18 @@ fn insert_variable(
     let picker: View = combo(
         shown,
         None,
-        context.callback(move |choice: Option<usize>| match choice.and_then(|index| names.get(index)) {
-            Some(name) => Msg::Menu(MenuMsg::InsertVariable(id, field, name.clone())),
-            None => Msg::Ignored,
+        context.callback(move |choice: Option<usize>| {
+            match choice.and_then(|index| names.get(index)) {
+                Some(name) => Msg::Menu(MenuMsg::InsertVariable(id, field, name.clone())),
+                None => Msg::Ignored,
+            }
         }),
     )
     .placeholder_text("Insert variable…")
     .into();
-    Stack::vertical(0.0).child(format!("insert-{field:?}-{current}"), picker).into()
+    Stack::vertical(0.0)
+        .child(format!("insert-{field:?}-{current}"), picker)
+        .into()
 }
 
 fn target(
@@ -98,12 +114,18 @@ fn target(
     context: &ViewContext<ConfigApp>,
 ) -> View {
     let mode = TargetMode::of(app);
-    let choices = [Choice::new("Program or file"), Choice::new("Folder as submenu"), Choice::new("Store app")];
+    let choices = [
+        Choice::new("Program or file"),
+        Choice::new("Folder as submenu"),
+        Choice::new("Store app"),
+    ];
     let selected = TargetMode::ALL.iter().position(|&m| m == mode);
     let modes = segmented(
         &choices,
         selected,
-        context.callback(move |index: usize| Msg::Menu(MenuMsg::TargetMode(id, TargetMode::ALL[index]))),
+        context.callback(move |index: usize| {
+            Msg::Menu(MenuMsg::TargetMode(id, TargetMode::ALL[index]))
+        }),
     );
 
     let body: View = if mode == TargetMode::Store {
@@ -119,24 +141,52 @@ fn target(
         let raw = app.exe.clone().unwrap_or_default();
         let folder = mode == TargetMode::Folder;
         let label = if folder { "Folder" } else { "Program or file" };
-        let placeholder = if folder { r"%mydocs%\Projects" } else { r"%programfiles%\App\app.exe" };
+        let placeholder = if folder {
+            r"%mydocs%\Projects"
+        } else {
+            r"%programfiles%\App\app.exe"
+        };
 
-        let browse: View = button("Browse…", false, true, context.callback(move |()| Msg::Menu(MenuMsg::Browse(id))));
+        let browse: View = button(
+            "Browse…",
+            false,
+            true,
+            context.callback(move |()| Msg::Menu(MenuMsg::Browse(id))),
+        );
         let tools = AutoGrid::new(180.0)
             .max_columns(2)
-            .item("insert", insert_variable(settings, id, TextField::Target, &raw, false, context))
-            .item("browse", browse.tooltip(if folder { "Choose a folder" } else { "Choose a program or file" }))
+            .item(
+                "insert",
+                insert_variable(settings, id, TextField::Target, &raw, false, context),
+            )
+            .item(
+                "browse",
+                browse.tooltip(if folder {
+                    "Choose a folder"
+                } else {
+                    "Choose a program or file"
+                }),
+            )
             .build(viewport);
 
         let expanded = settings.expand_text(&raw, &mut *ui.builtins.borrow_mut());
         Stack::vertical(space::S)
-            .child("field", field(label, text_box(raw, placeholder, text_of(id, TextField::Target, context))))
+            .child(
+                "field",
+                field(
+                    label,
+                    text_box(raw, placeholder, text_of(id, TextField::Target, context)),
+                ),
+            )
             .child("tools", tools)
             .child("readout", readout(&expanded, folder))
             .into()
     };
 
-    Stack::vertical(space::M).child("mode", modes).child("body", body).into()
+    Stack::vertical(space::M)
+        .child("mode", modes)
+        .child("body", body)
+        .into()
 }
 
 /// What the target comes to, and whether it is there.
@@ -160,17 +210,34 @@ fn launch(
     context: &ViewContext<ConfigApp>,
 ) -> View {
     let flag = move |label: &str, field: FlagField, on: bool| {
-        labeled_switch(label, on, context.callback(move |on| Msg::Menu(MenuMsg::Flag(id, field, on))))
+        labeled_switch(
+            label,
+            on,
+            context.callback(move |on| Msg::Menu(MenuMsg::Flag(id, field, on))),
+        )
     };
 
     let param = app.param.clone().unwrap_or_default();
     let arguments: View = Stack::vertical(space::S)
         .child(
             "field",
-            field("Arguments", text_box(param.clone(), "Command-line arguments", text_of(id, TextField::Param, context))),
+            field(
+                "Arguments",
+                text_box(
+                    param.clone(),
+                    "Command-line arguments",
+                    text_of(id, TextField::Param, context),
+                ),
+            ),
         )
-        .child("insert", insert_variable(settings, id, TextField::Param, &param, true, context))
-        .child("note", text::caption("%clipboard% and %clipboards% are read when the item is launched."))
+        .child(
+            "insert",
+            insert_variable(settings, id, TextField::Param, &param, true, context),
+        )
+        .child(
+            "note",
+            text::caption("%clipboard% and %clipboards% are read when the item is launched."),
+        )
         .into();
     let start_in = field(
         "Start in",
@@ -181,11 +248,19 @@ fn launch(
         ),
     );
 
-    let inherited = if settings.globals.shell_execute.unwrap_or(false) { "on" } else { "off" };
+    let inherited = if settings.globals.shell_execute.unwrap_or(false) {
+        "on"
+    } else {
+        "off"
+    };
     let shell = field(
         "Launch through the shell",
         combo(
-            [format!("Inherit ({inherited})"), "On".to_owned(), "Off".to_owned()],
+            [
+                format!("Inherit ({inherited})"),
+                "On".to_owned(),
+                "Off".to_owned(),
+            ],
             Some(match app.shell {
                 None => 0,
                 Some(true) => 1,
@@ -201,16 +276,44 @@ fn launch(
     Stack::vertical(space::M)
         .child(
             "fields",
-            AutoGrid::new(240.0).max_columns(2).item("arguments", arguments).item("start", start_in).build(viewport),
+            AutoGrid::new(240.0)
+                .max_columns(2)
+                .item("arguments", arguments)
+                .item("start", start_in)
+                .build(viewport),
         )
-        .child("shell", AutoGrid::new(240.0).max_columns(2).item("shell", shell).build(viewport))
-        .child("elevate", flag("Run as administrator", FlagField::Elevate, app.elevate))
-        .child("on-start", flag("Also run when y-pop starts", FlagField::OnStart, app.on_start))
-        .child("on-exit", flag("Also run when y-pop exits", FlagField::OnExit, app.on_exit))
+        .child(
+            "shell",
+            AutoGrid::new(240.0)
+                .max_columns(2)
+                .item("shell", shell)
+                .build(viewport),
+        )
+        .child(
+            "elevate",
+            flag("Run as administrator", FlagField::Elevate, app.elevate),
+        )
+        .child(
+            "on-start",
+            flag(
+                "Also run when y-pop starts",
+                FlagField::OnStart,
+                app.on_start,
+            ),
+        )
+        .child(
+            "on-exit",
+            flag("Also run when y-pop exits", FlagField::OnExit, app.on_exit),
+        )
         .into()
 }
 
-fn folder(id: ItemId, app: &AppFields, viewport: Viewport, context: &ViewContext<ConfigApp>) -> View {
+fn folder(
+    id: ItemId,
+    app: &AppFields,
+    viewport: Viewport,
+    context: &ViewContext<ConfigApp>,
+) -> View {
     let filter = field(
         "Filter",
         text_box(
@@ -230,7 +333,8 @@ fn folder(id: ItemId, app: &AppFields, viewport: Viewport, context: &ViewContext
                     depth.map(f64::from),
                     0.0,
                     200.0,
-                    context.callback(move |value: Option<f64>| Msg::Menu(MenuMsg::Depth(id, value))),
+                    context
+                        .callback(move |value: Option<f64>| Msg::Menu(MenuMsg::Depth(id, value))),
                 ),
             )
             .child("words", text::caption(depth_words(depth.unwrap_or(0)))),
@@ -239,7 +343,11 @@ fn folder(id: ItemId, app: &AppFields, viewport: Viewport, context: &ViewContext
     let open = field(
         "Entry to open the folder itself",
         combo(
-            ["Only for folders at the deepest level", "In every submenu", "Never"],
+            [
+                "Only for folders at the deepest level",
+                "In every submenu",
+                "Never",
+            ],
             Some(match app.open_folder {
                 None | Some(OpenFolder::MaxDepth) => 0,
                 Some(OpenFolder::All) => 1,
@@ -252,5 +360,10 @@ fn folder(id: ItemId, app: &AppFields, viewport: Viewport, context: &ViewContext
         ),
     );
 
-    AutoGrid::new(220.0).max_columns(3).item("filter", filter).item("depth", depth_box).item("open", open).build(viewport)
+    AutoGrid::new(220.0)
+        .max_columns(3)
+        .item("filter", filter)
+        .item("depth", depth_box)
+        .item("open", open)
+        .build(viewport)
 }

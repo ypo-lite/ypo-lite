@@ -4,8 +4,8 @@
 
 use crate::layout::{Stack, cell};
 use crate::text;
-use crate::viewport::Viewport;
 use crate::tokens::{radius, size, space};
+use crate::viewport::Viewport;
 use windows_reactor::*;
 
 /// Padding inside a [`card`] — exported so a responsive card body can
@@ -31,19 +31,35 @@ pub fn card() -> Border {
 /// a status) on the right — over `body`. The editor panels and the live
 /// preview are all one of these.
 pub fn panel(title: impl Into<String>, trailing: Option<View>, body: impl Into<View>) -> View {
-    let mut header = vec![("title", cell(text::strong(title).vertical_alignment(VerticalAlignment::Center), 0, 0))];
+    let mut header = vec![(
+        "title",
+        cell(
+            text::strong(title).vertical_alignment(VerticalAlignment::Center),
+            0,
+            0,
+        ),
+    )];
     if let Some(trailing) = trailing {
         header.push(("trailing", cell(trailing, 0, 1)));
     }
-    let header: View =
-        Grid::new().columns([GridLength::STAR, GridLength::Auto]).column_spacing(space::M).keyed_children(header);
+    let header: View = Grid::new()
+        .columns([GridLength::STAR, GridLength::Auto])
+        .column_spacing(space::M)
+        .keyed_children(header);
 
-    card().content(Stack::vertical(space::M).child("header", header).child("body", body))
+    card().content(
+        Stack::vertical(space::M)
+            .child("header", header)
+            .child("body", body),
+    )
 }
 
 /// A titled block inside a page ("Layout", "Palette", "Tiles — 16").
 pub fn section(title: impl Into<String>, body: impl Into<View>) -> View {
-    Stack::vertical(space::S).child("title", text::section_title(title)).child("body", body).into()
+    Stack::vertical(space::S)
+        .child("title", text::section_title(title))
+        .child("body", body)
+        .into()
 }
 
 /// A short explanatory callout with an accent bar — the layout mock's
@@ -61,7 +77,12 @@ pub fn note(message: impl Into<String>) -> View {
 /// A screen: title, lede, then `body`.
 pub fn page(title: &str, lede: &str, body: impl Into<View>) -> View {
     Stack::vertical(space::XL)
-        .child("header", Stack::vertical(space::XS).child("title", text::title(title)).child("lede", text::lede(lede)))
+        .child(
+            "header",
+            Stack::vertical(space::XS)
+                .child("title", text::title(title))
+                .child("lede", text::lede(lede)),
+        )
         .child("body", body)
         .into()
 }
@@ -74,7 +95,12 @@ pub const SETTING_SIDE_BY_SIDE_MIN: f64 = 460.0;
 /// control on the right — under the text when the card is too narrow for
 /// both. `viewport` is the width the *card* gets (it takes its own padding
 /// off).
-pub fn setting(title: &str, description: &str, control: impl Into<View>, viewport: Viewport) -> View {
+pub fn setting(
+    title: &str,
+    description: &str,
+    control: impl Into<View>,
+    viewport: Viewport,
+) -> View {
     let words = Stack::vertical(space::XXS)
         .child("title", text::body(title))
         .child("description", text::caption(description));
@@ -85,11 +111,32 @@ pub fn setting(title: &str, description: &str, control: impl Into<View>, viewpor
             .columns([GridLength::STAR, GridLength::Auto])
             .column_spacing(space::L)
             .keyed_children([
-                ("words", cell(Border::new().vertical_alignment(VerticalAlignment::Center).content(words), 0, 0)),
-                ("control", cell(Border::new().vertical_alignment(VerticalAlignment::Center).content(control), 0, 1)),
+                (
+                    "words",
+                    cell(
+                        Border::new()
+                            .vertical_alignment(VerticalAlignment::Center)
+                            .content(words),
+                        0,
+                        0,
+                    ),
+                ),
+                (
+                    "control",
+                    cell(
+                        Border::new()
+                            .vertical_alignment(VerticalAlignment::Center)
+                            .content(control),
+                        0,
+                        1,
+                    ),
+                ),
             ])
     } else {
-        Stack::vertical(space::M).child("words", words).child("control", control).into()
+        Stack::vertical(space::M)
+            .child("words", words)
+            .child("control", control)
+            .into()
     };
     card().content(body)
 }

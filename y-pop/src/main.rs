@@ -16,8 +16,8 @@ mod browse;
 mod menu;
 
 use windows::Win32::UI::WindowsAndMessaging::{
-    HMENU, MB_ICONINFORMATION, MB_OK, MessageBoxW, WM_DRAWITEM, WM_HOTKEY, WM_INITMENUPOPUP, WM_MENUCHAR,
-    WM_MEASUREITEM,
+    HMENU, MB_ICONINFORMATION, MB_OK, MessageBoxW, WM_DRAWITEM, WM_HOTKEY, WM_INITMENUPOPUP,
+    WM_MEASUREITEM, WM_MENUCHAR,
 };
 use windows::core::{HSTRING, PCWSTR};
 
@@ -218,7 +218,9 @@ impl YPop {
         let tree = match y_pop::builtins::load() {
             Ok(tree) => tree,
             Err(error) => {
-                y_core::log::line(format_args!("reload failed, keeping the old configuration: {error}"));
+                y_core::log::line(format_args!(
+                    "reload failed, keeping the old configuration: {error}"
+                ));
                 return;
             }
         };
@@ -230,7 +232,9 @@ impl YPop {
         self.tray.clear();
         self.tree = tree;
         if let Err(error) = self.install(hwnd) {
-            y_core::log::line(format_args!("reload: tray icons could not be created: {error}"));
+            y_core::log::line(format_args!(
+                "reload: tray icons could not be created: {error}"
+            ));
         }
     }
 

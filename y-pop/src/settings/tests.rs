@@ -73,7 +73,11 @@ fn the_shipped_file_survives_a_round_trip() {
     assert!(again.warnings.is_empty(), "{:?}", again.warnings);
     assert_eq!(dump(&original), dump(&again), "the same menus");
 
-    assert_eq!(comment_texts(SHIPPED), comment_texts(&written), "the same comments");
+    assert_eq!(
+        comment_texts(SHIPPED),
+        comment_texts(&written),
+        "the same comments"
+    );
 
     let after = load(&written);
     assert_eq!(before.globals, after.globals);
@@ -146,8 +150,12 @@ fn a_comment_directly_above_an_item_is_attached_to_it() {
     );
 
     let group = only_group(&settings);
-    let [Entry::Item(a), Entry::Comment(free), Entry::Item(b), Entry::Comment(trailing)] =
-        &group.children[..]
+    let [
+        Entry::Item(a),
+        Entry::Comment(free),
+        Entry::Item(b),
+        Entry::Comment(trailing),
+    ] = &group.children[..]
     else {
         panic!("unexpected shape: {:?}", group.children)
     };
@@ -250,7 +258,11 @@ fn the_empty_line_between_items_is_kept() {
         .map(|entry| matches!(entry, Entry::Item(item) if item.blank_before))
         .collect();
     assert_eq!(blank, [false, true, false]);
-    assert!(settings.to_xml().contains("<group name=\"A\"/>\n\n\t<group name=\"B\"/>\n\t<group"));
+    assert!(
+        settings
+            .to_xml()
+            .contains("<group name=\"A\"/>\n\n\t<group name=\"B\"/>\n\t<group")
+    );
 }
 
 #[test]
@@ -263,7 +275,12 @@ fn unknown_attributes_survive_and_are_still_warned_about() {
     assert!(settings.warnings.iter().any(|w| w.contains("colour")));
 
     let written = settings.to_xml();
-    for kept in ["flavour=\"mint\"", "popup=\"neon\"", "colour=\"red\"", "sticky=\"yes\""] {
+    for kept in [
+        "flavour=\"mint\"",
+        "popup=\"neon\"",
+        "colour=\"red\"",
+        "sticky=\"yes\"",
+    ] {
         assert!(written.contains(kept), "{kept} lost in:\n{written}");
     }
 }
@@ -301,7 +318,12 @@ fn an_element_y_pop_would_reject_is_kept_as_a_comment() {
     assert_eq!(comments.len(), 2, "{:?}", group.children);
     assert!(comments[0].contains("<widget size=\"3\">") && comments[0].contains("<part/>"));
     assert!(comments[1].contains("No target"));
-    assert!(settings.warnings.iter().any(|w| w.contains("kept in the file as a comment")));
+    assert!(
+        settings
+            .warnings
+            .iter()
+            .any(|w| w.contains("kept in the file as a comment"))
+    );
 
     // Saved, it loads like the original did — and the XML is still there.
     let written = settings.to_xml();
@@ -321,7 +343,11 @@ fn a_leaf_element_s_children_are_kept_not_dropped() {
     };
     assert_eq!(app.hotkeys.len(), 1);
     assert_eq!(app.inner_comments.len(), 1);
-    assert!(settings.to_xml().contains("<app name=\"inner\" exe=\"b.exe\"/>"));
+    assert!(
+        settings
+            .to_xml()
+            .contains("<app name=\"inner\" exe=\"b.exe\"/>")
+    );
 }
 
 #[test]
@@ -338,7 +364,9 @@ fn an_incomplete_skin_part_is_kept_as_a_comment() {
 #[test]
 fn a_variable_without_a_value_is_kept_as_a_comment() {
     let settings = load(r#"<y-pop><variables><var name="x"/></variables><quit/></y-pop>"#);
-    assert!(matches!(&settings.variables[0], VarEntry::Comment(c) if c.text.contains("name=\"x\"")));
+    assert!(
+        matches!(&settings.variables[0], VarEntry::Comment(c) if c.text.contains("name=\"x\""))
+    );
 }
 
 #[test]
@@ -399,8 +427,14 @@ fn a_skin_round_trips() {
     assert!(settings.warnings.is_empty(), "{:?}", settings.warnings);
 
     let overrides = settings.skin.overrides;
-    assert_eq!(overrides.back, Some(y_core::overlay::Color::rgb(0x10, 0x10, 0x10)));
-    assert_eq!(overrides.hover_back, Some(y_core::overlay::Color::rgba(0xff, 0x88, 0, 0x80)));
+    assert_eq!(
+        overrides.back,
+        Some(y_core::overlay::Color::rgb(0x10, 0x10, 0x10))
+    );
+    assert_eq!(
+        overrides.hover_back,
+        Some(y_core::overlay::Color::rgba(0xff, 0x88, 0, 0x80))
+    );
 
     let written = settings.to_xml();
     let again = load(&written);
@@ -415,7 +449,10 @@ fn a_skin_round_trips() {
 #[test]
 fn a_file_with_no_skin_and_no_variables_writes_neither() {
     let written = load("<y-pop><quit/></y-pop>").to_xml();
-    assert!(!written.contains("skin") && !written.contains("variables"), "{written}");
+    assert!(
+        !written.contains("skin") && !written.contains("variables"),
+        "{written}"
+    );
 }
 
 #[test]
@@ -481,7 +518,10 @@ fn saving_replaces_the_file_and_keeps_one_backup_per_session() {
         std::fs::read_to_string(directory.join("y-pop.xml.bak")).expect("backup"),
         "<y-pop><about/></y-pop>"
     );
-    assert_eq!(std::fs::read_to_string(&path).expect("file"), session.to_xml());
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("file"),
+        session.to_xml()
+    );
 
     let _ = std::fs::remove_dir_all(&directory);
 }
@@ -498,7 +538,10 @@ fn the_file_notes_read_as_one_text_in_file_order() {
         "<!-- first -->\n<y-pop>\n<!-- second -->\n<variables><var name=\"a\" value=\"b\"/></variables>\n<quit/>\n</y-pop>\n<!-- last\n\nstill last -->",
     );
     assert_eq!(settings.file_notes_count(), 3);
-    assert_eq!(settings.file_notes_text(), "first\n\nsecond\n\nlast\n\nstill last");
+    assert_eq!(
+        settings.file_notes_text(),
+        "first\n\nsecond\n\nlast\n\nstill last"
+    );
 }
 
 #[test]
@@ -508,7 +551,14 @@ fn editing_the_file_notes_merges_them_and_blank_removes_them() {
     // Reporting what is already there is not an edit.
     let same = settings.file_notes_text();
     assert!(!settings.set_file_notes_text(&same));
-    assert_eq!((settings.prolog.len(), settings.intro.len(), settings.epilog.len()), (1, 1, 1));
+    assert_eq!(
+        (
+            settings.prolog.len(),
+            settings.intro.len(),
+            settings.epilog.len()
+        ),
+        (1, 1, 1)
+    );
 
     assert!(settings.set_file_notes_text("one note\nfor everything"));
     assert_eq!(settings.file_notes_count(), 1);
@@ -539,8 +589,14 @@ fn an_item_previews_as_the_xml_a_save_would_write() {
         .expect("in the default file");
     let xml = notepad.to_xml();
     assert!(xml.starts_with("<!--\n\toverride=\"true\""), "{xml}");
-    assert!(xml.contains("<app name=\"Notepad\" exe=\"%win%\\notepad.exe\">"), "{xml}");
-    assert!(xml.contains("\t<hotkey key=\"Win+N\" override=\"true\"/>"), "{xml}");
+    assert!(
+        xml.contains("<app name=\"Notepad\" exe=\"%win%\\notepad.exe\">"),
+        "{xml}"
+    );
+    assert!(
+        xml.contains("\t<hotkey key=\"Win+N\" override=\"true\"/>"),
+        "{xml}"
+    );
     assert!(xml.ends_with("</app>"), "{xml}");
 
     // And it is part of what the whole file says.
@@ -556,7 +612,10 @@ fn expand_text_uses_the_files_variables_builtins_and_leaves_the_clipboard() {
         r#"<y-pop><variables><var name="tools" value="%win%\tools"/><var name="git" value="%tools%\git"/></variables></y-pop>"#,
     );
     let mut lookup = builtins();
-    assert_eq!(settings.expand_text(r"%git%\git.exe %clipboard% %nope%", &mut lookup), r"C:\Windows\tools\git\git.exe %clipboard% %nope%");
+    assert_eq!(
+        settings.expand_text(r"%git%\git.exe %clipboard% %nope%", &mut lookup),
+        r"C:\Windows\tools\git\git.exe %clipboard% %nope%"
+    );
 }
 
 #[test]

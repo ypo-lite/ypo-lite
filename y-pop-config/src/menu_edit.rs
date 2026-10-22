@@ -70,7 +70,11 @@ impl TargetMode {
 /// Moves `app` to `mode`. The value of the mode it leaves goes to `stash`
 /// (`(exe, app-id)`) and comes back when it is chosen again, so a click on
 /// the wrong choice loses nothing. Returns whether anything changed.
-pub(crate) fn set_target_mode(app: &mut AppFields, mode: TargetMode, stash: &mut (Option<String>, Option<String>)) -> bool {
+pub(crate) fn set_target_mode(
+    app: &mut AppFields,
+    mode: TargetMode,
+    stash: &mut (Option<String>, Option<String>),
+) -> bool {
     let from = TargetMode::of(app);
     if from == mode {
         return false;
@@ -108,9 +112,15 @@ pub enum MenuMsg {
     MoreToggled,
     /// The "written to y-pop.xml" preview.
     XmlToggled,
-    Move { id: ItemId, dir: MoveDir },
+    Move {
+        id: ItemId,
+        dir: MoveDir,
+    },
     /// Into the group at this place of `tree::groups(settings, Some(id))`.
-    MoveTo { id: ItemId, group: usize },
+    MoveTo {
+        id: ItemId,
+        group: usize,
+    },
     Duplicate(ItemId),
     Delete(ItemId),
     Text(ItemId, TextField, String),
@@ -141,7 +151,9 @@ pub enum MenuMsg {
     HotkeyEdit(ItemId, usize),
     /// The dialog closed: OK keeps the edit, anything else restores the
     /// hotkey as it was (and drops one that was just added).
-    HotkeyClosed { accepted: bool },
+    HotkeyClosed {
+        accepted: bool,
+    },
     HotkeyRemove(ItemId, usize),
     HotkeyOverride(ItemId, usize, bool),
     HotkeyKey(ItemId, usize, VIRTUAL_KEY),
@@ -157,12 +169,18 @@ pub enum MenuMsg {
 pub(crate) fn split_hotkey(raw: &str) -> (HOT_KEY_MODIFIERS, Option<VIRTUAL_KEY>) {
     if let Some(hotkey) = Hotkey::parse(raw) {
         // `parse` adds MOD_NOREPEAT, which the picker has no chip for.
-        let held = MODIFIERS.iter().fold(0, |held, (_, modifier)| held | (hotkey.modifiers.0 & modifier.0));
+        let held = MODIFIERS.iter().fold(0, |held, (_, modifier)| {
+            held | (hotkey.modifiers.0 & modifier.0)
+        });
         return (HOT_KEY_MODIFIERS(held), Some(hotkey.key));
     }
     let held = raw
         .split('+')
-        .filter_map(|part| MODIFIERS.iter().find(|(name, _)| name.eq_ignore_ascii_case(part.trim())))
+        .filter_map(|part| {
+            MODIFIERS
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case(part.trim()))
+        })
         .fold(0, |held, (_, modifier)| held | modifier.0);
     (HOT_KEY_MODIFIERS(held), None)
 }
@@ -198,7 +216,9 @@ impl ConfigApp {
     /// What is selected in the tray menu `root`: the menu's own item when
     /// nothing is, or when what was selected is gone.
     pub(crate) fn selected(&self, root: ItemId) -> ItemId {
-        let Ok(settings) = &self.settings else { return root };
+        let Ok(settings) = &self.settings else {
+            return root;
+        };
         self.selection
             .get(&root)
             .copied()
@@ -209,7 +229,10 @@ impl ConfigApp {
     /// The text of one hotkey, if it exists.
     fn hotkey_text(&self, id: ItemId, index: usize) -> Option<String> {
         let settings = self.settings.as_ref().ok()?;
-        tree::item(settings, id)?.hotkeys.get(index).map(|entry| entry.key.clone())
+        tree::item(settings, id)?
+            .hotkeys
+            .get(index)
+            .map(|entry| entry.key.clone())
     }
 
     /// Asks for the target of the app `id` — a file, or a folder in Folder
@@ -217,16 +240,36 @@ impl ConfigApp {
     fn browse_target(&self, id: ItemId) -> Option<String> {
         let settings = self.settings.as_ref().ok()?;
         let item = tree::item(settings, id)?;
-        let ItemKind::App(fields) = &item.kind else { return None };
+        let ItemKind::App(fields) = &item.kind else {
+            return None;
+        };
         let folder = TargetMode::of(fields) == TargetMode::Folder;
 
-        let current = settings.expand_text(fields.exe.as_deref().unwrap_or_default(), &mut *self.builtins.borrow_mut());
+        let current = settings.expand_text(
+            fields.exe.as_deref().unwrap_or_default(),
+            &mut *self.builtins.borrow_mut(),
+        );
         let current = std::path::PathBuf::from(current.trim().trim_matches('"'));
-        let start = if current.is_dir() { Some(current) } else { current.parent().map(std::path::Path::to_path_buf) };
+        let start = if current.is_dir() {
+            Some(current)
+        } else {
+            current.parent().map(std::path::Path::to_path_buf)
+        };
 
         let options = y_core::dialog::OpenOptions {
-            title: Some(if folder { "Choose a folder" } else { "Choose a program or file" }),
-            filters: if folder { &[] } else { &[("Programs and shortcuts", "*.exe;*.lnk;*.bat;*.cmd"), ("All files", "*.*")] },
+            title: Some(if folder {
+                "Choose a folder"
+            } else {
+                "Choose a program or file"
+            }),
+            filters: if folder {
+                &[]
+            } else {
+                &[
+                    ("Programs and shortcuts", "*.exe;*.lnk;*.bat;*.cmd"),
+                    ("All files", "*.*"),
+                ]
+            },
             start_folder: start.as_deref(),
             pick_folders: folder,
             ..Default::default()
@@ -234,15 +277,22 @@ impl ConfigApp {
         // The window being clicked is the foreground one.
         let owner = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
         let picked = y_core::dialog::open_files(Some(owner), &options).ok()?;
-        picked.into_iter().next().map(|path| path.to_string_lossy().into_owned())
+        picked
+            .into_iter()
+            .next()
+            .map(|path| path.to_string_lossy().into_owned())
     }
 
     /// "Run now": launches the app as y-pop would — expanded, with the
     /// current clipboard — and puts the outcome in the status bar.
     fn run_now(&mut self, id: ItemId) {
         let Ok(settings) = &self.settings else { return };
-        let Some(item) = tree::item(settings, id) else { return };
-        let ItemKind::App(fields) = &item.kind else { return };
+        let Some(item) = tree::item(settings, id) else {
+            return;
+        };
+        let ItemKind::App(fields) = &item.kind else {
+            return;
+        };
 
         let label = roots::label(item);
         let app = settings.launch_app(fields, &mut *self.builtins.borrow_mut());
@@ -295,7 +345,9 @@ impl ConfigApp {
                 let raw = self.hotkey_text(id, index);
                 self.hotkeys = HotkeyUi {
                     open: raw.is_some().then_some((id, index)),
-                    picker: KeyPickerUi::opening_on(raw.as_deref().and_then(|raw| split_hotkey(raw).1)),
+                    picker: KeyPickerUi::opening_on(
+                        raw.as_deref().and_then(|raw| split_hotkey(raw).1),
+                    ),
                     original: raw.unwrap_or_default(),
                 };
                 return;
@@ -313,18 +365,24 @@ impl ConfigApp {
 
         self.run_status = None;
         let selected = self.selected(root);
-        let Ok(settings) = &mut self.settings else { return };
+        let Ok(settings) = &mut self.settings else {
+            return;
+        };
         let mut changed = false;
         // Where to go after this edit, if it moved something out of this menu.
         let mut navigate: Option<(ItemId, ItemId)> = None;
 
         let name_of = |settings: &y_pop::settings::Settings, id: ItemId| {
-            tree::item(settings, id).map(roots::label).unwrap_or_default()
+            tree::item(settings, id)
+                .map(roots::label)
+                .unwrap_or_default()
         };
 
         match message {
             MenuMsg::Add(kind) => {
-                if let Some(at) = tree::insertion_point(settings, root, Some(selected), &self.collapsed) {
+                if let Some(at) =
+                    tree::insertion_point(settings, root, Some(selected), &self.collapsed)
+                {
                     let item = tree::new_item(settings, kind);
                     if let Some(id) = tree::insert(settings, at, vec![item]) {
                         // The new item must be visible where it landed.
@@ -340,23 +398,33 @@ impl ConfigApp {
                 if tree::can_move(settings, id, dir, root) {
                     let before = settings.clone();
                     let label = name_of(settings, id);
-                    let into = (dir == MoveDir::Into).then(|| tree::group_above(settings, id)).flatten();
+                    let into = (dir == MoveDir::Into)
+                        .then(|| tree::group_above(settings, id))
+                        .flatten();
                     if tree::move_item(settings, id, dir, root) {
                         if let Some(group) = into {
                             self.collapsed.remove(&group);
                         }
-                        self.undo = Some(Undo { label: format!("Moved {label}"), settings: before });
+                        self.undo = Some(Undo {
+                            label: format!("Moved {label}"),
+                            settings: before,
+                        });
                         changed = true;
                     }
                 }
             }
             MenuMsg::MoveTo { id, group } => {
-                let target = tree::groups(settings, Some(id)).get(group).map(|(_, group)| *group);
+                let target = tree::groups(settings, Some(id))
+                    .get(group)
+                    .map(|(_, group)| *group);
                 if let Some(target) = target {
                     let before = settings.clone();
                     let label = name_of(settings, id);
                     if tree::move_to_group(settings, id, target) {
-                        self.undo = Some(Undo { label: format!("Moved {label}"), settings: before });
+                        self.undo = Some(Undo {
+                            label: format!("Moved {label}"),
+                            settings: before,
+                        });
                         self.collapsed.remove(&target);
                         // Follow it: it just left this menu if the group is elsewhere.
                         if let Some(destination) = tree::root_of(settings, target) {
@@ -378,9 +446,15 @@ impl ConfigApp {
                 if let Some((removed, next)) = tree::delete(settings, id) {
                     let mut label = format!("Deleted {}", roots::label(&removed));
                     if inside > 0 {
-                        label.push_str(&format!(" and {inside} item{} inside", if inside == 1 { "" } else { "s" }));
+                        label.push_str(&format!(
+                            " and {inside} item{} inside",
+                            if inside == 1 { "" } else { "s" }
+                        ));
                     }
-                    self.undo = Some(Undo { label, settings: before });
+                    self.undo = Some(Undo {
+                        label,
+                        settings: before,
+                    });
                     self.selection.insert(root, next.unwrap_or(root));
                     changed = true;
                 }
@@ -435,12 +509,16 @@ impl ConfigApp {
             }
             MenuMsg::TargetMode(id, mode) => {
                 let stash = self.target_stash.entry(id).or_default();
-                if let Some(ItemKind::App(app)) = tree::item_mut(settings, id).map(|item| &mut item.kind) {
+                if let Some(ItemKind::App(app)) =
+                    tree::item_mut(settings, id).map(|item| &mut item.kind)
+                {
                     changed = set_target_mode(app, mode, stash);
                 }
             }
             MenuMsg::ShellExecute(id, choice) => {
-                if let Some(ItemKind::App(app)) = tree::item_mut(settings, id).map(|item| &mut item.kind) {
+                if let Some(ItemKind::App(app)) =
+                    tree::item_mut(settings, id).map(|item| &mut item.kind)
+                {
                     let value = match choice {
                         1 => Some(true),
                         2 => Some(false),
@@ -451,7 +529,9 @@ impl ConfigApp {
                 }
             }
             MenuMsg::Depth(id, depth) => {
-                if let Some(ItemKind::App(app)) = tree::item_mut(settings, id).map(|item| &mut item.kind) {
+                if let Some(ItemKind::App(app)) =
+                    tree::item_mut(settings, id).map(|item| &mut item.kind)
+                {
                     // An empty box is the default: no `depth` attribute.
                     let value = depth.map(|depth| depth.clamp(0.0, 200.0) as u32);
                     changed = app.depth != value;
@@ -459,14 +539,17 @@ impl ConfigApp {
                 }
             }
             MenuMsg::OpenFolder(id, choice) => {
-                if let Some(ItemKind::App(app)) = tree::item_mut(settings, id).map(|item| &mut item.kind) {
+                if let Some(ItemKind::App(app)) =
+                    tree::item_mut(settings, id).map(|item| &mut item.kind)
+                {
                     let value = match choice {
                         1 => Some(OpenFolder::All),
                         2 => Some(OpenFolder::Never),
                         _ => None,
                     };
                     // The file may say `max-depth` outright: that is choice 0 too.
-                    let same = app.open_folder == value || (choice == 0 && app.open_folder == Some(OpenFolder::MaxDepth));
+                    let same = app.open_folder == value
+                        || (choice == 0 && app.open_folder == Some(OpenFolder::MaxDepth));
                     if !same {
                         app.open_folder = value;
                         changed = true;
@@ -483,7 +566,10 @@ impl ConfigApp {
                 let before = settings.clone();
                 let label = name_of(settings, id);
                 if let Some(group) = tree::wrap_in_group(settings, id) {
-                    self.undo = Some(Undo { label: format!("Turned {label} into a menu"), settings: before });
+                    self.undo = Some(Undo {
+                        label: format!("Turned {label} into a menu"),
+                        settings: before,
+                    });
                     navigate = Some((group, id));
                     changed = true;
                 }
@@ -507,31 +593,52 @@ impl ConfigApp {
             }
             MenuMsg::HotkeyAdd(id) => {
                 if let Some(item) = tree::item_mut(settings, id) {
-                    item.hotkeys.push(HotkeyEntry { key: String::new(), can_override: false, extra_attrs: Vec::new() });
-                    self.hotkeys =
-                        HotkeyUi { open: Some((id, item.hotkeys.len() - 1)), ..HotkeyUi::default() };
+                    item.hotkeys.push(HotkeyEntry {
+                        key: String::new(),
+                        can_override: false,
+                        extra_attrs: Vec::new(),
+                    });
+                    self.hotkeys = HotkeyUi {
+                        open: Some((id, item.hotkeys.len() - 1)),
+                        ..HotkeyUi::default()
+                    };
                     changed = true;
                 }
             }
             MenuMsg::HotkeyRemove(id, index) => {
                 let before = settings.clone();
-                if let Some(item) = tree::item_mut(settings, id).filter(|item| index < item.hotkeys.len()) {
+                if let Some(item) =
+                    tree::item_mut(settings, id).filter(|item| index < item.hotkeys.len())
+                {
                     let removed = item.hotkeys.remove(index);
-                    let shown = if removed.key.is_empty() { "a hotkey".to_owned() } else { removed.key };
-                    self.undo = Some(Undo { label: format!("Removed {shown}"), settings: before });
+                    let shown = if removed.key.is_empty() {
+                        "a hotkey".to_owned()
+                    } else {
+                        removed.key
+                    };
+                    self.undo = Some(Undo {
+                        label: format!("Removed {shown}"),
+                        settings: before,
+                    });
                     self.hotkeys = HotkeyUi::default();
                     changed = true;
                 }
             }
             MenuMsg::HotkeyOverride(id, index, on) => {
-                if let Some(entry) = tree::item_mut(settings, id).and_then(|item| item.hotkeys.get_mut(index)) {
+                if let Some(entry) =
+                    tree::item_mut(settings, id).and_then(|item| item.hotkeys.get_mut(index))
+                {
                     changed = entry.can_override != on;
                     entry.can_override = on;
                 }
             }
-            MenuMsg::HotkeyKey(id, index, key) => changed = set_hotkey(settings, id, index, |m, _| (m, Some(key))),
+            MenuMsg::HotkeyKey(id, index, key) => {
+                changed = set_hotkey(settings, id, index, |m, _| (m, Some(key)))
+            }
             MenuMsg::HotkeyModifier(id, index, modifier) => {
-                changed = set_hotkey(settings, id, index, |m, key| (HOT_KEY_MODIFIERS(m.0 ^ modifier.0), key));
+                changed = set_hotkey(settings, id, index, |m, key| {
+                    (HOT_KEY_MODIFIERS(m.0 ^ modifier.0), key)
+                });
             }
             MenuMsg::HotkeySearchChosen(id, index, suggestion) => {
                 if let Some(key) = keys::from_suggestion(&suggestion) {
@@ -568,9 +675,15 @@ fn set_hotkey(
     settings: &mut y_pop::settings::Settings,
     id: ItemId,
     index: usize,
-    change: impl FnOnce(HOT_KEY_MODIFIERS, Option<VIRTUAL_KEY>) -> (HOT_KEY_MODIFIERS, Option<VIRTUAL_KEY>),
+    change: impl FnOnce(
+        HOT_KEY_MODIFIERS,
+        Option<VIRTUAL_KEY>,
+    ) -> (HOT_KEY_MODIFIERS, Option<VIRTUAL_KEY>),
 ) -> bool {
-    let Some(entry) = tree::item_mut(settings, id).and_then(|item| item.hotkeys.get_mut(index)) else { return false };
+    let Some(entry) = tree::item_mut(settings, id).and_then(|item| item.hotkeys.get_mut(index))
+    else {
+        return false;
+    };
     let (modifiers, key) = split_hotkey(&entry.key);
     let (modifiers, key) = change(modifiers, key);
     let text = join_hotkey(modifiers, key);
@@ -615,13 +728,21 @@ pub(crate) fn set_text(item: &mut y_pop::settings::Item, field: TextField, text:
     }
 
     match field {
-        TextField::Name if matches!(item.kind, ItemKind::Group | ItemKind::App(_)) => put(&mut item.name, Some(text)),
+        TextField::Name if matches!(item.kind, ItemKind::Group | ItemKind::App(_)) => {
+            put(&mut item.name, Some(text))
+        }
         TextField::Name => put(&mut item.name, absent_when_empty(text)),
         TextField::Tooltip => put(&mut item.tooltip, absent_when_empty(text)),
         TextField::Icon => put(&mut item.icon, absent_when_empty(text)),
         // The target and the Store id are always present on an app, even empty.
-        TextField::Target | TextField::AppId | TextField::Param | TextField::StartIn | TextField::Filter => {
-            let ItemKind::App(app) = &mut item.kind else { return false };
+        TextField::Target
+        | TextField::AppId
+        | TextField::Param
+        | TextField::StartIn
+        | TextField::Filter => {
+            let ItemKind::App(app) = &mut item.kind else {
+                return false;
+            };
             match field {
                 TextField::Target => put(&mut app.exe, Some(text)),
                 TextField::AppId => put(&mut app.app_id, Some(text)),

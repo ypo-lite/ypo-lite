@@ -25,7 +25,10 @@ use y_snap::config::{MinButton, Overlay, QuickAction, is_minbutton_action};
 /// Every action a popup tile or the right-click can fire — exactly what
 /// `y-snap`'s config reader accepts in `<minbutton>`.
 pub fn actions() -> Vec<Action> {
-    OVERLAY_ACTIONS.into_iter().filter(|&action| is_minbutton_action(action)).collect()
+    OVERLAY_ACTIONS
+        .into_iter()
+        .filter(|&action| is_minbutton_action(action))
+        .collect()
 }
 
 /// The slider's range. A hand-edited file may hold more; the range then
@@ -33,8 +36,11 @@ pub fn actions() -> Vec<Action> {
 const DELAY_MAX_MS: f64 = 2000.0;
 const DELAY_STEP_MS: f64 = 50.0;
 
-const COLUMNS: [Column; 3] =
-    [Column::fixed("Icon", 48.0), Column::flex("Tile", 160.0), Column::actions(TWO_ICON_BUTTONS)];
+const COLUMNS: [Column; 3] = [
+    Column::fixed("Icon", 48.0),
+    Column::flex("Tile", 160.0),
+    Column::actions(TWO_ICON_BUTTONS),
+];
 
 /// Smallest the preview gets beside the settings before moving below them.
 const PREVIEW_MIN_WIDTH: f64 = 300.0;
@@ -49,8 +55,17 @@ pub fn min_button_view(
     viewport: Viewport,
     context: &ViewContext<ConfigApp>,
 ) -> View {
-    let split = Split::new(viewport).min_widths(SETTINGS_MIN_WIDTH, PREVIEW_MIN_WIDTH).weights(1.2, 1.0);
-    let settings = settings(min_button, editing, reordering, icons, split.primary(), context);
+    let split = Split::new(viewport)
+        .min_widths(SETTINGS_MIN_WIDTH, PREVIEW_MIN_WIDTH)
+        .weights(1.2, 1.0);
+    let settings = settings(
+        min_button,
+        editing,
+        reordering,
+        icons,
+        split.primary(),
+        context,
+    );
     let preview = preview(min_button, overlay, split.secondary());
 
     page(
@@ -75,8 +90,10 @@ fn settings(
     let delay = min_button.hover_delay_ms as f64;
     // Choice 0 is "(off)" — `Msg::MinButtonRightClickChanged` reads it so.
     let right_click = std::iter::once("(off — a normal right-click)").chain(names());
-    let right_click_index =
-        min_button.right_click_action.and_then(|a| actions.iter().position(|b| *b == a)).map_or(0, |i| i + 1);
+    let right_click_index = min_button
+        .right_click_action
+        .and_then(|a| actions.iter().position(|b| *b == a))
+        .map_or(0, |i| i + 1);
 
     let behaviour = AutoGrid::new(240.0).max_columns(2).items([
         (
@@ -97,7 +114,11 @@ fn settings(
             "right-click",
             field(
                 "Right-click action",
-                combo(right_click, Some(right_click_index), context.callback(Msg::MinButtonRightClickChanged)),
+                combo(
+                    right_click,
+                    Some(right_click_index),
+                    context.callback(Msg::MinButtonRightClickChanged),
+                ),
             ),
         ),
     ]);
@@ -106,9 +127,20 @@ fn settings(
     let detail_viewport = table.detail_viewport(viewport).inset(CARD_INSET);
     let rows = min_button.items.iter().enumerate().map(|(index, item)| {
         let open = editing == Some(index);
-        let detail = open.then(|| tile_editor(index, item, &actions, icons, detail_viewport, context));
-        Row::new(index.to_string(), cells(index, item, open, min_button.items.len(), reordering, context))
-            .detail(detail)
+        let detail =
+            open.then(|| tile_editor(index, item, &actions, icons, detail_viewport, context));
+        Row::new(
+            index.to_string(),
+            cells(
+                index,
+                item,
+                open,
+                min_button.items.len(),
+                reordering,
+                context,
+            ),
+        )
+        .detail(detail)
     });
 
     Stack::vertical(space::XL)
@@ -117,16 +149,18 @@ fn settings(
             "tiles",
             section(
                 format!("Popup tiles — {}", min_button.items.len()),
-                Stack::vertical(space::L).child("table", table.rows(rows).build(viewport)).child(
-                    "add",
-                    list_footer(
-                        ListKind::PopupTiles,
-                        add_button("Add tile", context.callback(|()| Msg::QuickActionAdded)),
-                        min_button.items.len(),
-                        reordering,
-                        context,
+                Stack::vertical(space::L)
+                    .child("table", table.rows(rows).build(viewport))
+                    .child(
+                        "add",
+                        list_footer(
+                            ListKind::PopupTiles,
+                            add_button("Add tile", context.callback(|()| Msg::QuickActionAdded)),
+                            min_button.items.len(),
+                            reordering,
+                            context,
+                        ),
                     ),
-                ),
             ),
         )
         .into()
@@ -145,7 +179,14 @@ fn cells(
         None => text::placeholder().into(),
     };
     let tile: View = Stack::vertical(0.0)
-        .child("label", text::single_line(item.label.clone().unwrap_or_else(|| "(no label)".to_owned())))
+        .child(
+            "label",
+            text::single_line(
+                item.label
+                    .clone()
+                    .unwrap_or_else(|| "(no label)".to_owned()),
+            ),
+        )
         .child("action", text::caption(item.action.name()))
         .into();
     let actions = row_actions(
@@ -222,14 +263,22 @@ fn tile_editor(
         );
 
     editor(
-        format!("Popup tile — {}", item.label.as_deref().unwrap_or(item.action.name())),
+        format!(
+            "Popup tile — {}",
+            item.label.as_deref().unwrap_or(item.action.name())
+        ),
         Stack::vertical(space::L)
             .child("fields", fields.build(viewport))
             .maybe(
                 "icon-picker",
-                icons.open.then(|| icon_picker(item.icon.as_deref(), item.action, icons, viewport, context)),
+                icons.open.then(|| {
+                    icon_picker(item.icon.as_deref(), item.action, icons, viewport, context)
+                }),
             )
-            .child("note", note("The popup shows the icon; the label is shown only when there's no icon.")),
+            .child(
+                "note",
+                note("The popup shows the icon; the label is shown only when there's no icon."),
+            ),
         context.callback(|()| Msg::EditorClosed(EditorClose::Revert)),
         context.callback(|()| Msg::EditorClosed(EditorClose::Keep)),
     )
@@ -255,11 +304,16 @@ fn preview(min_button: &MinButton, overlay: &Overlay, viewport: Viewport) -> Vie
     let tiles = min_button.items.len();
     let popup_width = POPUP_TILE.0 * tiles as f64;
     let stub_width = STUB_TITLE_WIDTH + 3.0 * CAPTION_BUTTON.0;
-    let available = viewport.inset(CARD_INSET).inset(space::L + size::STROKE).width;
+    let available = viewport
+        .inset(CARD_INSET)
+        .inset(space::L + size::STROKE)
+        .width;
     let scale = (available / popup_width.max(stub_width)).clamp(0.4, 1.0);
 
     let caption = |glyph: &'static str, highlighted: bool| -> View {
-        let mut button = Border::new().width(CAPTION_BUTTON.0 * scale).height(CAPTION_BUTTON.1 * scale);
+        let mut button = Border::new()
+            .width(CAPTION_BUTTON.0 * scale)
+            .height(CAPTION_BUTTON.1 * scale);
         if highlighted {
             button = button.background(ThemeBrush::Accent);
         }
@@ -271,8 +325,14 @@ fn preview(min_button: &MinButton, overlay: &Overlay, viewport: Viewport) -> Vie
                 .vertical_alignment(VerticalAlignment::Center),
         )
     };
-    let title_bar: View =
-        Grid::new().columns([GridLength::STAR, GridLength::Auto, GridLength::Auto, GridLength::Auto]).keyed_children([
+    let title_bar: View = Grid::new()
+        .columns([
+            GridLength::STAR,
+            GridLength::Auto,
+            GridLength::Auto,
+            GridLength::Auto,
+        ])
+        .keyed_children([
             (
                 "title",
                 cell(
@@ -289,7 +349,12 @@ fn preview(min_button: &MinButton, overlay: &Overlay, viewport: Viewport) -> Vie
         ]);
     let window: View = Border::new()
         .corner_radius(CornerRadius::new(radius::CARD, radius::CARD, 0.0, 0.0))
-        .border_thickness(Thickness::new(size::STROKE, size::STROKE, size::STROKE, 0.0))
+        .border_thickness(Thickness::new(
+            size::STROKE,
+            size::STROKE,
+            size::STROKE,
+            0.0,
+        ))
         .border_brush(ThemeBrush::CardStroke)
         .background(ThemeBrush::CardBackground)
         .content(title_bar);
@@ -305,12 +370,18 @@ fn preview(min_button: &MinButton, overlay: &Overlay, viewport: Viewport) -> Vie
         None => "Right-click: normal".to_owned(),
     };
 
-    let stage = Stack::vertical(0.0).child("window", window).child("popup", popup);
+    let stage = Stack::vertical(0.0)
+        .child("window", window)
+        .child("popup", popup);
     let live: View = Stack::horizontal(space::XS)
         .child("dot", dot(ThemeBrush::Accent))
         .child(
             "text",
-            text::caption(if scale < 1.0 { format!("Live · {:.0}%", scale * 100.0) } else { "Live".to_owned() }),
+            text::caption(if scale < 1.0 {
+                format!("Live · {:.0}%", scale * 100.0)
+            } else {
+                "Live".to_owned()
+            }),
         )
         .into();
 
@@ -321,7 +392,10 @@ fn preview(min_button: &MinButton, overlay: &Overlay, viewport: Viewport) -> Vie
             .child("stage", stage)
             .child(
                 "delay",
-                text::caption(format!("After resting {} ms on the minimize button.", min_button.hover_delay_ms)),
+                text::caption(format!(
+                    "After resting {} ms on the minimize button.",
+                    min_button.hover_delay_ms
+                )),
             )
             .child("right-click", text::caption(right_click)),
     )
@@ -335,10 +409,16 @@ fn popup(min_button: &MinButton, overlay: &Overlay, scale: f64, available: f64) 
     let (width, height) = (POPUP_TILE.0 * scale, POPUP_TILE.1 * scale);
     let popup_width = width * min_button.items.len() as f64;
     let button_centre_from_right = 2.5 * CAPTION_BUTTON.0 * scale;
-    let right = (button_centre_from_right - popup_width / 2.0).clamp(0.0, (available - popup_width).max(0.0));
+    let right = (button_centre_from_right - popup_width / 2.0)
+        .clamp(0.0, (available - popup_width).max(0.0));
 
     let glyphs = min_button.items.iter().enumerate().map(|(index, item)| {
-        let glyph = item.icon.as_deref().or(item.label.as_deref()).unwrap_or("?").to_owned();
+        let glyph = item
+            .icon
+            .as_deref()
+            .or(item.label.as_deref())
+            .unwrap_or("?")
+            .to_owned();
         let text = TextBlock::new()
             .text(glyph)
             .font_size((POPUP_GLYPH_SIZE * scale).max(6.0))
@@ -357,7 +437,10 @@ fn popup(min_button: &MinButton, overlay: &Overlay, scale: f64, available: f64) 
         .horizontal_alignment(HorizontalAlignment::Right)
         .margin(Thickness::new(0.0, 0.0, right, 0.0))
         .corner_radius(CornerRadius::uniform(overlay.corner_radius as f64 * scale))
-        .background(to_ui_color(y_core::overlay::Color { a: overlay.alpha, ..overlay.palette.back }))
+        .background(to_ui_color(y_core::overlay::Color {
+            a: overlay.alpha,
+            ..overlay.palette.back
+        }))
         .content(row)
 }
 

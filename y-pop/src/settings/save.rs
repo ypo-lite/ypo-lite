@@ -95,7 +95,10 @@ impl<'w> Attributes<'w> {
     }
 
     fn bool(&mut self, name: &'static str, value: Option<bool>) {
-        self.text(name, value.map(|value| if value { "true" } else { "false" }));
+        self.text(
+            name,
+            value.map(|value| if value { "true" } else { "false" }),
+        );
     }
 
     /// Written only when set: `false` is what an absent attribute means.

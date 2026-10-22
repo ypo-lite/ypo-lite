@@ -181,10 +181,13 @@ fn neighbour(list: &[Entry], index: usize, up: bool) -> Option<usize> {
 pub fn group_above(settings: &Settings, id: ItemId) -> Option<ItemId> {
     let location = locate(settings, id)?;
     let list = entries(settings, location.parent)?;
-    (0..location.index).rev().find(|&i| is_group(&list[i])).and_then(|i| match &list[i] {
-        Entry::Item(group) => Some(group.id),
-        Entry::Comment(_) => None,
-    })
+    (0..location.index)
+        .rev()
+        .find(|&i| is_group(&list[i]))
+        .and_then(|i| match &list[i] {
+            Entry::Item(group) => Some(group.id),
+            Entry::Comment(_) => None,
+        })
 }
 
 /// Whether `dir` does anything for `id` inside the menu whose own item is
@@ -284,14 +287,23 @@ fn put(settings: &mut Settings, parent: Option<ItemId>, index: usize, entry: Ent
 /// "Move to…" list. Groups inside `excluding` (and it) are left out: an item
 /// can't move into itself.
 pub fn groups(settings: &Settings, excluding: Option<ItemId>) -> Vec<(String, ItemId)> {
-    fn walk(entries: &[Entry], path: &str, excluding: Option<ItemId>, out: &mut Vec<(String, ItemId)>) {
+    fn walk(
+        entries: &[Entry],
+        path: &str,
+        excluding: Option<ItemId>,
+        out: &mut Vec<(String, ItemId)>,
+    ) {
         for entry in entries {
             let Entry::Item(item) = entry else { continue };
             if item.kind != ItemKind::Group || Some(item.id) == excluding {
                 continue;
             }
             let name = crate::roots::label(item);
-            let here = if path.is_empty() { name } else { format!("{path} › {name}") };
+            let here = if path.is_empty() {
+                name
+            } else {
+                format!("{path} › {name}")
+            };
             out.push((here.clone(), item.id));
             walk(&item.children, &here, excluding, out);
         }
@@ -321,7 +333,10 @@ pub fn wrap_in_group(settings: &mut Settings, id: ItemId) -> Option<ItemId> {
     }
     let mut group = settings.new_item(ItemKind::Group);
     let group_id = group.id;
-    let Entry::Item(mut inner) = std::mem::replace(&mut settings.roots[location.index], Entry::Comment(Default::default())) else {
+    let Entry::Item(mut inner) = std::mem::replace(
+        &mut settings.roots[location.index],
+        Entry::Comment(Default::default()),
+    ) else {
         return None;
     };
     group.name = inner.name.clone();
@@ -370,7 +385,13 @@ pub fn duplicate(settings: &mut Settings, id: ItemId) -> Option<ItemId> {
     let source = item(settings, id)?.clone();
     let copy = copy_of(settings, &source);
     let copy_id = copy.id;
-    put(settings, location.parent, location.index + 1, Entry::Item(copy)).then_some(copy_id)
+    put(
+        settings,
+        location.parent,
+        location.index + 1,
+        Entry::Item(copy),
+    )
+    .then_some(copy_id)
 }
 
 /// Removes `id` (with everything inside it and the comments attached to it)
@@ -413,10 +434,15 @@ pub fn insertion_point(
     collapsed: &HashSet<ItemId>,
 ) -> Option<Insertion> {
     let end_of = |group: ItemId| {
-        item(settings, group).map(|item| Insertion { parent: group, index: item.children.len() })
+        item(settings, group).map(|item| Insertion {
+            parent: group,
+            index: item.children.len(),
+        })
     };
 
-    let selected = selected.filter(|&id| is_inside(settings, root, id)).unwrap_or(root);
+    let selected = selected
+        .filter(|&id| is_inside(settings, root, id))
+        .unwrap_or(root);
     if selected == root {
         return end_of(root);
     }
@@ -425,7 +451,10 @@ pub fn insertion_point(
         return end_of(selected);
     }
     let location = locate(settings, selected)?;
-    Some(Insertion { parent: location.parent?, index: location.index + 1 })
+    Some(Insertion {
+        parent: location.parent?,
+        index: location.index + 1,
+    })
 }
 
 /// Inserts `items` in order at `at` and returns the last one's id.
@@ -459,9 +488,19 @@ pub enum NewKind {
 /// would replace.
 pub fn new_item(settings: &mut Settings, kind: NewKind) -> Item {
     let (item_kind, name) = match kind {
-        NewKind::App => (ItemKind::App(Box::new(AppFields { exe: Some(String::new()), ..AppFields::default() })), "New app"),
+        NewKind::App => (
+            ItemKind::App(Box::new(AppFields {
+                exe: Some(String::new()),
+                ..AppFields::default()
+            })),
+            "New app",
+        ),
         NewKind::Folder => (
-            ItemKind::App(Box::new(AppFields { exe: Some(String::new()), browse: true, ..AppFields::default() })),
+            ItemKind::App(Box::new(AppFields {
+                exe: Some(String::new()),
+                browse: true,
+                ..AppFields::default()
+            })),
             "New folder",
         ),
         NewKind::Group => (ItemKind::Group, "New group"),
@@ -527,7 +566,11 @@ pub fn rows(
 }
 
 fn first_line(text: &str) -> String {
-    text.lines().find(|line| !line.trim().is_empty()).unwrap_or("(empty comment)").trim().to_owned()
+    text.lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or("(empty comment)")
+        .trim()
+        .to_owned()
 }
 
 fn walk(
@@ -538,20 +581,34 @@ fn walk(
     at: Option<Insertion>,
     out: &mut Vec<TreeRow>,
 ) {
-    out.push(TreeRow { depth, kind: TreeRowKind::Item { id: item.id, hidden_comments: 0 } });
+    out.push(TreeRow {
+        depth,
+        kind: TreeRowKind::Item {
+            id: item.id,
+            hidden_comments: 0,
+        },
+    });
 
     let open = item.kind == ItemKind::Group && (depth == 0 || !collapsed.contains(&item.id));
     if !open {
         return;
     }
 
-    let marker_here = |index: usize| at == Some(Insertion { parent: item.id, index });
+    let marker_here = |index: usize| {
+        at == Some(Insertion {
+            parent: item.id,
+            index,
+        })
+    };
     // Hidden free comments waiting to be counted on the next item's row.
     let mut pending = 0;
 
     for (index, entry) in item.children.iter().enumerate() {
         if marker_here(index) {
-            out.push(TreeRow { depth: depth + 1, kind: TreeRowKind::Marker });
+            out.push(TreeRow {
+                depth: depth + 1,
+                kind: TreeRowKind::Marker,
+            });
         }
         match entry {
             Entry::Comment(comment) => {
@@ -586,7 +643,14 @@ fn walk(
                 }
                 let before = out.len();
                 walk(child, depth + 1, collapsed, show_comments, at, out);
-                if let Some(TreeRow { kind: TreeRowKind::Item { hidden_comments, .. }, .. }) = out.get_mut(before) {
+                if let Some(TreeRow {
+                    kind:
+                        TreeRowKind::Item {
+                            hidden_comments, ..
+                        },
+                    ..
+                }) = out.get_mut(before)
+                {
                     *hidden_comments = hidden;
                 }
             }
@@ -594,10 +658,16 @@ fn walk(
     }
 
     if pending > 0 {
-        out.push(TreeRow { depth: depth + 1, kind: TreeRowKind::HiddenAtEnd(pending) });
+        out.push(TreeRow {
+            depth: depth + 1,
+            kind: TreeRowKind::HiddenAtEnd(pending),
+        });
     }
     if marker_here(item.children.len()) {
-        out.push(TreeRow { depth: depth + 1, kind: TreeRowKind::Marker });
+        out.push(TreeRow {
+            depth: depth + 1,
+            kind: TreeRowKind::Marker,
+        });
     }
 }
 

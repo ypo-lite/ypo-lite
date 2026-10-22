@@ -195,7 +195,10 @@ impl Reader<'_> {
             return ThemeOverrides::default();
         };
         for extra in root.children_named("skin").skip(1) {
-            self.warn(extra, "a second <skin> is ignored — only the first one is read");
+            self.warn(
+                extra,
+                "a second <skin> is ignored — only the first one is read",
+            );
         }
         self.check(
             skin,
@@ -301,7 +304,11 @@ impl Reader<'_> {
     /// colour set is a config mistake, not a flat-colour fallback (see
     /// [[portal-analysis]]'s note on PortAL's own inconsistent handling of
     /// this exact case).
-    fn gradient_override(&mut self, skin: Element<'_>, child_name: &str) -> Option<GradientOverride> {
+    fn gradient_override(
+        &mut self,
+        skin: Element<'_>,
+        child_name: &str,
+    ) -> Option<GradientOverride> {
         let gradient = skin.child(child_name)?;
         self.check(gradient, &["start", "end", "direction"]);
 
@@ -334,7 +341,10 @@ impl Reader<'_> {
                 None
             }
             None => {
-                self.warn(element, format!("<{}> needs a {name} attribute", element.name()));
+                self.warn(
+                    element,
+                    format!("<{}> needs a {name} attribute", element.name()),
+                );
                 None
             }
         }
@@ -352,7 +362,10 @@ impl Reader<'_> {
                 }
             },
             None => {
-                self.warn(element, format!("<{}> needs a {name} attribute", element.name()));
+                self.warn(
+                    element,
+                    format!("<{}> needs a {name} attribute", element.name()),
+                );
                 None
             }
         }
@@ -397,12 +410,14 @@ mod tests {
 
     #[test]
     fn an_unknown_theme_warns_and_falls_back_to_native() {
-        let tree = load_str(r#"<y-pop theme="neon"><quit/></y-pop>"#, &mut builtins())
-            .expect("valid");
+        let tree =
+            load_str(r#"<y-pop theme="neon"><quit/></y-pop>"#, &mut builtins()).expect("valid");
 
         assert_eq!(tree.defaults.theme, Theme::Native);
         assert!(
-            tree.warnings.iter().any(|warning| warning.contains("theme")),
+            tree.warnings
+                .iter()
+                .any(|warning| warning.contains("theme")),
             "{:?}",
             tree.warnings
         );
@@ -460,7 +475,9 @@ mod tests {
             "only the first <skin> is read"
         );
         assert!(
-            tree.warnings.iter().any(|warning| warning.contains("second <skin>")),
+            tree.warnings
+                .iter()
+                .any(|warning| warning.contains("second <skin>")),
             "{:?}",
             tree.warnings
         );
@@ -475,7 +492,11 @@ mod tests {
         .expect("valid");
 
         assert!(tree.warnings.is_empty(), "{:?}", tree.warnings);
-        let border = tree.defaults.theme_overrides.border.expect("a <border> was given");
+        let border = tree
+            .defaults
+            .theme_overrides
+            .border
+            .expect("a <border> was given");
         assert_eq!(border.size, 2);
         assert_eq!(border.round, 10);
         assert_eq!(border.color, Color::rgb(0x3a, 0x3a, 0x3a));
@@ -494,7 +515,9 @@ mod tests {
             "a half-set border is dropped, not defaulted"
         );
         assert!(
-            tree.warnings.iter().any(|warning| warning.contains("color")),
+            tree.warnings
+                .iter()
+                .any(|warning| warning.contains("color")),
             "{:?}",
             tree.warnings
         );
@@ -551,7 +574,11 @@ mod tests {
             let xml = format!(r#"<y-pop><skin edge="{value}"/><quit/></y-pop>"#);
             let tree = load_str(&xml, &mut builtins()).expect("valid");
             assert!(tree.warnings.is_empty(), "{:?}", tree.warnings);
-            assert_eq!(tree.defaults.theme_overrides.edge, Some(expected), "edge={value:?}");
+            assert_eq!(
+                tree.defaults.theme_overrides.edge,
+                Some(expected),
+                "edge={value:?}"
+            );
         }
     }
 
@@ -618,7 +645,11 @@ mod tests {
         .expect("valid");
 
         assert!(tree.warnings.is_empty(), "{:?}", tree.warnings);
-        let background = tree.defaults.theme_overrides.background_gradient.expect("set");
+        let background = tree
+            .defaults
+            .theme_overrides
+            .background_gradient
+            .expect("set");
         let icon = tree.defaults.theme_overrides.icon_gradient.expect("set");
         assert_eq!(background.start, Color::rgb(0, 0, 0));
         assert_eq!(icon.start, Color::rgb(255, 0, 0));

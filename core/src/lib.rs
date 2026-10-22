@@ -85,11 +85,11 @@ pub mod known_folders;
 pub mod memory;
 #[cfg(feature = "win")]
 pub mod menu;
-pub mod png;
 #[cfg(feature = "win")]
 pub mod monitor;
 #[cfg(feature = "win")]
 pub mod overlay;
+pub mod png;
 #[cfg(feature = "win")]
 pub mod prelude;
 #[cfg(feature = "win")]

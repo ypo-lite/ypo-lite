@@ -199,7 +199,11 @@ mod tests {
     }
 
     fn browse(depth: u8, open_folder: OpenFolder) -> Browse {
-        Browse { filter: None, depth, open_folder }
+        Browse {
+            filter: None,
+            depth,
+            open_folder,
+        }
     }
 
     #[test]
@@ -239,7 +243,10 @@ mod tests {
         let entries = list(dir.path(), &browse(2, OpenFolder::MaxDepth), 0);
         assert_eq!(entries.len(), 1);
         assert!(entries[0].is_dir);
-        assert!(entries[0].browsable, "level 1 <= depth 2, should still get a submenu");
+        assert!(
+            entries[0].browsable,
+            "level 1 <= depth 2, should still get a submenu"
+        );
     }
 
     #[test]
@@ -257,7 +264,10 @@ mod tests {
         let entries = list(dir.path(), &browse(1, OpenFolder::MaxDepth), 1);
         assert_eq!(entries.len(), 1);
         assert!(entries[0].is_dir);
-        assert!(!entries[0].browsable, "level 2 > depth 1, should be flattened");
+        assert!(
+            !entries[0].browsable,
+            "level 2 > depth 1, should be flattened"
+        );
     }
 
     #[test]
@@ -283,7 +293,14 @@ mod tests {
 
     #[test]
     fn an_unreadable_directory_yields_an_empty_list_not_an_error() {
-        assert!(list(r"Z:\this\does\not\exist", &browse(0, OpenFolder::MaxDepth), 0).is_empty());
+        assert!(
+            list(
+                r"Z:\this\does\not\exist",
+                &browse(0, OpenFolder::MaxDepth),
+                0
+            )
+            .is_empty()
+        );
     }
 
     #[test]

@@ -534,7 +534,11 @@ impl YSnap {
             let id = hidden::menu_id(entry.slot);
             let _ = menu.add_item(id, &menu_label(&entry.title, &entry.app));
 
-            if let Some(bitmap) = entry.icon.as_ref().and_then(|icon| icon.to_bitmap(ICON_SIZE)) {
+            if let Some(bitmap) = entry
+                .icon
+                .as_ref()
+                .and_then(|icon| icon.to_bitmap(ICON_SIZE))
+            {
                 let _ = menu.set_item_icon(id, bitmap.handle());
                 icons.push(bitmap);
             }

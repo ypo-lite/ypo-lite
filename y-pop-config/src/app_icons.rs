@@ -29,7 +29,10 @@ use windows_reactor::*;
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum IconSpec {
     /// A program, library, icon file or shortcut, and which icon in it.
-    File { path: String, index: Option<i32> },
+    File {
+        path: String,
+        index: Option<i32>,
+    },
     /// The shell's folder icon.
     Directory,
     Info,
@@ -64,7 +67,10 @@ pub fn spec_for(settings: &Settings, item: &Item, builtins: &mut dyn Lookup) -> 
         ItemKind::App(app) => {
             let exe = settings.expand_text(app.exe.as_deref()?, builtins);
             let exe = exe.trim().trim_matches('"');
-            (!exe.is_empty()).then(|| IconSpec::File { path: exe.to_owned(), index: None })
+            (!exe.is_empty()).then(|| IconSpec::File {
+                path: exe.to_owned(),
+                index: None,
+            })
         }
         ItemKind::About => Some(IconSpec::Info),
         ItemKind::Quit => Some(IconSpec::Delete),
@@ -132,7 +138,12 @@ impl IconStore {
     pub fn image(&self, spec: Option<&IconSpec>, size: f64) -> Option<View> {
         match self.states.get(spec?)? {
             State::Ready(data) => Some(
-                Image::new().source_data(data.clone()).stretch(Stretch::Uniform).width(size).height(size).into(),
+                Image::new()
+                    .source_data(data.clone())
+                    .stretch(Stretch::Uniform)
+                    .width(size)
+                    .height(size)
+                    .into(),
             ),
             State::Loading | State::Missing => None,
         }
@@ -162,15 +173,30 @@ mod tests {
 
     fn specs(xml: &str) -> Vec<Option<IconSpec>> {
         let settings = load(xml);
-        let mut lookup = vec![Variable { name: "win".into(), value: r"C:\Windows".into() }];
-        settings.items().map(|item| spec_for(&settings, item, &mut lookup)).collect()
+        let mut lookup = vec![Variable {
+            name: "win".into(),
+            value: r"C:\Windows".into(),
+        }];
+        settings
+            .items()
+            .map(|item| spec_for(&settings, item, &mut lookup))
+            .collect()
     }
 
     #[test]
     fn icon_text_splits_into_a_path_and_an_optional_index() {
-        assert_eq!(split_icon_text(r"C:\a\b.dll,-41"), (r"C:\a\b.dll".to_owned(), Some(-41)));
-        assert_eq!(split_icon_text(r"C:\a\b.exe"), (r"C:\a\b.exe".to_owned(), None));
-        assert_eq!(split_icon_text(r"C:\a,b\c.ico"), (r"C:\a,b\c.ico".to_owned(), None));
+        assert_eq!(
+            split_icon_text(r"C:\a\b.dll,-41"),
+            (r"C:\a\b.dll".to_owned(), Some(-41))
+        );
+        assert_eq!(
+            split_icon_text(r"C:\a\b.exe"),
+            (r"C:\a\b.exe".to_owned(), None)
+        );
+        assert_eq!(
+            split_icon_text(r"C:\a,b\c.ico"),
+            (r"C:\a,b\c.ico".to_owned(), None)
+        );
     }
 
     #[test]
@@ -185,10 +211,19 @@ mod tests {
                </group></y-pop>"#,
         );
         assert_eq!(found[0], Some(IconSpec::Directory));
-        assert_eq!(found[1], Some(IconSpec::File { path: r"C:\Windows\notepad.exe".into(), index: None }));
+        assert_eq!(
+            found[1],
+            Some(IconSpec::File {
+                path: r"C:\Windows\notepad.exe".into(),
+                index: None
+            })
+        );
         assert_eq!(
             found[2],
-            Some(IconSpec::File { path: r"C:\Windows\system32\shell32.dll".into(), index: Some(3) })
+            Some(IconSpec::File {
+                path: r"C:\Windows\system32\shell32.dll".into(),
+                index: Some(3)
+            })
         );
         assert_eq!(found[3], Some(IconSpec::Directory));
         assert_eq!(found[4], None);
@@ -210,7 +245,10 @@ mod tests {
 
     #[test]
     fn a_real_icon_loads_to_png() {
-        let path = format!(r"{}\notepad.exe", std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into()));
+        let path = format!(
+            r"{}\notepad.exe",
+            std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into())
+        );
         let png = load_png(&IconSpec::File { path, index: None }).expect("notepad has an icon");
         assert_eq!(&png[1..4], b"PNG");
         assert!(load_png(&IconSpec::Directory).is_some());

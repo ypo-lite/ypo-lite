@@ -3,8 +3,8 @@
 //! that row ([`Row::detail`]).
 
 use crate::key_events;
-use crate::ui::key_picker::{KeyPickerUi, combo_labels, key_picker};
 use crate::reorder::{list_footer, row_actions};
+use crate::ui::key_picker::{KeyPickerUi, combo_labels, key_picker};
 use crate::ui::prelude::*;
 use crate::{ConfigApp, EditorClose, ListKind, Msg};
 use windows_reactor::*;
@@ -75,7 +75,11 @@ pub fn hotkeys_view(
                 context.callback(|()| Msg::EditorClosed(EditorClose::Keep)),
             )
         });
-        Row::new(index.to_string(), cells(index, binding, hotkeys.len(), reordering, context)).detail(detail)
+        Row::new(
+            index.to_string(),
+            cells(index, binding, hotkeys.len(), reordering, context),
+        )
+        .detail(detail)
     });
 
     page(
@@ -119,7 +123,10 @@ fn cells(
         .fill()
         .horizontal_content_alignment(HorizontalAlignment::Left)
         .on_click(context.callback(move |()| Msg::EditHotkey(index)))
-        .content(keycaps(&combo_labels(binding.hotkey.modifiers, Some(binding.hotkey.key)), false))
+        .content(keycaps(
+            &combo_labels(binding.hotkey.modifiers, Some(binding.hotkey.key)),
+            false,
+        ))
         .tooltip("Change the key combination");
 
     let desktop: View = if binding.action == Action::DesktopMove {
@@ -136,16 +143,35 @@ fn cells(
 
     vec![
         key,
-        combo(ACTIONS.map(Action::name), action, context.callback(move |c| Msg::HotkeyActionChanged(index, c))).into(),
-        combo(TARGETS.map(Target::name), target, context.callback(move |c| Msg::HotkeyTargetChanged(index, c))).into(),
+        combo(
+            ACTIONS.map(Action::name),
+            action,
+            context.callback(move |c| Msg::HotkeyActionChanged(index, c)),
+        )
+        .into(),
+        combo(
+            TARGETS.map(Target::name),
+            target,
+            context.callback(move |c| Msg::HotkeyTargetChanged(index, c)),
+        )
+        .into(),
         desktop,
-        switch(binding.steal, context.callback(move |on| Msg::HotkeyStealToggled(index, on))),
+        switch(
+            binding.steal,
+            context.callback(move |on| Msg::HotkeyStealToggled(index, on)),
+        ),
         row_actions(
             ListKind::Hotkeys,
             index,
             count,
             reordering,
-            || icon_button(Symbol::Delete, "Delete hotkey", context.callback(move |()| Msg::HotkeyDeleted(index))),
+            || {
+                icon_button(
+                    Symbol::Delete,
+                    "Delete hotkey",
+                    context.callback(move |()| Msg::HotkeyDeleted(index)),
+                )
+            },
             context,
         ),
     ]

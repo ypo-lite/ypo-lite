@@ -30,14 +30,14 @@
 
 use windows::Win32::Foundation::{LPARAM, RECT, SIZE};
 use windows::Win32::Graphics::Gdi::{
-    AC_SRC_ALPHA, AC_SRC_OVER, AlphaBlend, BF_BOTTOM, BF_LEFT, BITMAP, BLENDFUNCTION, BeginPath, BitBlt,
-    CreateCompatibleBitmap, CreateCompatibleDC, CreateRectRgnIndirect, CreateSolidBrush, DFC_MENU,
-    DFCS_MENUARROW, DT_LEFT, DT_NOPREFIX, DT_RIGHT, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject,
-    DrawEdge, DrawFrameControl, DrawTextW, EDGE_ETCHED, EndPath, ExcludeClipRect, FillRect,
-    GRADIENT_FILL_RECT_H, GRADIENT_FILL_RECT_V, GRADIENT_RECT, GetClipBox, GetDC, GetObjectW,
-    GetTextExtentPoint32W, GradientFill, HBITMAP, HDC, HGDIOBJ, ReleaseDC, RGN_COPY, RoundRect,
-    SRCAND, SRCINVERT, SelectClipPath, SelectClipRgn, SelectObject, SetBkMode, SetTextColor,
-    TRANSPARENT, TRIVERTEX,
+    AC_SRC_ALPHA, AC_SRC_OVER, AlphaBlend, BF_BOTTOM, BF_LEFT, BITMAP, BLENDFUNCTION, BeginPath,
+    BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreateRectRgnIndirect, CreateSolidBrush,
+    DFC_MENU, DFCS_MENUARROW, DT_LEFT, DT_NOPREFIX, DT_RIGHT, DT_SINGLELINE, DT_VCENTER, DeleteDC,
+    DeleteObject, DrawEdge, DrawFrameControl, DrawTextW, EDGE_ETCHED, EndPath, ExcludeClipRect,
+    FillRect, GRADIENT_FILL_RECT_H, GRADIENT_FILL_RECT_V, GRADIENT_RECT, GetClipBox, GetDC,
+    GetObjectW, GetTextExtentPoint32W, GradientFill, HBITMAP, HDC, HGDIOBJ, RGN_COPY, ReleaseDC,
+    RoundRect, SRCAND, SRCINVERT, SelectClipPath, SelectClipRgn, SelectObject, SetBkMode,
+    SetTextColor, TRANSPARENT, TRIVERTEX,
 };
 use windows::Win32::UI::Controls::{
     DRAWITEMSTRUCT, MEASUREITEMSTRUCT, ODS_DISABLED, ODS_GRAYED, ODS_SELECTED, ODT_MENU,
@@ -138,7 +138,11 @@ pub fn handle_measure_item(lparam: LPARAM) -> bool {
         ItemKind::Normal => ICON_SIZE + ICON_GAP,
         ItemKind::Separator => 0,
     };
-    let arrow_width = if data.submenu { ARROW_WIDTH + TEXT_PAD } else { 0 };
+    let arrow_width = if data.submenu {
+        ARROW_WIDTH + TEXT_PAD
+    } else {
+        0
+    };
 
     // Two independent extras, `Normal`-row only — a separator keeps its
     // rule spanning the row's unpadded, unmargined width/height (see
@@ -219,7 +223,9 @@ pub fn handle_draw_item(lparam: LPARAM) -> bool {
 
     match data.kind {
         ItemKind::Separator => draw_separator(hdc, content_rect, data, text_color),
-        ItemKind::Normal => draw_normal_item(hdc, content_rect, item.rcItem, data, text_color, idle),
+        ItemKind::Normal => {
+            draw_normal_item(hdc, content_rect, item.rcItem, data, text_color, idle)
+        }
     }
 
     true
@@ -385,7 +391,15 @@ fn get_clip_rect(hdc: HDC) -> RECT {
 fn set_round_clip(hdc: HDC, rect: RECT, round: i32) {
     unsafe {
         let _ = BeginPath(hdc);
-        let _ = RoundRect(hdc, rect.left, rect.top, rect.right, rect.bottom, round, round);
+        let _ = RoundRect(
+            hdc,
+            rect.left,
+            rect.top,
+            rect.right,
+            rect.bottom,
+            round,
+            round,
+        );
         let _ = EndPath(hdc);
         let _ = SelectClipPath(hdc, RGN_COPY);
     }
@@ -418,7 +432,14 @@ fn restore_clip(hdc: HDC, rect: RECT) {
 /// see [`MenuDesign::edge`]'s own doc comment for why its rule (drawn here,
 /// unlike [`MenuDesign::icon_backdrop`], since it needs the same icon/text
 /// boundary this function already computes) is gated on it.
-fn draw_normal_item(hdc: HDC, rect: RECT, item_rect: RECT, data: &ItemData, text_color: Color, idle: bool) {
+fn draw_normal_item(
+    hdc: HDC,
+    rect: RECT,
+    item_rect: RECT,
+    data: &ItemData,
+    text_color: Color,
+    idle: bool,
+) {
     let mut text_rect = rect;
     text_rect.left += TEXT_PAD;
     text_rect.right -= TEXT_PAD;
@@ -449,7 +470,12 @@ fn draw_normal_item(hdc: HDC, rect: RECT, item_rect: RECT, data: &ItemData, text
         && edge_rule_draws(rule, idle)
     {
         let x = icon_end + ICON_GAP / 2;
-        let mut bar = RECT { left: x, top: rect.top, right: rect.right, bottom: rect.bottom };
+        let mut bar = RECT {
+            left: x,
+            top: rect.top,
+            right: rect.right,
+            bottom: rect.bottom,
+        };
         unsafe {
             let _ = DrawEdge(hdc, &mut bar, EDGE_ETCHED, BF_LEFT);
         }
@@ -485,7 +511,13 @@ fn draw_normal_item(hdc: HDC, rect: RECT, item_rect: RECT, data: &ItemData, text
         // this function's own doc comment for why stopping at `rect`
         // leaves a sliver of the native arrow uncovered.
         unsafe {
-            let _ = ExcludeClipRect(hdc, column_left, item_rect.top, item_rect.right, item_rect.bottom);
+            let _ = ExcludeClipRect(
+                hdc,
+                column_left,
+                item_rect.top,
+                item_rect.right,
+                item_rect.bottom,
+            );
         }
     }
 
@@ -503,7 +535,13 @@ fn draw_normal_item(hdc: HDC, rect: RECT, item_rect: RECT, data: &ItemData, text
     if let Some(shortcut) = &data.shortcut {
         let mut shortcut_rect = text_rect;
         shortcut_rect.right -= TEXT_PAD;
-        draw_text(hdc, shortcut.clone(), shortcut_rect, data.design.disabled_text, DT_RIGHT | DT_NOPREFIX);
+        draw_text(
+            hdc,
+            shortcut.clone(),
+            shortcut_rect,
+            data.design.disabled_text,
+            DT_RIGHT | DT_NOPREFIX,
+        );
     }
 
     // Without `DT_NOPREFIX`: the label's `&` marks its mnemonic, which
@@ -542,7 +580,12 @@ fn draw_separator(hdc: HDC, rect: RECT, data: &ItemData, text_color: Color) {
     unsafe {
         SetBkMode(hdc, TRANSPARENT);
         SetTextColor(hdc, text_color.colorref());
-        DrawTextW(hdc, &mut text, &mut text_rect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        DrawTextW(
+            hdc,
+            &mut text,
+            &mut text_rect,
+            DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
+        );
     }
 
     let mid_y = (rect.top + rect.bottom) / 2;
@@ -666,16 +709,41 @@ fn draw_arrow(hdc: HDC, rect: RECT, color: Color) {
         let old_arrow = SelectObject(arrow_dc, arrow_bitmap.into());
         let old_fill = SelectObject(fill_dc, fill_bitmap.into());
 
-        let mut glyph_rect = RECT { left: 0, top: 0, right: w, bottom: h };
+        let mut glyph_rect = RECT {
+            left: 0,
+            top: 0,
+            right: w,
+            bottom: h,
+        };
         let _ = DrawFrameControl(arrow_dc, &mut glyph_rect, DFC_MENU, DFCS_MENUARROW);
 
         let brush = CreateSolidBrush(color.colorref());
         FillRect(fill_dc, &glyph_rect, brush);
         let _ = DeleteObject(brush.into());
 
-        let _ = BitBlt(hdc, rect.left, rect.top, w, h, Some(fill_dc), 0, 0, SRCINVERT);
+        let _ = BitBlt(
+            hdc,
+            rect.left,
+            rect.top,
+            w,
+            h,
+            Some(fill_dc),
+            0,
+            0,
+            SRCINVERT,
+        );
         let _ = BitBlt(hdc, rect.left, rect.top, w, h, Some(arrow_dc), 0, 0, SRCAND);
-        let _ = BitBlt(hdc, rect.left, rect.top, w, h, Some(fill_dc), 0, 0, SRCINVERT);
+        let _ = BitBlt(
+            hdc,
+            rect.left,
+            rect.top,
+            w,
+            h,
+            Some(fill_dc),
+            0,
+            0,
+            SRCINVERT,
+        );
 
         SelectObject(arrow_dc, old_arrow);
         SelectObject(fill_dc, old_fill);
@@ -741,7 +809,10 @@ mod tests {
             itemData: item_data(menu, position),
         };
         let handled = handle_measure_item(LPARAM(&raw mut measure as isize));
-        assert!(handled, "a themed item's own WM_MEASUREITEM must be recognised");
+        assert!(
+            handled,
+            "a themed item's own WM_MEASUREITEM must be recognised"
+        );
         measure.itemWidth
     }
 
@@ -920,7 +991,11 @@ mod tests {
                     CtlID: 0,
                     itemID: 0,
                     itemAction: unsafe { std::mem::zeroed() },
-                    itemState: if selected { ODS_SELECTED } else { unsafe { std::mem::zeroed() } },
+                    itemState: if selected {
+                        ODS_SELECTED
+                    } else {
+                        unsafe { std::mem::zeroed() }
+                    },
                     hwndItem: HWND(menu.handle().0 as *mut _),
                     hDC: hdc,
                     rcItem: RECT {

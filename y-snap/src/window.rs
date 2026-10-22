@@ -16,9 +16,9 @@
 use windows::Win32::Foundation::{HANDLE, HWND, LPARAM, POINT, RECT, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{
     GWL_EXSTYLE, GWL_STYLE, GetPropW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
-    HWND_NOTOPMOST, HWND_TOPMOST, IsWindow, IsWindowVisible, LWA_ALPHA, PostMessageW,
-    RemovePropW, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, SWP_FRAMECHANGED,
-    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetCursorPos, SetForegroundWindow,
+    HWND_NOTOPMOST, HWND_TOPMOST, IsWindow, IsWindowVisible, LWA_ALPHA, PostMessageW, RemovePropW,
+    SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, SWP_FRAMECHANGED, SWP_NOACTIVATE,
+    SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetCursorPos, SetForegroundWindow,
     SetLayeredWindowAttributes, SetPropW, SetWindowPos, ShowWindow, WM_CLOSE, WS_CAPTION,
     WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_MAXIMIZE, WS_MINIMIZE, WS_THICKFRAME,
 };

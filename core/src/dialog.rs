@@ -22,8 +22,9 @@ use windows::Win32::System::Com::{
 };
 use windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC;
 use windows::Win32::UI::Shell::{
-    FOS_ALLOWMULTISELECT, FOS_FILEMUSTEXIST, FOS_FORCEFILESYSTEM, FOS_PATHMUSTEXIST, FOS_PICKFOLDERS, FileOpenDialog,
-    IFileOpenDialog, IShellItem, SHCreateItemFromParsingName, SIGDN_FILESYSPATH,
+    FOS_ALLOWMULTISELECT, FOS_FILEMUSTEXIST, FOS_FORCEFILESYSTEM, FOS_PATHMUSTEXIST,
+    FOS_PICKFOLDERS, FileOpenDialog, IFileOpenDialog, IShellItem, SHCreateItemFromParsingName,
+    SIGDN_FILESYSPATH,
 };
 use windows::core::{HRESULT, HSTRING, PCWSTR, Result};
 
@@ -48,7 +49,8 @@ pub fn open_files(owner: Option<HWND>, options: &OpenOptions<'_>) -> Result<Vec<
     // else, differently") both mean there is an apartment to use.
     let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
 
-    let dialog: IFileOpenDialog = unsafe { CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)? };
+    let dialog: IFileOpenDialog =
+        unsafe { CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)? };
 
     let mut flags = FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | FOS_FILEMUSTEXIST;
     if options.pick_folders {
@@ -64,8 +66,16 @@ pub fn open_files(owner: Option<HWND>, options: &OpenOptions<'_>) -> Result<Vec<
     }
 
     // The strings must outlive `Show`; the spec array only borrows them.
-    let names: Vec<HSTRING> = options.filters.iter().map(|(name, _)| HSTRING::from(*name)).collect();
-    let patterns: Vec<HSTRING> = options.filters.iter().map(|(_, pattern)| HSTRING::from(*pattern)).collect();
+    let names: Vec<HSTRING> = options
+        .filters
+        .iter()
+        .map(|(name, _)| HSTRING::from(*name))
+        .collect();
+    let patterns: Vec<HSTRING> = options
+        .filters
+        .iter()
+        .map(|(_, pattern)| HSTRING::from(*pattern))
+        .collect();
     if !names.is_empty() && !options.pick_folders {
         let specs: Vec<COMDLG_FILTERSPEC> = names
             .iter()
@@ -91,7 +101,9 @@ pub fn open_files(owner: Option<HWND>, options: &OpenOptions<'_>) -> Result<Vec<
 
     match unsafe { dialog.Show(owner) } {
         Ok(()) => {}
-        Err(error) if error.code() == HRESULT::from_win32(ERROR_CANCELLED.0) => return Ok(Vec::new()),
+        Err(error) if error.code() == HRESULT::from_win32(ERROR_CANCELLED.0) => {
+            return Ok(Vec::new());
+        }
         Err(error) => return Err(error),
     }
 
@@ -101,7 +113,9 @@ pub fn open_files(owner: Option<HWND>, options: &OpenOptions<'_>) -> Result<Vec<
     for index in 0..count {
         let item = unsafe { results.GetItemAt(index)? };
         let name = unsafe { item.GetDisplayName(SIGDN_FILESYSPATH)? };
-        paths.push(PathBuf::from(unsafe { name.to_string() }.unwrap_or_default()));
+        paths.push(PathBuf::from(
+            unsafe { name.to_string() }.unwrap_or_default(),
+        ));
         unsafe { CoTaskMemFree(Some(name.0.cast())) };
     }
     Ok(paths)

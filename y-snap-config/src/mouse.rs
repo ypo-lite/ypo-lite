@@ -12,7 +12,12 @@ use windows::Win32::UI::Input::KeyboardAndMouse::HOT_KEY_MODIFIERS;
 use windows_reactor::*;
 use y_snap::config::{Button as MouseButton, Gesture, Mouse};
 
-pub const BUTTONS: [MouseButton; 4] = [MouseButton::Left, MouseButton::Right, MouseButton::Middle, MouseButton::Wheel];
+pub const BUTTONS: [MouseButton; 4] = [
+    MouseButton::Left,
+    MouseButton::Right,
+    MouseButton::Middle,
+    MouseButton::Wheel,
+];
 const BUTTON_NAMES: [&str; 4] = ["Left", "Right", "Middle", "Wheel"];
 
 /// Which mouse gesture a [`Msg`] refers to.
@@ -61,9 +66,15 @@ impl GestureKind {
 
 pub fn mouse_view(mouse: &Mouse, viewport: Viewport, context: &ViewContext<ConfigApp>) -> View {
     let grid = AutoGrid::new(250.0).max_columns(3);
-    let card_viewport = grid.item_viewport(viewport, GestureKind::ALL.len()).inset(CARD_INSET);
-    let cards =
-        GestureKind::ALL.map(|kind| (kind.title(), gesture_card(kind, kind.get(mouse), card_viewport, context)));
+    let card_viewport = grid
+        .item_viewport(viewport, GestureKind::ALL.len())
+        .inset(CARD_INSET);
+    let cards = GestureKind::ALL.map(|kind| {
+        (
+            kind.title(),
+            gesture_card(kind, kind.get(mouse), card_viewport, context),
+        )
+    });
 
     page(
         "Mouse gestures",
@@ -85,15 +96,44 @@ fn gesture_card(
     let button = gesture.and_then(|g| BUTTONS.iter().position(|b| *b == g.button));
     let modifiers = gesture.map_or(HOT_KEY_MODIFIERS(0), |g| g.modifiers);
 
-    let title: View = Grid::new().columns([GridLength::STAR, GridLength::Auto]).keyed_children([
-        ("title", cell(text::strong(kind.title()).vertical_alignment(VerticalAlignment::Center), 0, 0)),
-        ("switch", cell(switch(on, context.callback(move |on| Msg::GestureToggled(kind, on))), 0, 1)),
-    ]);
+    let title: View = Grid::new()
+        .columns([GridLength::STAR, GridLength::Auto])
+        .keyed_children([
+            (
+                "title",
+                cell(
+                    text::strong(kind.title()).vertical_alignment(VerticalAlignment::Center),
+                    0,
+                    0,
+                ),
+            ),
+            (
+                "switch",
+                cell(
+                    switch(
+                        on,
+                        context.callback(move |on| Msg::GestureToggled(kind, on)),
+                    ),
+                    0,
+                    1,
+                ),
+            ),
+        ]);
 
-    let chips =
-        AutoGrid::new(56.0).max_columns(4).gap(space::XS, space::XS).items(MODIFIERS.map(|(name, modifier)| {
+    let chips = AutoGrid::new(56.0)
+        .max_columns(4)
+        .gap(space::XS, space::XS)
+        .items(MODIFIERS.map(|(name, modifier)| {
             let checked = modifiers.0 & modifier.0 != 0;
-            (name, chip(name, checked, on, context.callback(move |_| Msg::GestureModifierToggled(kind, modifier))))
+            (
+                name,
+                chip(
+                    name,
+                    checked,
+                    on,
+                    context.callback(move |_| Msg::GestureModifierToggled(kind, modifier)),
+                ),
+            )
         }));
 
     let body = Stack::vertical(space::M)
@@ -103,12 +143,18 @@ fn gesture_card(
             "button",
             field(
                 "Button",
-                combo(BUTTON_NAMES, button, context.callback(move |c| Msg::GestureButtonChanged(kind, c)))
-                    .is_enabled(on),
+                combo(
+                    BUTTON_NAMES,
+                    button,
+                    context.callback(move |c| Msg::GestureButtonChanged(kind, c)),
+                )
+                .is_enabled(on),
             ),
         )
         .child("modifiers", field("Modifiers", chips.build(viewport)));
 
     // Dimmed rather than disabled when off, so it still reads at a glance.
-    card().opacity(if on { 1.0 } else { emphasis::OFF }).content(body)
+    card()
+        .opacity(if on { 1.0 } else { emphasis::OFF })
+        .content(body)
 }

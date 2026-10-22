@@ -37,7 +37,11 @@ pub struct IconPickerUi {
 impl IconPickerUi {
     /// Opened on `icon`: its own category showing, if it's in the catalog.
     pub fn opening_on(icon: Option<&str>) -> Self {
-        Self { open: true, category: icon.and_then(IconCategory::of).unwrap_or_default(), search: String::new() }
+        Self {
+            open: true,
+            category: icon.and_then(IconCategory::of).unwrap_or_default(),
+            search: String::new(),
+        }
     }
 }
 
@@ -53,13 +57,25 @@ pub fn icon_field(
     on_text: Callback<String>,
     context: &ViewContext<ConfigApp>,
 ) -> View {
-    let input = text_box(icon.unwrap_or_default(), "Emoji or glyph (Win + . for all emoji)", on_text);
+    let input = text_box(
+        icon.unwrap_or_default(),
+        "Emoji or glyph (Win + . for all emoji)",
+        on_text,
+    );
     let button: View = Button::new()
-        .style(if picker_open { ButtonStyle::Accent } else { ButtonStyle::Default })
+        .style(if picker_open {
+            ButtonStyle::Accent
+        } else {
+            ButtonStyle::Default
+        })
         .vertical_alignment(VerticalAlignment::Stretch)
         .on_click(context.callback(|()| Msg::IconPickerToggled))
         .content(SymbolIcon::new().symbol(Symbol::Emoji2))
-        .tooltip(if picker_open { "Close the icon picker" } else { "Choose an icon" });
+        .tooltip(if picker_open {
+            "Close the icon picker"
+        } else {
+            "Choose an icon"
+        });
 
     let row: View = Grid::new()
         .columns([GridLength::STAR, GridLength::Auto])
@@ -79,23 +95,39 @@ pub fn icon_picker(
 ) -> View {
     let inner = viewport.inset(CARD_INSET);
 
-    let suggested = Stack::horizontal(space::XS).children(
-        icons::suggestions(action)
-            .iter()
-            .map(|&icon| (icon, icon_choice(icon, current, Some(size::ICON_CHOICE), context))),
-    );
+    let suggested =
+        Stack::horizontal(space::XS).children(icons::suggestions(action).iter().map(|&icon| {
+            (
+                icon,
+                icon_choice(icon, current, Some(size::ICON_CHOICE), context),
+            )
+        }));
 
     let searching = !ui.search.trim().is_empty();
     let search = field(
         "Search",
-        text_box(ui.search.clone(), "pin, arrow, close, desktop…", context.callback(Msg::IconSearchChanged)),
+        text_box(
+            ui.search.clone(),
+            "pin, arrow, close, desktop…",
+            context.callback(Msg::IconSearchChanged),
+        ),
     );
 
     let (heading, choices): (String, Vec<&'static str>) = if searching {
         let results = icons::search(&ui.search);
-        (format!("{} match{}", results.len(), if results.len() == 1 { "" } else { "es" }), results)
+        (
+            format!(
+                "{} match{}",
+                results.len(),
+                if results.len() == 1 { "" } else { "es" }
+            ),
+            results,
+        )
     } else {
-        (ui.category.title().to_owned(), ui.category.icons().collect())
+        (
+            ui.category.title().to_owned(),
+            ui.category.icons().collect(),
+        )
     };
     let grid: View = if choices.is_empty() {
         text::caption("Nothing matches — try another word, or use Win + . in the Icon box.").into()
@@ -104,7 +136,11 @@ pub fn icon_picker(
             .max_columns(16)
             .gap(space::XS, space::XS)
             .keep_columns()
-            .items(choices.into_iter().map(|icon| (icon, icon_choice(icon, current, None, context))))
+            .items(
+                choices
+                    .into_iter()
+                    .map(|icon| (icon, icon_choice(icon, current, None, context))),
+            )
             .build(inner)
     };
 
@@ -121,7 +157,11 @@ pub fn icon_picker(
 
     panel(
         "Choose an icon",
-        Some(icon_button(Symbol::Cancel, "Close the icon picker", context.callback(|()| Msg::IconPickerToggled))),
+        Some(icon_button(
+            Symbol::Cancel,
+            "Close the icon picker",
+            context.callback(|()| Msg::IconPickerToggled),
+        )),
         body,
     )
 }
@@ -137,29 +177,51 @@ fn icon_choice(
     context: &ViewContext<ConfigApp>,
 ) -> View {
     let button = Button::new()
-        .style(if current == Some(icon) { ButtonStyle::Accent } else { ButtonStyle::Default })
+        .style(if current == Some(icon) {
+            ButtonStyle::Accent
+        } else {
+            ButtonStyle::Default
+        })
         .min_width(0.0)
         .fill();
     let button = match width {
-        Some(width) => button.width(width).horizontal_alignment(HorizontalAlignment::Left),
+        Some(width) => button
+            .width(width)
+            .horizontal_alignment(HorizontalAlignment::Left),
         None => button,
     };
-    button.on_click(context.callback(move |()| Msg::IconPicked(icon))).content(glyph(icon))
+    button
+        .on_click(context.callback(move |()| Msg::IconPicked(icon)))
+        .content(glyph(icon))
 }
 
-fn category_selector(current: IconCategory, viewport: Viewport, context: &ViewContext<ConfigApp>) -> View {
+fn category_selector(
+    current: IconCategory,
+    viewport: Viewport,
+    context: &ViewContext<ConfigApp>,
+) -> View {
     if viewport.fits(TABS_MIN_WIDTH) {
         let items = IconCategory::ALL.map(|category| {
-            let item: View = SelectorBarItem::new().text(category.title()).is_selected(category == current).into();
+            let item: View = SelectorBarItem::new()
+                .text(category.title())
+                .is_selected(category == current)
+                .into();
             (category.title(), item)
         });
         SelectorBar::new()
             .on_selected_text_changed(context.callback(move |title: Option<String>| {
-                Msg::IconCategorySelected(title.as_deref().and_then(IconCategory::from_title).unwrap_or(current))
+                Msg::IconCategorySelected(
+                    title
+                        .as_deref()
+                        .and_then(IconCategory::from_title)
+                        .unwrap_or(current),
+                )
             }))
             .slots([SlotView::collection(SelectorBarSlot::Items, items)])
     } else {
-        let selected = IconCategory::ALL.iter().position(|&category| category == current);
+        let selected = IconCategory::ALL
+            .iter()
+            .position(|&category| category == current);
         let picker = combo(
             IconCategory::ALL.map(IconCategory::title),
             selected,
@@ -173,5 +235,8 @@ fn category_selector(current: IconCategory, viewport: Viewport, context: &ViewCo
 
 /// An emoji at a size that reads as an icon, centred in its button.
 fn glyph(icon: &'static str) -> TextBlock {
-    TextBlock::new().text(icon).font_size(font::BODY_LARGE).horizontal_alignment(HorizontalAlignment::Center)
+    TextBlock::new()
+        .text(icon)
+        .font_size(font::BODY_LARGE)
+        .horizontal_alignment(HorizontalAlignment::Center)
 }

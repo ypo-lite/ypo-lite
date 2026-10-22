@@ -30,9 +30,10 @@ pub fn body(facts: &Facts) -> String {
         Some((hotkeys, overlay)) => format!("{hotkeys} hotkeys · {overlay} overlay actions"),
         None => "No configuration loaded".to_owned(),
     };
-    let memory = facts
-        .working_set
-        .map_or_else(|| "Memory: unknown".to_owned(), |bytes| format!("Memory: {}", megabytes(bytes)));
+    let memory = facts.working_set.map_or_else(
+        || "Memory: unknown".to_owned(),
+        |bytes| format!("Memory: {}", megabytes(bytes)),
+    );
     let settings = if facts.settings_app {
         "Settings app: installed"
     } else {
@@ -116,7 +117,10 @@ mod tests {
 
     #[test]
     fn the_body_always_fits_a_balloon() {
-        let long = PathBuf::from(format!(r"C:\{}\y-snap.xml", "very-long-folder-name\\".repeat(30)));
+        let long = PathBuf::from(format!(
+            r"C:\{}\y-snap.xml",
+            "very-long-folder-name\\".repeat(30)
+        ));
         for facts in [
             facts(&long),
             Facts {

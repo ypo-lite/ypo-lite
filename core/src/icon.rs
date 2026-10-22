@@ -45,17 +45,17 @@
 use std::collections::HashMap;
 use std::ffi::c_void;
 
+use windows::Win32::Foundation::{ERROR_TIMEOUT, GetLastError, HWND, LPARAM, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    BI_RGB, BITMAP, BITMAPINFO, BITMAPINFOHEADER, CreateCompatibleDC, CreateDIBSection, DIB_RGB_COLORS,
-    DeleteDC, DeleteObject, GetObjectW, HBITMAP, SelectObject,
+    BI_RGB, BITMAP, BITMAPINFO, BITMAPINFOHEADER, CreateCompatibleDC, CreateDIBSection,
+    DIB_RGB_COLORS, DeleteDC, DeleteObject, GetObjectW, HBITMAP, SelectObject,
 };
 use windows::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL};
 use windows::Win32::UI::Shell::{
-    ExtractIconExW, SHFILEINFOW, SHGSI_ICON, SHGSI_SMALLICON, SHGetFileInfoW, SHGetStockIconInfo,
-    SHGFI_ICON, SHGFI_SMALLICON, SHGFI_USEFILEATTRIBUTES, SHSTOCKICONID, SHSTOCKICONINFO,
+    ExtractIconExW, SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON, SHGFI_USEFILEATTRIBUTES, SHGSI_ICON,
+    SHGSI_SMALLICON, SHGetFileInfoW, SHGetStockIconInfo, SHSTOCKICONID, SHSTOCKICONINFO,
     SIID_DELETE, SIID_INFO, SIID_SETTINGS,
 };
-use windows::Win32::Foundation::{ERROR_TIMEOUT, GetLastError, HWND, LPARAM, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{
     CopyIcon, DI_MASK, DI_NORMAL, DestroyIcon, DrawIconEx, GCLP_HICONSM, GetClassLongPtrW, HICON,
     SMTO_ABORTIFHUNG, SendMessageTimeoutW, WM_GETICON,
@@ -128,7 +128,9 @@ impl Icon {
             return None;
         }
 
-        unsafe { CopyIcon(HICON(found as *mut c_void)) }.ok().map(Icon)
+        unsafe { CopyIcon(HICON(found as *mut c_void)) }
+            .ok()
+            .map(Icon)
     }
 
     /// Renders this icon into a `size`×`size` 32-bit ARGB bitmap suitable
@@ -168,7 +170,9 @@ impl Icon {
             let _ = unsafe { DeleteObject(bitmap.into()) };
             return None;
         }
-        unsafe { std::ptr::write_bytes(bits.cast::<u8>(), 0, (size as usize) * (size as usize) * 4) };
+        unsafe {
+            std::ptr::write_bytes(bits.cast::<u8>(), 0, (size as usize) * (size as usize) * 4)
+        };
 
         let dc = unsafe { CreateCompatibleDC(None) };
         if dc.is_invalid() {
@@ -194,8 +198,9 @@ impl Icon {
         // shows up as a bright fringe around every icon. Premultiplying once
         // here, in place, keeps both consumers correct without either one
         // needing to know which convention the other expects.
-        let pixels =
-            unsafe { std::slice::from_raw_parts_mut(bits.cast::<u8>(), (size as usize) * (size as usize) * 4) };
+        let pixels = unsafe {
+            std::slice::from_raw_parts_mut(bits.cast::<u8>(), (size as usize) * (size as usize) * 4)
+        };
 
         // A classic icon (PuTTY's, Pageant's: 4/8-bit colour plus an AND
         // mask) has no alpha channel, so GDI draws its colours into the DIB
@@ -231,8 +236,17 @@ impl Icon {
         for line in bgra.chunks_exact(row).rev() {
             for pixel in line.chunks_exact(4) {
                 let alpha = pixel[3] as u32;
-                let straight = |channel: u8| (channel as u32 * 255).checked_div(alpha).map_or(0, |value| value.min(255) as u8);
-                rgba.extend_from_slice(&[straight(pixel[2]), straight(pixel[1]), straight(pixel[0]), pixel[3]]);
+                let straight = |channel: u8| {
+                    (channel as u32 * 255)
+                        .checked_div(alpha)
+                        .map_or(0, |value| value.min(255) as u8)
+                };
+                rgba.extend_from_slice(&[
+                    straight(pixel[2]),
+                    straight(pixel[1]),
+                    straight(pixel[0]),
+                    pixel[3],
+                ]);
             }
         }
         let png = crate::png::encode_rgba(size as u32, size as u32, &rgba);
@@ -313,7 +327,11 @@ impl Bitmap {
     fn pixels(&self, size: i32) -> Option<Vec<u8>> {
         let mut info = BITMAP::default();
         let got = unsafe {
-            GetObjectW(self.0.into(), size_of::<BITMAP>() as i32, Some((&mut info as *mut BITMAP).cast::<c_void>()))
+            GetObjectW(
+                self.0.into(),
+                size_of::<BITMAP>() as i32,
+                Some((&mut info as *mut BITMAP).cast::<c_void>()),
+            )
         };
         let len = size as usize * size as usize * 4;
         if got == 0 || info.bmBits.is_null() || info.bmWidth != size || info.bmHeight != size {
@@ -465,7 +483,6 @@ impl IconCache {
     }
 }
 
-
 /// How many icons the file at `path` holds (`.exe`, `.dll`, `.ico`…), 0 if
 /// it has none or cannot be read. The positions `0..count` are what
 /// [`IconCache::for_file`] takes as an index.
@@ -477,8 +494,7 @@ pub fn count_in_file(path: &str) -> u32 {
 fn extract_own_icon(path: &str, index: i32) -> Option<Icon> {
     let wide = HSTRING::from(path);
     let mut icon = HICON::default();
-    let extracted =
-        unsafe { ExtractIconExW(&wide, index, None, Some(&mut icon), 1) };
+    let extracted = unsafe { ExtractIconExW(&wide, index, None, Some(&mut icon), 1) };
     (extracted > 0 && !icon.is_invalid()).then_some(Icon(icon))
 }
 
@@ -537,7 +553,9 @@ mod tests {
     static SHELL_CALLS: Mutex<()> = Mutex::new(());
 
     fn serialized() -> std::sync::MutexGuard<'static, ()> {
-        SHELL_CALLS.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        SHELL_CALLS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     /// A throwaway file under the system temp folder, removed on drop —
@@ -553,7 +571,10 @@ mod tests {
         }
 
         fn path(&self) -> String {
-            self.0.to_str().expect("temp file path is valid UTF-8").to_owned()
+            self.0
+                .to_str()
+                .expect("temp file path is valid UTF-8")
+                .to_owned()
         }
     }
 
@@ -587,14 +608,22 @@ mod tests {
         let mut cache = IconCache::new();
         let notepad = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_owned())
             + r"\notepad.exe";
-        let icon = cache.for_file(&notepad, None).expect("notepad.exe has an icon");
+        let icon = cache
+            .for_file(&notepad, None)
+            .expect("notepad.exe has an icon");
         let png = icon.to_png(32).expect("converts to a PNG");
         assert_eq!(&png[1..4], b"PNG");
         // IHDR says 32×32, and the pixels are not all one transparent value.
         assert_eq!(&png[16..24], &[0, 0, 0, 32, 0, 0, 0, 32]);
-        let idat = png.windows(4).position(|w| w == b"IDAT").expect("an IDAT chunk");
+        let idat = png
+            .windows(4)
+            .position(|w| w == b"IDAT")
+            .expect("an IDAT chunk");
         let pixels = &png[idat + 4 + 2 + 5..];
-        assert!(pixels[..32 * 4].iter().any(|&b| b != 0) || pixels[32 * 4..2000].iter().any(|&b| b != 0));
+        assert!(
+            pixels[..32 * 4].iter().any(|&b| b != 0)
+                || pixels[32 * 4..2000].iter().any(|&b| b != 0)
+        );
     }
 
     #[test]

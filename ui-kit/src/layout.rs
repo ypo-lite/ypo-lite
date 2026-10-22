@@ -27,7 +27,8 @@ use windows_reactor::*;
 pub trait Fill: LayoutControl + Sized {
     /// Fill the cell's width; centre in its height.
     fn fill(self) -> Self {
-        self.horizontal_alignment(HorizontalAlignment::Stretch).vertical_alignment(VerticalAlignment::Center)
+        self.horizontal_alignment(HorizontalAlignment::Stretch)
+            .vertical_alignment(VerticalAlignment::Center)
     }
 }
 
@@ -39,12 +40,19 @@ impl<T: LayoutControl> Fill for T {}
 /// stretches to the whole cell; `view` fills it if `view` itself stretches
 /// (anything from [`crate::controls`] does).
 pub fn cell(view: impl Into<View>, row: usize, column: usize) -> View {
-    Border::new().grid_row(row as i32).grid_column(column as i32).content(view)
+    Border::new()
+        .grid_row(row as i32)
+        .grid_column(column as i32)
+        .content(view)
 }
 
 /// [`cell`] spanning `columns` columns.
 pub fn cell_span(view: impl Into<View>, row: usize, column: usize, columns: usize) -> View {
-    Border::new().grid_row(row as i32).grid_column(column as i32).grid_column_span(columns.max(1) as i32).content(view)
+    Border::new()
+        .grid_row(row as i32)
+        .grid_column(column as i32)
+        .grid_column_span(columns.max(1) as i32)
+        .content(view)
 }
 
 /// A vertical or horizontal run of keyed children.
@@ -61,11 +69,19 @@ pub struct Stack {
 
 impl Stack {
     pub fn vertical(spacing: f64) -> Self {
-        Self { orientation: Orientation::Vertical, spacing, children: Vec::new() }
+        Self {
+            orientation: Orientation::Vertical,
+            spacing,
+            children: Vec::new(),
+        }
     }
 
     pub fn horizontal(spacing: f64) -> Self {
-        Self { orientation: Orientation::Horizontal, spacing, children: Vec::new() }
+        Self {
+            orientation: Orientation::Horizontal,
+            spacing,
+            children: Vec::new(),
+        }
     }
 
     pub fn child(mut self, key: impl Into<Key>, view: impl Into<View>) -> Self {
@@ -81,15 +97,25 @@ impl Stack {
         self
     }
 
-    pub fn children<K: Into<Key>, V: Into<View>>(mut self, children: impl IntoIterator<Item = (K, V)>) -> Self {
-        self.children.extend(children.into_iter().map(|(key, view)| (key.into(), view.into())));
+    pub fn children<K: Into<Key>, V: Into<View>>(
+        mut self,
+        children: impl IntoIterator<Item = (K, V)>,
+    ) -> Self {
+        self.children.extend(
+            children
+                .into_iter()
+                .map(|(key, view)| (key.into(), view.into())),
+        );
         self
     }
 }
 
 impl From<Stack> for View {
     fn from(stack: Stack) -> Self {
-        StackPanel::new().orientation(stack.orientation).spacing(stack.spacing).keyed_children(stack.children)
+        StackPanel::new()
+            .orientation(stack.orientation)
+            .spacing(stack.spacing)
+            .keyed_children(stack.children)
     }
 }
 
@@ -152,7 +178,11 @@ impl AutoGrid {
     /// How many columns `count` items get in `viewport`.
     pub fn columns_for(&self, viewport: Viewport, count: usize) -> usize {
         let columns = viewport.columns(self.min_item_width, self.column_gap, self.max_columns);
-        if self.fill_row { columns.min(count.max(1)) } else { columns }
+        if self.fill_row {
+            columns.min(count.max(1))
+        } else {
+            columns
+        }
     }
 
     /// The viewport each of `count` items will get — for items whose own
@@ -167,8 +197,15 @@ impl AutoGrid {
         self
     }
 
-    pub fn items<K: Into<Key>, V: Into<View>>(mut self, items: impl IntoIterator<Item = (K, V)>) -> Self {
-        self.items.extend(items.into_iter().map(|(key, view)| (key.into(), view.into())));
+    pub fn items<K: Into<Key>, V: Into<View>>(
+        mut self,
+        items: impl IntoIterator<Item = (K, V)>,
+    ) -> Self {
+        self.items.extend(
+            items
+                .into_iter()
+                .map(|(key, view)| (key.into(), view.into())),
+        );
         self
     }
 
@@ -235,7 +272,10 @@ impl Split {
     fn shares(&self) -> (f64, f64) {
         let available = (self.viewport.width - self.gap).max(0.0);
         let total = self.primary_weight + self.secondary_weight;
-        (available * self.primary_weight / total, available * self.secondary_weight / total)
+        (
+            available * self.primary_weight / total,
+            available * self.secondary_weight / total,
+        )
     }
 
     pub fn is_side_by_side(&self) -> bool {
@@ -244,11 +284,19 @@ impl Split {
     }
 
     pub fn primary(&self) -> Viewport {
-        if self.is_side_by_side() { Viewport::new(self.shares().0) } else { self.viewport }
+        if self.is_side_by_side() {
+            Viewport::new(self.shares().0)
+        } else {
+            self.viewport
+        }
     }
 
     pub fn secondary(&self) -> Viewport {
-        if self.is_side_by_side() { Viewport::new(self.shares().1) } else { self.viewport }
+        if self.is_side_by_side() {
+            Viewport::new(self.shares().1)
+        } else {
+            self.viewport
+        }
     }
 
     pub fn build(self, primary: View, secondary: View) -> View {
@@ -257,14 +305,23 @@ impl Split {
         // focused field survives the window crossing the threshold).
         if self.is_side_by_side() {
             Grid::new()
-                .columns([GridLength::Star(self.primary_weight), GridLength::Star(self.secondary_weight)])
+                .columns([
+                    GridLength::Star(self.primary_weight),
+                    GridLength::Star(self.secondary_weight),
+                ])
                 .column_spacing(self.gap)
-                .keyed_children([("primary", cell(primary, 0, 0)), ("secondary", cell(secondary, 0, 1))])
+                .keyed_children([
+                    ("primary", cell(primary, 0, 0)),
+                    ("secondary", cell(secondary, 0, 1)),
+                ])
         } else {
             Grid::new()
                 .rows([GridLength::Auto, GridLength::Auto])
                 .row_spacing(self.gap)
-                .keyed_children([("primary", cell(primary, 0, 0)), ("secondary", cell(secondary, 1, 0))])
+                .keyed_children([
+                    ("primary", cell(primary, 0, 0)),
+                    ("secondary", cell(secondary, 1, 0)),
+                ])
         }
     }
 }

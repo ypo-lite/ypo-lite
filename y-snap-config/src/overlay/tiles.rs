@@ -12,9 +12,9 @@
 use super::OVERLAY_ACTIONS;
 use crate::icon_picker::{IconPickerUi, icon_field, icon_picker};
 use crate::key_events;
-use crate::ui::key_picker::{KeyPickerUi, key_picker};
 use crate::keys;
 use crate::reorder::{list_footer, row_actions};
+use crate::ui::key_picker::{KeyPickerUi, key_picker};
 use crate::ui::prelude::*;
 use crate::{ConfigApp, EditorClose, ListKind, Msg};
 use windows_reactor::*;
@@ -46,17 +46,36 @@ pub fn tiles_tab(
     let detail_viewport = table.detail_viewport(viewport).inset(CARD_INSET);
 
     let rows = overlay.items.iter().enumerate().map(|(index, item)| {
-        let detail = (editing == Some(index))
-            .then(|| tile_editor(index, item, overlay, picker, icons, detail_viewport, context));
+        let detail = (editing == Some(index)).then(|| {
+            tile_editor(
+                index,
+                item,
+                overlay,
+                picker,
+                icons,
+                detail_viewport,
+                context,
+            )
+        });
         Row::new(
             index.to_string(),
-            cells(index, item, editing == Some(index), overlay.items.len(), reordering, context),
+            cells(
+                index,
+                item,
+                editing == Some(index),
+                overlay.items.len(),
+                reordering,
+                context,
+            ),
         )
         .detail(detail)
     });
 
     Stack::vertical(space::L)
-        .child("count", text::section_title(format!("{} tiles", overlay.items.len())))
+        .child(
+            "count",
+            text::section_title(format!("{} tiles", overlay.items.len())),
+        )
         .child("table", table.rows(rows).build(viewport))
         .child(
             "add",
@@ -88,7 +107,14 @@ fn cells(
         None => text::placeholder().into(),
     };
     let tile: View = Stack::vertical(0.0)
-        .child("label", text::single_line(item.label.clone().unwrap_or_else(|| "(no label)".to_owned())))
+        .child(
+            "label",
+            text::single_line(
+                item.label
+                    .clone()
+                    .unwrap_or_else(|| "(no label)".to_owned()),
+            ),
+        )
         .child("action", text::caption(item.action.name()))
         .into();
     let group: View = match &item.group {
@@ -137,9 +163,13 @@ fn tile_editor(
 ) -> View {
     let action = OVERLAY_ACTIONS.iter().position(|a| *a == item.action);
     // Choice 0 is always "(none)" — `Msg::OverlayItemGroupChanged` reads it so.
-    let group_names = std::iter::once("(none)".to_owned()).chain(overlay.groups.iter().map(|g| g.id.clone()));
-    let group =
-        item.group.as_deref().and_then(|id| overlay.groups.iter().position(|g| g.id == id)).map_or(0, |p| p + 1);
+    let group_names =
+        std::iter::once("(none)".to_owned()).chain(overlay.groups.iter().map(|g| g.id.clone()));
+    let group = item
+        .group
+        .as_deref()
+        .and_then(|id| overlay.groups.iter().position(|g| g.id == id))
+        .map_or(0, |p| p + 1);
 
     let mut fields = AutoGrid::new(170.0)
         .max_columns(3)
@@ -178,7 +208,11 @@ fn tile_editor(
             "group",
             field(
                 "Group",
-                combo(group_names, Some(group), context.callback(move |c| Msg::OverlayItemGroupChanged(index, c))),
+                combo(
+                    group_names,
+                    Some(group),
+                    context.callback(move |c| Msg::OverlayItemGroupChanged(index, c)),
+                ),
             ),
         );
     if item.action == Action::DesktopMove {
@@ -197,18 +231,28 @@ fn tile_editor(
     }
 
     let key: View = if item.action == Action::DesktopList {
-        note("A desktop-list tile has no key of its own: it becomes one tile per virtual desktop, keyed 1, 2, 3….")
+        note(
+            "A desktop-list tile has no key of its own: it becomes one tile per virtual desktop, keyed 1, 2, 3….",
+        )
     } else {
-        section("Key", key_picker(item.key, None, picker, viewport, &key_events(context)))
+        section(
+            "Key",
+            key_picker(item.key, None, picker, viewport, &key_events(context)),
+        )
     };
 
     editor(
-        format!("Tile — {}", item.label.as_deref().unwrap_or(item.action.name())),
+        format!(
+            "Tile — {}",
+            item.label.as_deref().unwrap_or(item.action.name())
+        ),
         Stack::vertical(space::XL)
             .child("fields", fields.build(viewport))
             .maybe(
                 "icon-picker",
-                icons.open.then(|| icon_picker(item.icon.as_deref(), item.action, icons, viewport, context)),
+                icons.open.then(|| {
+                    icon_picker(item.icon.as_deref(), item.action, icons, viewport, context)
+                }),
             )
             .child("key", key),
         context.callback(|()| Msg::EditorClosed(EditorClose::Revert)),

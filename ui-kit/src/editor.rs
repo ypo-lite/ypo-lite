@@ -17,11 +17,16 @@ use crate::controls::button;
 use crate::layout::{Stack, scroll_y};
 use crate::surfaces::{CARD_INSET, card, panel};
 use crate::text;
-use crate::viewport::Viewport;
 use crate::tokens::space;
+use crate::viewport::Viewport;
 use windows_reactor::*;
 
-pub fn editor(title: impl Into<String>, body: impl Into<View>, on_cancel: Callback<()>, on_done: Callback<()>) -> View {
+pub fn editor(
+    title: impl Into<String>,
+    body: impl Into<View>,
+    on_cancel: Callback<()>,
+    on_done: Callback<()>,
+) -> View {
     let actions = Stack::horizontal(space::S)
         .child("cancel", button("Cancel", false, true, on_cancel))
         .child("done", button("Done", true, true, on_done));
@@ -59,7 +64,12 @@ pub fn modal(
     let content = Stack::vertical(space::L)
         .child("title", text::strong(title))
         .child("body", body(inner))
-        .child("buttons", Border::new().horizontal_alignment(HorizontalAlignment::Right).content(buttons));
+        .child(
+            "buttons",
+            Border::new()
+                .horizontal_alignment(HorizontalAlignment::Right)
+                .content(buttons),
+        );
     // `card()`'s own background is translucent (it lets the window's Mica show
     // through); over other content it must be opaque to be readable.
     let card = card()
@@ -71,7 +81,13 @@ pub fn modal(
         .content(content);
 
     Grid::new().keyed_children([
-        ("scrim", Border::new().background(ThemeBrush::SolidBackground).opacity(0.7).into()),
+        (
+            "scrim",
+            Border::new()
+                .background(ThemeBrush::SolidBackground)
+                .opacity(0.7)
+                .into(),
+        ),
         ("dialog", scroll_y(card)),
     ])
 }

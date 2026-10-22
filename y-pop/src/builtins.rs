@@ -16,10 +16,10 @@
 
 use std::path::Path;
 
-use y_core::known_folders::{KnownFolder, KnownFolders};
 use crate::config::{self, LoadError};
 use crate::model::ConfigTree;
 use crate::variables::Lookup;
+use y_core::known_folders::{KnownFolder, KnownFolders};
 
 /// Loads `y-pop.xml` from wherever it lives, resolving its builtins from
 /// Win32 lazily as the file is parsed. The one entry point `main` needs:

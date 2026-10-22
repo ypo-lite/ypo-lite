@@ -66,9 +66,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, DestroyMenu, GetMenuInfo, GetMenuItemCount, GetMenuItemInfoW,
     HMENU, MENU_ITEM_FLAGS, MENUINFO, MENUITEMINFOW, MF_CHECKED, MF_DISABLED, MF_GRAYED,
     MF_MENUBREAK, MF_OWNERDRAW, MF_POPUP, MF_SEPARATOR, MF_STRING, MFS_DISABLED, MFS_HILITE,
-    MFT_OWNERDRAW, MIIM_BITMAP, MIIM_DATA, MIIM_FTYPE, MIIM_STATE, MIIM_SUBMENU, MIM_BACKGROUND, PostMessageW, SetForegroundWindow,
-    SetMenuInfo, SetMenuItemInfoW, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD,
-    TPM_RIGHTBUTTON, TrackPopupMenu, WM_NULL,
+    MFT_OWNERDRAW, MIIM_BITMAP, MIIM_DATA, MIIM_FTYPE, MIIM_STATE, MIIM_SUBMENU, MIM_BACKGROUND,
+    PostMessageW, SetForegroundWindow, SetMenuInfo, SetMenuItemInfoW, TPM_BOTTOMALIGN,
+    TPM_LEFTALIGN, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, WM_NULL,
 };
 use windows::core::{HSTRING, PCWSTR, Result};
 
@@ -127,7 +127,9 @@ pub fn handle_menu_char(wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
     const MNC_EXECUTE: isize = 2;
     const MNC_SELECT: isize = 3;
 
-    let typed = char::from_u32((wparam.0 & 0xFFFF) as u32)?.to_lowercase().next()?;
+    let typed = char::from_u32((wparam.0 & 0xFFFF) as u32)?
+        .to_lowercase()
+        .next()?;
     let menu = HMENU(lparam.0 as *mut _);
 
     let mut matches = Vec::new();
@@ -457,7 +459,12 @@ impl PopupMenu {
     /// right-aligns anything after a menu item's `\t` as an accelerator
     /// hint for free; only the owner-draw path needs [`paint`] to draw one
     /// itself.
-    pub fn add_item_with_shortcut(&self, id: u32, text: &str, shortcut: Option<&str>) -> Result<()> {
+    pub fn add_item_with_shortcut(
+        &self,
+        id: u32,
+        text: &str,
+        shortcut: Option<&str>,
+    ) -> Result<()> {
         match self.design {
             Some(design) => append_owner_draw(
                 self.handle,
@@ -472,7 +479,11 @@ impl PopupMenu {
                 },
                 design,
             ),
-            None => self.append(MF_STRING, id as usize, &with_native_shortcut(text, shortcut)),
+            None => self.append(
+                MF_STRING,
+                id as usize,
+                &with_native_shortcut(text, shortcut),
+            ),
         }
     }
 
@@ -603,7 +614,11 @@ impl PopupMenu {
                 },
                 design,
             ),
-            None => self.append(MF_POPUP, handle.0 as usize, &with_native_shortcut(text, shortcut)),
+            None => self.append(
+                MF_POPUP,
+                handle.0 as usize,
+                &with_native_shortcut(text, shortcut),
+            ),
         }
     }
 
@@ -617,7 +632,11 @@ impl PopupMenu {
     }
 
     fn append(&self, flags: MENU_ITEM_FLAGS, id: usize, text: &str) -> Result<()> {
-        let flags = if self.take_break() { flags | MF_MENUBREAK } else { flags };
+        let flags = if self.take_break() {
+            flags | MF_MENUBREAK
+        } else {
+            flags
+        };
         let text = HSTRING::from(text);
         unsafe { AppendMenuW(self.handle, flags, id, PCWSTR(text.as_ptr())) }
     }
@@ -719,7 +738,15 @@ struct NewItem<'a> {
 /// `on_init_menu_popup`, populating a submenu from its raw handle — see
 /// `core::menu`'s module doc).
 fn append_owner_draw(menu: HMENU, item: NewItem, design: MenuDesign) -> Result<()> {
-    let NewItem { id, disabled, submenu, text, shortcut, kind, menu_break } = item;
+    let NewItem {
+        id,
+        disabled,
+        submenu,
+        text,
+        shortcut,
+        kind,
+        menu_break,
+    } = item;
     let separator = matches!(kind, ItemKind::Separator);
 
     let data = Box::new(ItemData {
@@ -1009,7 +1036,10 @@ mod tests {
     fn mnemonic_markers_are_stripped_for_measuring() {
         assert_eq!(without_mnemonic_markers(&wide("P&ageant")), wide("Pageant"));
         assert_eq!(without_mnemonic_markers(&wide("R&&D")), wide("R&D"));
-        assert_eq!(without_mnemonic_markers(&wide("Trailing&")), wide("Trailing"));
+        assert_eq!(
+            without_mnemonic_markers(&wide("Trailing&")),
+            wide("Trailing")
+        );
     }
 
     /// Today's exact look (see [`MenuDesign::padding`]/[`MenuDesign::
@@ -1065,7 +1095,10 @@ mod tests {
             itemData: item_data(menu, position),
         };
         let handled = handle_measure_item(LPARAM(&raw mut measure as isize));
-        assert!(handled, "a themed item's own WM_MEASUREITEM must be recognised");
+        assert!(
+            handled,
+            "a themed item's own WM_MEASUREITEM must be recognised"
+        );
         measure.itemWidth
     }
 
@@ -1076,16 +1109,21 @@ mod tests {
         let mut info: MENUITEMINFOW = unsafe { std::mem::zeroed() };
         info.cbSize = size_of::<MENUITEMINFOW>() as u32;
         info.fMask = MIIM_FTYPE | MIIM_DATA;
-        unsafe { GetMenuItemInfoW(themed.handle(), 1, false, &mut info) }.expect("GetMenuItemInfoW");
+        unsafe { GetMenuItemInfoW(themed.handle(), 1, false, &mut info) }
+            .expect("GetMenuItemInfoW");
         assert!(info.fType.contains(MFT_OWNERDRAW));
-        assert_ne!(info.dwItemData, 0, "text/kind/colours live behind dwItemData");
+        assert_ne!(
+            info.dwItemData, 0,
+            "text/kind/colours live behind dwItemData"
+        );
 
         let native = PopupMenu::new().expect("CreatePopupMenu");
         native.add_item(1, "Item").expect("add_item");
         let mut info: MENUITEMINFOW = unsafe { std::mem::zeroed() };
         info.cbSize = size_of::<MENUITEMINFOW>() as u32;
         info.fMask = MIIM_FTYPE | MIIM_DATA;
-        unsafe { GetMenuItemInfoW(native.handle(), 1, false, &mut info) }.expect("GetMenuItemInfoW");
+        unsafe { GetMenuItemInfoW(native.handle(), 1, false, &mut info) }
+            .expect("GetMenuItemInfoW");
         assert!(!info.fType.contains(MFT_OWNERDRAW));
         assert_eq!(info.dwItemData, 0);
     }
@@ -1105,14 +1143,20 @@ mod tests {
         info.cbSize = size_of::<MENUINFO>() as u32;
         info.fMask = MIM_BACKGROUND;
         unsafe { GetMenuInfo(themed.handle(), &mut info) }.expect("GetMenuInfo");
-        assert!(!info.hbrBack.is_invalid(), "a themed popup must set its own background brush");
+        assert!(
+            !info.hbrBack.is_invalid(),
+            "a themed popup must set its own background brush"
+        );
 
         let native = PopupMenu::new().expect("CreatePopupMenu");
         let mut info: MENUINFO = unsafe { std::mem::zeroed() };
         info.cbSize = size_of::<MENUINFO>() as u32;
         info.fMask = MIM_BACKGROUND;
         unsafe { GetMenuInfo(native.handle(), &mut info) }.expect("GetMenuInfo");
-        assert!(info.hbrBack.is_invalid(), "a native popup keeps the OS default, untouched");
+        assert!(
+            info.hbrBack.is_invalid(),
+            "a native popup keeps the OS default, untouched"
+        );
     }
 
     /// A submenu created through the lazy-`browse` path ([`append_submenu`],
@@ -1121,7 +1165,8 @@ mod tests {
     #[test]
     fn a_lazily_appended_themed_submenu_also_paints_its_own_background() {
         let root = PopupMenu::themed(test_design()).expect("CreatePopupMenu");
-        let submenu = append_submenu(root.handle(), "Sub", Some(test_design())).expect("append_submenu");
+        let submenu =
+            append_submenu(root.handle(), "Sub", Some(test_design())).expect("append_submenu");
 
         let mut info: MENUINFO = unsafe { std::mem::zeroed() };
         info.cbSize = size_of::<MENUINFO>() as u32;
@@ -1166,7 +1211,10 @@ mod tests {
             )
         };
         let text = String::from_utf16_lossy(&buf[..len as usize]);
-        assert_eq!(text, "Notepad\tWin+N", "Win32 right-aligns anything after a menu item's own \\t");
+        assert_eq!(
+            text, "Notepad\tWin+N",
+            "Win32 right-aligns anything after a menu item's own \\t"
+        );
     }
 
     #[test]
@@ -1192,7 +1240,10 @@ mod tests {
         // the measured width, which is exactly what keeps a mix of icon and
         // no-icon rows lining their text up in one column.
         let after = measured_width(menu.handle(), 0);
-        assert_eq!(after, before, "the icon column is reserved regardless of whether this item has an icon");
+        assert_eq!(
+            after, before,
+            "the icon column is reserved regardless of whether this item has an icon"
+        );
 
         let _ = unsafe { DeleteObject(bitmap.into()) };
     }
@@ -1206,7 +1257,8 @@ mod tests {
     fn dropping_a_themed_menu_with_nested_submenus_does_not_crash() {
         let mut root = PopupMenu::themed(test_design()).expect("CreatePopupMenu");
         root.add_item(1, "Leaf").expect("add_item");
-        root.add_titled_separator("Section").expect("add_titled_separator");
+        root.add_titled_separator("Section")
+            .expect("add_titled_separator");
 
         let inner = PopupMenu::themed(test_design()).expect("CreatePopupMenu");
         inner.add_item(2, "Nested leaf").expect("add_item");
@@ -1214,7 +1266,8 @@ mod tests {
         let raw_submenu =
             append_submenu(inner.handle(), "Raw", Some(test_design())).expect("append_submenu");
         append_item(raw_submenu, 3, "Raw leaf", Some(test_design())).expect("append_item");
-        append_disabled_item(raw_submenu, "(empty)", Some(test_design())).expect("append_disabled_item");
+        append_disabled_item(raw_submenu, "(empty)", Some(test_design()))
+            .expect("append_disabled_item");
 
         root.add_submenu("Group", inner).expect("add_submenu");
         drop(root);

@@ -18,7 +18,6 @@ pub fn open(path: &Path) {
     unsafe { ShellExecuteW(None, w!("open"), &file, None, None, SW_SHOWNORMAL) };
 }
 
-
 /// Keeps what the user copies from outliving a WinUI window the wrong way.
 ///
 /// A WinUI `TextBox` copies lazily: the clipboard holds a data object that
@@ -52,7 +51,9 @@ impl ClipboardFlusher {
             let _ = Clipboard::Flush();
             Ok(())
         });
-        Clipboard::ContentChanged(&handler).ok().map(|token| Self { token })
+        Clipboard::ContentChanged(&handler)
+            .ok()
+            .map(|token| Self { token })
     }
 }
 

@@ -619,7 +619,11 @@ fn tidy_comment(raw: &str) -> String {
     let mut tidy = first.trim_end().to_owned();
     for line in rest {
         tidy.push('\n');
-        tidy.push_str(line.strip_prefix(indent).unwrap_or(line.trim_start()).trim_end());
+        tidy.push_str(
+            line.strip_prefix(indent)
+                .unwrap_or(line.trim_start())
+                .trim_end(),
+        );
     }
     tidy
 }
@@ -947,13 +951,17 @@ mod tests {
 
     #[test]
     fn keeps_comments_around_the_root() {
-        let document =
-            Document::parse("<?xml version=\"1.0\"?>\n<!-- one -->\n\n<!-- two -->\n<a/>\n<!-- after -->")
-                .expect("valid");
+        let document = Document::parse(
+            "<?xml version=\"1.0\"?>\n<!-- one -->\n\n<!-- two -->\n<a/>\n<!-- after -->",
+        )
+        .expect("valid");
         assert_eq!(texts(document.prolog_comments()), ["one", "two"]);
         assert_eq!(texts(document.epilog_comments()), ["after"]);
 
-        let blanks: Vec<_> = document.prolog_comments().map(|c| c.blank_before()).collect();
+        let blanks: Vec<_> = document
+            .prolog_comments()
+            .map(|c| c.blank_before())
+            .collect();
         assert_eq!(blanks, [false, true]);
         assert!(!document.root().blank_before());
         assert_eq!(document.root().name(), "a");
@@ -969,10 +977,9 @@ mod tests {
 
     #[test]
     fn keeps_comments_between_children_in_order() {
-        let document = Document::parse(
-            "<a>\n\t<!-- first -->\n\t<b/>\n\n\t<!-- second -->\n\t<c/>\n</a>",
-        )
-        .expect("valid");
+        let document =
+            Document::parse("<a>\n\t<!-- first -->\n\t<b/>\n\n\t<!-- second -->\n\t<c/>\n</a>")
+                .expect("valid");
 
         let mut seen = Vec::new();
         for node in document.root().children_with_comments() {
@@ -981,10 +988,7 @@ mod tests {
                 Node::Element(e) => seen.push(format!("{} {}", e.name(), e.blank_before())),
             }
         }
-        assert_eq!(
-            seen,
-            ["#first false", "b false", "#second true", "c false"],
-        );
+        assert_eq!(seen, ["#first false", "b false", "#second true", "c false"],);
     }
 
     #[test]
@@ -1049,10 +1053,13 @@ mod tests {
         writer.open("b");
         writer.empty();
         writer.close();
-        assert_eq!(writer.finish(), "<a>
+        assert_eq!(
+            writer.finish(),
+            "<a>
 	<b/>
 </a>
-");
+"
+        );
     }
 
     #[test]

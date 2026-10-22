@@ -305,7 +305,9 @@ mod tests {
                 assert_eq!(gradient.end, Color::rgb(4, 5, 6));
                 assert_eq!(gradient.direction, menu::GradientDirection::Vertical);
             }
-            menu::Fill::Solid => panic!("expected the override's gradient, not the base theme's solid fill"),
+            menu::Fill::Solid => {
+                panic!("expected the override's gradient, not the base theme's solid fill")
+            }
         }
     }
 
@@ -355,7 +357,10 @@ mod tests {
         assert_eq!(FLAT.border.color, Color::rgb(0xa8, 0xd2, 0xfd));
         assert_eq!(FLAT.selected.text, Color::rgb(0x00, 0x00, 0x00));
         assert_eq!(FLAT.selected.back, Color::rgb(0xed, 0xf4, 0xfc));
-        assert!(matches!(FLAT.fill, menu::Fill::Solid), "PortAL's flat skin has no gradient");
+        assert!(
+            matches!(FLAT.fill, menu::Fill::Solid),
+            "PortAL's flat skin has no gradient"
+        );
 
         assert_eq!(DARK.border.size, 0);
         assert_eq!(DARK.border.round, 0);
@@ -370,9 +375,17 @@ mod tests {
             menu::Fill::Solid => panic!("PortAL's dark skin has a background gradient"),
         }
 
-        assert_eq!(DEFAULT.edge, Some(menu::EdgeRule::Idle), "design1.edge = PORTAL_ST_SEL");
+        assert_eq!(
+            DEFAULT.edge,
+            Some(menu::EdgeRule::Idle),
+            "design1.edge = PORTAL_ST_SEL"
+        );
         assert_eq!(FLAT.edge, None, "design2.edge = PORTAL_ST_NONE");
-        assert_eq!(DARK.edge, Some(menu::EdgeRule::Always), "design3.edge = PORTAL_ST_ALL");
+        assert_eq!(
+            DARK.edge,
+            Some(menu::EdgeRule::Always),
+            "design3.edge = PORTAL_ST_ALL"
+        );
 
         assert!(DEFAULT.icon_backdrop.is_none());
         assert!(FLAT.icon_backdrop.is_none());

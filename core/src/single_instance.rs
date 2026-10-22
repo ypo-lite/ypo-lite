@@ -9,7 +9,8 @@
 use windows::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, HANDLE, LPARAM, WPARAM};
 use windows::Win32::System::Threading::{CreateMutexW, OpenMutexW, SYNCHRONIZATION_SYNCHRONIZE};
 use windows::Win32::UI::WindowsAndMessaging::{
-    FindWindowW, HWND_BROADCAST, IsIconic, PostMessageW, SW_RESTORE, SetForegroundWindow, ShowWindow,
+    FindWindowW, HWND_BROADCAST, IsIconic, PostMessageW, SW_RESTORE, SetForegroundWindow,
+    ShowWindow,
 };
 use windows::core::{Error, HSTRING, PCWSTR, Result};
 
@@ -122,7 +123,9 @@ mod tests {
         let name = format!("YpoLite.Test.IsRunning.{}", std::process::id());
         assert!(!is_running(&name));
 
-        let guard = SingleInstance::acquire(&name).expect("creates").expect("first holder");
+        let guard = SingleInstance::acquire(&name)
+            .expect("creates")
+            .expect("first holder");
         assert!(is_running(&name));
 
         drop(guard);

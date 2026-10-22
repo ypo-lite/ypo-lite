@@ -19,9 +19,17 @@ pub fn min_width() -> f64 {
     Table::new(&COLUMNS).min_width()
 }
 
-pub fn groups_tab(overlay: &Overlay, reordering: bool, viewport: Viewport, context: &ViewContext<ConfigApp>) -> View {
+pub fn groups_tab(
+    overlay: &Overlay,
+    reordering: bool,
+    viewport: Viewport,
+    context: &ViewContext<ConfigApp>,
+) -> View {
     let rows = overlay.groups.iter().enumerate().map(|(index, group)| {
-        Row::new(group.id.clone(), cells(index, group, overlay.groups.len(), reordering, context))
+        Row::new(
+            group.id.clone(),
+            cells(index, group, overlay.groups.len(), reordering, context),
+        )
     });
 
     Stack::vertical(space::L)
@@ -52,12 +60,27 @@ pub fn groups_tab(overlay: &Overlay, reordering: bool, viewport: Viewport, conte
         .into()
 }
 
-fn cells(index: usize, group: &Group, count: usize, reordering: bool, context: &ViewContext<ConfigApp>) -> Vec<View> {
-    let number = |value: Option<u32>, maximum: f64, message: fn(usize, Option<f64>) -> Msg| -> View {
-        number_box(value.map(f64::from), 1.0, maximum, context.callback(move |v| message(index, v))).into()
-    };
+fn cells(
+    index: usize,
+    group: &Group,
+    count: usize,
+    reordering: bool,
+    context: &ViewContext<ConfigApp>,
+) -> Vec<View> {
+    let number =
+        |value: Option<u32>, maximum: f64, message: fn(usize, Option<f64>) -> Msg| -> View {
+            number_box(
+                value.map(f64::from),
+                1.0,
+                maximum,
+                context.callback(move |v| message(index, v)),
+            )
+            .into()
+        };
     vec![
-        text::strong(group.id.clone()).vertical_alignment(VerticalAlignment::Center).into(),
+        text::strong(group.id.clone())
+            .vertical_alignment(VerticalAlignment::Center)
+            .into(),
         number(group.columns, 20.0, Msg::OverlayGroupColumnsChanged),
         number(group.tile_width, 400.0, Msg::OverlayGroupTileWidthChanged),
         number(group.tile_height, 400.0, Msg::OverlayGroupTileHeightChanged),
@@ -66,7 +89,13 @@ fn cells(index: usize, group: &Group, count: usize, reordering: bool, context: &
             index,
             count,
             reordering,
-            || icon_button(Symbol::Delete, "Delete group", context.callback(move |()| Msg::OverlayGroupDeleted(index))),
+            || {
+                icon_button(
+                    Symbol::Delete,
+                    "Delete group",
+                    context.callback(move |()| Msg::OverlayGroupDeleted(index)),
+                )
+            },
             context,
         ),
     ]
@@ -74,5 +103,8 @@ fn cells(index: usize, group: &Group, count: usize, reordering: bool, context: &
 
 /// A fresh `group-N` id, not already used by an existing group.
 pub fn next_group_id(groups: &[Group]) -> String {
-    (1..).map(|n| format!("group-{n}")).find(|id| !groups.iter().any(|g| &g.id == id)).expect("infinite iterator")
+    (1..)
+        .map(|n| format!("group-{n}"))
+        .find(|id| !groups.iter().any(|g| &g.id == id))
+        .expect("infinite iterator")
 }

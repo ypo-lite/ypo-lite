@@ -57,21 +57,36 @@ const MIN_SCALE: f64 = 0.4;
 
 pub fn overlay_preview(overlay: &Overlay, viewport: Viewport) -> View {
     let sections = sections(overlay);
-    let natural = sections.iter().map(Section::natural_width).fold(0.0, f64::max);
-    let available = viewport.inset(CARD_INSET).inset(STAGE_PADDING + size::STROKE).width;
-    let scale = if natural > 0.0 { (available / natural).clamp(MIN_SCALE, 1.0) } else { 1.0 };
+    let natural = sections
+        .iter()
+        .map(Section::natural_width)
+        .fold(0.0, f64::max);
+    let available = viewport
+        .inset(CARD_INSET)
+        .inset(STAGE_PADDING + size::STROKE)
+        .width;
+    let scale = if natural > 0.0 {
+        (available / natural).clamp(MIN_SCALE, 1.0)
+    } else {
+        1.0
+    };
 
-    let stage = Stack::vertical(space::S).children(sections.iter().enumerate().map(|(index, section)| {
-        let grid = preview_grid(section, overlay, scale);
-        let view: View = match section.title {
-            Some(title) => Stack::vertical(space::XS)
-                .child("title", text::caption(title.to_owned()).foreground(to_ui_color(overlay.palette.text)))
-                .child("grid", grid)
-                .into(),
-            None => grid,
-        };
-        (index, view)
-    }));
+    let stage =
+        Stack::vertical(space::S).children(sections.iter().enumerate().map(|(index, section)| {
+            let grid = preview_grid(section, overlay, scale);
+            let view: View = match section.title {
+                Some(title) => Stack::vertical(space::XS)
+                    .child(
+                        "title",
+                        text::caption(title.to_owned())
+                            .foreground(to_ui_color(overlay.palette.text)),
+                    )
+                    .child("grid", grid)
+                    .into(),
+                None => grid,
+            };
+            (index, view)
+        }));
 
     let stage: View = Border::new()
         .padding(Thickness::uniform(STAGE_PADDING))
@@ -85,7 +100,11 @@ pub fn overlay_preview(overlay: &Overlay, viewport: Viewport) -> View {
         .child("dot", dot(ThemeBrush::Accent))
         .child(
             "text",
-            text::caption(if scale < 1.0 { format!("Live · {:.0}%", scale * 100.0) } else { "Live".to_owned() }),
+            text::caption(if scale < 1.0 {
+                format!("Live · {:.0}%", scale * 100.0)
+            } else {
+                "Live".to_owned()
+            }),
         )
         .into();
 
@@ -99,14 +118,23 @@ fn with_alpha(color: y_core::overlay::Color, alpha: u8) -> y_core::overlay::Colo
 fn sections(overlay: &Overlay) -> Vec<Section<'_>> {
     let mut sections = vec![Section {
         title: None,
-        tiles: overlay.items.iter().filter(|item| item.group.is_none()).map(Tile::Item).collect(),
+        tiles: overlay
+            .items
+            .iter()
+            .filter(|item| item.group.is_none())
+            .map(Tile::Item)
+            .collect(),
         columns: overlay.columns,
         tile: overlay.tile,
     }];
 
     for group in &overlay.groups {
         let mut tiles = Vec::new();
-        for item in overlay.items.iter().filter(|item| item.group.as_deref() == Some(group.id.as_str())) {
+        for item in overlay
+            .items
+            .iter()
+            .filter(|item| item.group.as_deref() == Some(group.id.as_str()))
+        {
             if item.action == Action::DesktopList {
                 tiles.extend(["1", "2", "3", "+", "◀", "▶"].map(Tile::Glyph));
             } else {
@@ -118,7 +146,10 @@ fn sections(overlay: &Overlay) -> Vec<Section<'_>> {
                 title: Some(&group.id),
                 tiles,
                 columns: group.columns.unwrap_or(overlay.columns),
-                tile: (group.tile_width.unwrap_or(overlay.tile.0), group.tile_height.unwrap_or(overlay.tile.1)),
+                tile: (
+                    group.tile_width.unwrap_or(overlay.tile.0),
+                    group.tile_height.unwrap_or(overlay.tile.1),
+                ),
             });
         }
     }
@@ -134,7 +165,14 @@ fn preview_grid(section: &Section<'_>, overlay: &Overlay, scale: f64) -> View {
     let (width, height) = (section.tile.0 as f64 * scale, section.tile.1 as f64 * scale);
 
     let cells = section.tiles.iter().enumerate().map(|(index, tile)| {
-        (index, cell(preview_tile(tile, overlay, width, height, scale), index / columns, index % columns))
+        (
+            index,
+            cell(
+                preview_tile(tile, overlay, width, height, scale),
+                index / columns,
+                index % columns,
+            ),
+        )
     });
 
     Grid::new()
@@ -172,7 +210,12 @@ fn preview_tile(tile: &Tile<'_>, overlay: &Overlay, width: f64, height: f64, sca
                 .opacity(emphasis::MUTED)
                 .horizontal_alignment(HorizontalAlignment::Left)
                 .vertical_alignment(VerticalAlignment::Top)
-                .margin(Thickness::new(KEY_INSET.0 * scale, KEY_INSET.1 * scale, 0.0, 0.0))
+                .margin(Thickness::new(
+                    KEY_INSET.0 * scale,
+                    KEY_INSET.1 * scale,
+                    0.0,
+                    0.0,
+                ))
                 .into(),
         ),
         (
@@ -211,7 +254,9 @@ fn preview_tile(tile: &Tile<'_>, overlay: &Overlay, width: f64, height: f64, sca
     Border::new()
         .width(width)
         .height(height)
-        .corner_radius(CornerRadius::uniform(overlay.corner_radius.min(6) as f64 * scale))
+        .corner_radius(CornerRadius::uniform(
+            overlay.corner_radius.min(6) as f64 * scale,
+        ))
         .background(to_ui_color(palette.back))
         .content(content)
 }
