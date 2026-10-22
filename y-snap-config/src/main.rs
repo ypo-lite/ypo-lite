@@ -434,6 +434,7 @@ impl Component for ConfigApp {
                 save_tooltip: "Rewrites y-snap.xml from these settings. Comments and hand formatting in the file \
                                aren't kept.",
                 extra: None,
+                tools: None,
             },
             context.callback(|()| Msg::Reload),
             context.callback(|()| Msg::Save),

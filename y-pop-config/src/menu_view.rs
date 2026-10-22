@@ -31,7 +31,14 @@ pub struct MenuUi<'a> {
 }
 
 /// Each level of nesting indents a row by this much.
-const INDENT: f64 = space::L;
+const INDENT: f64 = space::M;
+
+/// How far a row at `depth` is indented. The menu itself (depth 0) is the
+/// outline's heading and its items start flush left, so only what is inside a
+/// group is indented.
+fn indent_of(depth: usize) -> f64 {
+    depth.saturating_sub(1) as f64 * INDENT
+}
 /// The room the expand button takes at the start of a row, empty or not.
 const EXPAND_SLOT: f64 = size::ICON_BUTTON;
 /// Narrowest the outline and the inspector are useful at, side by side.
@@ -62,14 +69,61 @@ pub fn menu_view(settings: &Settings, ui: &MenuUi<'_>, viewport: Viewport, conte
          selected row, or inside a selected open group."
     );
 
-    let split = Split::new(viewport).min_widths(TREE_MIN, INSPECTOR_MIN).weights(1.0, 1.0);
-    let outline = outline_pane(settings, ui, split.primary(), context);
-    let inspector = crate::inspector::inspector_view(settings, ui, ui.selected, split.secondary(), context);
+    let split = split(viewport);
+    if split.is_side_by_side() {
+        // Pinned: the page doesn't scroll. The outline scrolls its rows under
+        // its toolbar, and the inspector scrolls on its own.
+        let outline = outline_pane(settings, ui, split.primary(), true, context);
+        let inspector = pane_scroll(crate::inspector::inspector_view(
+            settings,
+            ui,
+            ui.selected,
+            pane_viewport(split.secondary()),
+            context,
+        ));
+        let header = page(&roots::label(root), &lede, View::empty());
+        return Grid::new()
+            .rows([GridLength::Auto, GridLength::STAR])
+            .row_spacing(space::XL)
+            .keyed_children([("header", cell(header, 0, 0)), ("panes", cell(split.build(outline, inspector), 1, 0))]);
+    }
 
+    let outline = outline_pane(settings, ui, split.primary(), false, context);
+    let inspector = crate::inspector::inspector_view(settings, ui, ui.selected, split.secondary(), context);
     page(&roots::label(root), &lede, split.build(outline, inspector))
 }
 
-fn outline_pane(settings: &Settings, ui: &MenuUi<'_>, viewport: Viewport, context: &ViewContext<ConfigApp>) -> View {
+fn split(viewport: Viewport) -> Split {
+    Split::new(viewport).min_widths(TREE_MIN, INSPECTOR_MIN).weights(1.0, 1.0)
+}
+
+/// Whether the screen shows the outline and the inspector side by side, each
+/// scrolling on its own — then the page around it must not scroll
+/// (`shell::page_frame_pinned`).
+pub fn is_pinned(settings: &Settings, root: ItemId, viewport: Viewport) -> bool {
+    tree::item(settings, root).is_some_and(|root| root.kind == ItemKind::Group) && split(viewport).is_side_by_side()
+}
+
+/// What a pane's scrollbar takes from its width, so it never covers a card.
+const SCROLLBAR: f64 = space::M;
+
+fn pane_viewport(viewport: Viewport) -> Viewport {
+    Viewport::new(viewport.width - SCROLLBAR)
+}
+
+fn pane_scroll(pane: View) -> View {
+    scroll_y(Border::new().padding(Thickness::new(0.0, 0.0, SCROLLBAR, 0.0)).content(pane))
+}
+
+/// `pinned`: the pane has the window's height to itself, and scrolls its rows
+/// under a fixed toolbar.
+fn outline_pane(
+    settings: &Settings,
+    ui: &MenuUi<'_>,
+    viewport: Viewport,
+    pinned: bool,
+    context: &ViewContext<ConfigApp>,
+) -> View {
     // What the toolbar gets: the card's own width, inside its padding.
     let inner = viewport.inset(CARD_INSET);
     let at = tree::insertion_point(settings, ui.root, Some(ui.selected), ui.collapsed);
@@ -78,7 +132,7 @@ fn outline_pane(settings: &Settings, ui: &MenuUi<'_>, viewport: Viewport, contex
     let mut outline = Stack::vertical(space::XXS);
     let mut other = 0;
     for row in &rows {
-        let indent = row.depth as f64 * INDENT;
+        let indent = indent_of(row.depth);
         match &row.kind {
             TreeRowKind::Item { id, hidden_comments } => {
                 if let Some(item) = tree::item(settings, *id) {
@@ -101,19 +155,22 @@ fn outline_pane(settings: &Settings, ui: &MenuUi<'_>, viewport: Viewport, contex
         }
     }
 
-    let comments = tree::count_comments(settings, ui.root);
+    // Showing comments is a toggle in the status bar, not here.
     let toolbar = Stack::vertical(space::S)
         .child("add", add_row(inner, context))
-        .maybe("more", ui.more_open.then(|| more_row(inner, context)))
-        .child(
-            "comments",
-            labeled_switch(
-                &format!("Show comments ({comments})"),
-                ui.show_comments,
-                context.callback(Msg::ShowCommentsToggled),
-            ),
-        );
+        .maybe("more", ui.more_open.then(|| more_row(inner, context)));
 
+    if pinned {
+        // The toolbar stays put; only the rows scroll under it, so a new item
+        // can be added wherever the selection is.
+        let rows = scroll_y(Border::new().padding(Thickness::new(0.0, 0.0, SCROLLBAR, 0.0)).content(outline));
+        return card().content(
+            Grid::new()
+                .rows([GridLength::Auto, GridLength::STAR])
+                .row_spacing(space::M)
+                .keyed_children([("toolbar", cell(toolbar, 0, 0)), ("rows", cell(rows, 1, 0))]),
+        );
+    }
     card().content(Stack::vertical(space::M).child("toolbar", toolbar).child("rows", outline))
 }
 
@@ -177,11 +234,13 @@ fn item_row(
 ) -> View {
     let id = item.id;
     let selected = ui.selected == id;
-    let indent = depth as f64 * INDENT;
+    let indent = indent_of(depth);
 
     // Groups below the menu itself fold; everything else has an empty slot of
-    // the same width, so names line up.
-    let expand: View = if item.kind == ItemKind::Group && depth > 0 {
+    // the same width, so names line up. The menu's own row has no slot.
+    let expand: View = if depth == 0 {
+        Border::new().width(0.0).into()
+    } else if item.kind == ItemKind::Group {
         let open = !ui.collapsed.contains(&id);
         Button::new()
             .style(ButtonStyle::Subtle)

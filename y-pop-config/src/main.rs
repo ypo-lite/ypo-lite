@@ -377,11 +377,23 @@ impl Component for ConfigApp {
         // be anywhere in the file.
         let banner = (!settings.warnings.is_empty() && !self.warnings_dismissed)
             .then(|| warnings_banner(&settings.warnings, context.callback(|()| Msg::WarningsDismissed)));
-        let screen: View = Stack::vertical(space::L).maybe("warnings", banner).child("screen", screen).into();
+        // A tray menu shown as two panes scrolls them itself: the page stays
+        // put, and gives the screen the window's height.
+        let pinned = matches!(self.screen, Screen::Menu(id) if menu_view::is_pinned(settings, id, viewport));
+        let page: View = if pinned {
+            let screen = Grid::new().rows([GridLength::Auto, GridLength::STAR]).row_spacing(space::L).keyed_children([
+                ("warnings", cell(banner.unwrap_or_else(View::empty), 0, 0)),
+                ("screen", cell(screen, 1, 0)),
+            ]);
+            shell::page_frame_pinned(screen, layout)
+        } else {
+            let screen: View = Stack::vertical(space::L).maybe("warnings", banner).child("screen", screen).into();
+            shell::page_frame(screen, layout)
+        };
 
         let mut slots = vec![
             SlotView::collection(NavigationViewSlot::MenuItems, self.nav_items(settings)),
-            SlotView::new(NavigationViewSlot::Content, shell::page_frame(screen, layout)),
+            SlotView::new(NavigationViewSlot::Content, page),
         ];
         // The file path only fits a labelled pane; on the icon rail it's in
         // the status tooltip instead.
@@ -702,6 +714,25 @@ impl ConfigApp {
         }
     }
 
+    /// The "show comments" toggle, on the screens that have comments to show.
+    fn bar_tools(&self, settings: &Settings, context: &ViewContext<Self>) -> Option<View> {
+        let count = match self.screen {
+            Screen::Menu(id) => tree::count_comments(settings, id),
+            Screen::Variables => variables::count_comments(settings),
+            _ => return None,
+        };
+        let on = self.prefs.show_comments;
+        let tooltip = format!("{} comments ({count})", if on { "Hide" } else { "Show" });
+        Some(
+            ToggleButton::new()
+                .is_checked(on)
+                .min_width(0.0)
+                .on_is_checked_changed(context.callback(Msg::ShowCommentsToggled))
+                .content(SymbolIcon::new().symbol(Symbol::Comment))
+                .tooltip(tooltip),
+        )
+    }
+
     /// The bar along the bottom: status, an inline question or an Undo
     /// beside the buttons, Reload, Save.
     fn bar(&self, status: &str, healthy: bool, settings: Option<&Settings>, context: &ViewContext<Self>) -> View {
@@ -733,6 +764,7 @@ impl ConfigApp {
                                can't load are kept; only the layout is regenerated. The first save of a session keeps \
                                the old file as y-pop.xml.bak.",
                 extra,
+                tools: settings.and_then(|settings| self.bar_tools(settings, context)),
             },
             context.callback(|()| Msg::Reload),
             context.callback(|()| Msg::Save),

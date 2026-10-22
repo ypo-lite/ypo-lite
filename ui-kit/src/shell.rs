@@ -62,6 +62,13 @@ pub fn page_frame(screen: View, layout: ShellLayout) -> View {
     scroll_y(Border::new().padding(Thickness::xy(layout.page_padding, space::XL)).content(screen))
 }
 
+/// Like [`page_frame`], but without the scroll: for a screen that scrolls
+/// its own panes so the others stay in view. The screen gets the window's
+/// height and must give it to something (a `Star` row), or nothing scrolls.
+pub fn page_frame_pinned(screen: View, layout: ShellLayout) -> View {
+    Border::new().padding(Thickness::xy(layout.page_padding, space::XL)).content(screen)
+}
+
 /// What [`action_bar`] shows besides the buttons every app has.
 pub struct BarStatus<'a> {
     pub text: &'a str,
@@ -76,12 +83,15 @@ pub struct BarStatus<'a> {
     /// Shown between the status and the buttons: an Undo link, an inline
     /// confirmation.
     pub extra: Option<View>,
+    /// Small controls for the screen showing (a "show comments" toggle),
+    /// right after the status.
+    pub tools: Option<View>,
 }
 
 /// The status / Reload / Save bar along the bottom of the window — one for
 /// the whole app, so an edit on one screen can be saved from another.
 pub fn action_bar(bar: BarStatus<'_>, on_reload: Callback<()>, on_save: Callback<()>) -> View {
-    let BarStatus { text: status, detail: status_detail, healthy, dirty, save_tooltip, extra } = bar;
+    let BarStatus { text: status, detail: status_detail, healthy, dirty, save_tooltip, extra, tools } = bar;
     let status: View = Stack::horizontal(space::S)
         .child("dot", dot(if healthy { ThemeBrush::Accent } else { ThemeBrush::SystemCritical }))
         .child("text", text::single_line(status).vertical_alignment(VerticalAlignment::Center))
@@ -92,14 +102,17 @@ pub fn action_bar(bar: BarStatus<'_>, on_reload: Callback<()>, on_save: Callback
     // after the buttons and trims, instead of pushing them off the window.
     let status_cell = Border::new().vertical_alignment(VerticalAlignment::Center).grid_column(0).content(status);
     let mut cells: Vec<(&str, View)> = vec![("status", status_cell)];
-    if let Some(extra) = extra {
-        cells.push(("extra", cell(extra, 0, 1)));
+    if let Some(tools) = tools {
+        cells.push(("tools", cell(tools, 0, 1)));
     }
-    cells.push(("reload", cell(button("Reload from disk", false, true, on_reload), 0, 2)));
-    cells.push(("save", cell(button("Save", true, dirty, on_save).tooltip(save_tooltip), 0, 3)));
+    if let Some(extra) = extra {
+        cells.push(("extra", cell(extra, 0, 2)));
+    }
+    cells.push(("reload", cell(button("Reload from disk", false, true, on_reload), 0, 3)));
+    cells.push(("save", cell(button("Save", true, dirty, on_save).tooltip(save_tooltip), 0, 4)));
 
     let row: View = Grid::new()
-        .columns([GridLength::STAR, GridLength::Auto, GridLength::Auto, GridLength::Auto])
+        .columns([GridLength::STAR, GridLength::Auto, GridLength::Auto, GridLength::Auto, GridLength::Auto])
         .column_spacing(space::S)
         .keyed_children(cells);
 

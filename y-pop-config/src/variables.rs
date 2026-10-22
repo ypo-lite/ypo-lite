@@ -14,6 +14,11 @@ use crate::ui::prelude::*;
 use crate::{ConfigApp, Msg};
 use windows_reactor::*;
 
+/// How many comments the variables list holds, shown or not.
+pub fn count_comments(settings: &Settings) -> usize {
+    settings.variables.iter().filter(|entry| matches!(entry, VarEntry::Comment(_))).count()
+}
+
 /// What the screen remembers between renders.
 #[derive(Clone, Default, Debug)]
 pub struct VariablesUi {
@@ -125,7 +130,6 @@ pub fn variables_view(
 
     let toolbar: View = Stack::horizontal(space::L)
         .child("add", add_button("Add variable", context.callback(|()| Msg::VarAdded)))
-        .child("comments", labeled_switch("Show comments", show_comments, context.callback(Msg::ShowCommentsToggled)))
         .into();
 
     page(
