@@ -51,7 +51,7 @@ until the user commits it**: check `git status` first.
    Mark each 👁 row ✅ (or note what is wrong) in this file and in
    `ui-checklist.md`.
 2. **Then phase 6**, in this order:
-   1. 6.6's prerequisite first: move `key_picker.rs` (and the generic half of
+   1. (Done.) 6.6's prerequisite: move `key_picker.rs` (and the generic half of
       `reorder.rs`) from `y-snap-config` into `ui-kit`, made callback-based so
       it no longer names `ConfigApp`/`Msg`; `y-snap-config` then uses it from
       there. This is the one place where `y-snap-config` is touched: run it
@@ -60,7 +60,7 @@ until the user commits it**: check `git status` first.
       readout, launch fields, folder fields, Store field, Run now). The basic
       app form in `inspector.rs` is the thing to grow. Resolving paths needs
       `y_pop::variables::expand` with `ConfigApp::builtins` (a `RefCell`).
-   3. 6.6 hotkeys, replacing the read-only keycaps (`hotkeys_line`).
+   3. 6.6 hotkeys — done (see the table).
 3. Read, before touching UI: `CLAUDE.md`, this file, `spec.md` (§5 holds the
    decisions), `ui-checklist.md`, and **`ui-kit/docs/ui-toolkit.md`, whose
    trap table has the WinUI surprises we already paid for** (multi-line
@@ -279,7 +279,7 @@ move buttons alone, saved, and y-pop shows the same menu.
 | 6.3 | Launch fields | ⬜ | Arguments with a "Clipboard" insert and its "read at launch" note; Start in; Run as administrator; Launch through the shell as a tri-state showing the inherited value; run at y-pop start / exit. |
 | 6.4 | Folder fields | ⬜ | Filter, depth (0–200) with a plain-language readout ("files only", "1 level of subfolders"), and the open-folder entry. |
 | 6.5 | Store app field | ⬜ | `ComboBox` of installed Store apps (needs the enumeration from 8.5; free text until then). |
-| 6.6 | Hotkeys | ⬜ | **Prerequisite done:** `ui_kit::key_picker` (`key_picker`, `KeyPickerUi`, `KeyPickerEvents` callbacks) is shared, and `y-snap-config` uses it. The generic half of `reorder` is left in `y-snap-config`: its controls are already in `ui-kit`, and the rest only names `Msg`. Keycaps list, "Add hotkey" opening the shared `key_picker` under the row, a per-binding Override switch, remove. Conflict check across the whole file (same combo twice) as a warning marker. |
+| 6.6 | Hotkeys | 👁 | Keycaps list per item with Edit, a per-binding Override switch, Remove (undoable) and "Add hotkey". **As built:** `ui_kit::key_picker` (`key_picker`, `KeyPickerUi`, `KeyPickerEvents`) is shared and `y-snap-config` uses it; the generic half of `reorder` stayed in `y-snap-config` (its controls are already in `ui-kit`, the rest only names `Msg`). `y_core::Hotkey` gained `with_key` / `toggled`, used by both config apps. Edit opens the picker in `ui_kit::editor::modal`, an overlay up to 860px wide (a `ContentDialog` can't exceed ~548px and this crate can't resize it) with OK / Cancel: OK needs a key, Cancel restores the old text or drops a new hotkey. The text stays what the file says: `menu_edit::split_hotkey` / `join_hotkey` convert to modifiers + key and back (modifiers alone are kept as `Win+Ctrl` until a key is chosen). A combination used twice shows "Also used by X" under the hotkey. **Not done:** the outline-row marker for duplicates (11.1); Esc / Tab trapping for the modal (no key events). |
 | 6.7 | Run now | ⬜ | Calls the library's `launch` (2.6) with the expanded app and the current clipboard; any error goes to the status bar. |
 
 ---

@@ -73,6 +73,8 @@ Every 👁 row is checked by resizing a real window across the thresholds:
 | 15 | Side by side, the page doesn't scroll: the panes do | 👁 | `menu_view::is_pinned` → `page_frame_pinned`; the header and the warnings banner stay on top. The outline card fills the height; its toolbar is fixed and only the rows scroll under it. The inspector scrolls on its own. Check the toolbar and the inspector stay in view after scrolling a long menu and selecting a row far down. |
 | 16 | Scrollbars don't cover the cards | 👁 | Each scrolling pane keeps `SCROLLBAR` (12px) free on its right: a guess, check it on the rows and on the inspector. |
 | 17 | Stacked, the whole page scrolls as before | 👁 | Below the `Split` minimums (≈ 620px of content) the outline's toolbar scrolls with it. Check the switch both ways keeps the selection and focus. |
+| 18 | Hotkeys: edit in a modal, Cancel really cancels | 👁 | Edit / "Add hotkey" opens `editor::modal` (overlay over the whole window, up to 860px) holding the shared `key_picker`. OK is disabled until a key is chosen; Cancel restores the old text, or drops a hotkey just added. Edits show live behind it. Check the card is opaque and readable on Mica, that it scrolls in a short window, that category tabs/key grid reflow with the window width, and that the search box and chips update while it is open. Known: Tab can reach controls behind it and Esc does not cancel (no key events in `windows-reactor`). Unit-tested: `menu_tests` (build/override/remove/undo, cancel). |
+| 19 | A combination used twice is flagged | 👁 | Under the hotkey: "Also used by X: only one of them will work." (compared case- and order-insensitively through `Hotkey::parse`). **Not done:** the marker on the outline row (11.1). |
 
 ## Placeholder screens
 

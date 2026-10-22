@@ -205,7 +205,7 @@ documented defaults; confirm them on a live run if one looks off.
 ` shows as no break | A multi-line note renders as its first line only | `text_area()` converts both ways, so app code keeps `
 ` |
 | A `TextBox` copy is a lazy clipboard entry that calls back into the app when pasted | After Ctrl+C, closing the window leaves the process stalling for some seconds and then ending with `0xc0000005` (access violation). Flushing *at exit* doesn't help — the runtime that would answer is already gone — and itself stalls | Hold a `y_core::shell::ClipboardFlusher` in the main component (`start()` in `create`): it flushes on the clipboard's change event, while the window is alive, so nothing lazy is left at exit. Untested remedy: confirm live. |
-| `ContentDialog` max width ~548px, `Flyout` width follows its anchor | Pickers cramped | Editors are inline page content (`editor`), never popups |
+| `ContentDialog` max width ~548px, `Flyout` width follows its anchor | Pickers cramped | Editors are inline page content (`editor`); if one truly needs a popup, `editor::modal` (an overlay, no Esc/Tab trap) |
 | `VariableSizedWrapGrid` has one fixed item height | Cards clip when their text wraps | `AutoGrid` (rows are `Auto`) |
 | Fixed-pixel content in a vertical-only scroller | Clipped with no scrollbar | Rule 4: reflow or scale, never rely on sideways scrolling |
 

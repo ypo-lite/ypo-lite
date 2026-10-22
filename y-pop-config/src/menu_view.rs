@@ -29,7 +29,6 @@ pub struct MenuUi<'a> {
     pub show_comments: bool,
     /// "Delete this tray menu?" is waiting for an answer.
     pub confirming_delete: bool,
-    pub hotkeys: &'a HotkeyUi,
 }
 
 /// The hotkey picker dialog: which hotkey (item, position) it is open on, if any,

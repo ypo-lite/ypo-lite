@@ -371,7 +371,6 @@ impl Component for ConfigApp {
                     show_xml: self.show_xml,
                     show_comments: self.prefs.show_comments,
                     confirming_delete: self.confirming_delete == Some(id),
-                    hotkeys: &self.hotkeys,
                 },
                 viewport,
                 context,
@@ -421,7 +420,13 @@ impl Component for ConfigApp {
         let bar = self.bar(&status, healthy, Some(settings), context);
 
         // Nav takes the height the bar doesn't (`Star` over `Auto`).
-        Grid::new().rows([GridLength::STAR, GridLength::Auto]).keyed_children([("nav", nav), ("bar", bar)])
+        let app: View = Grid::new().rows([GridLength::STAR, GridLength::Auto]).keyed_children([("nav", nav), ("bar", bar)]);
+
+        // The hotkey picker covers the whole window, bar included.
+        match inspector::hotkey_modal(settings, &self.hotkeys, Viewport::new(self.window_width), context) {
+            Some(modal) => Grid::new().keyed_children([("app", app), ("modal", modal)]),
+            None => app,
+        }
     }
 }
 

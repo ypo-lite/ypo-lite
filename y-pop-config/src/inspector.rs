@@ -12,9 +12,10 @@
 use y_pop::settings::{Item, ItemId, ItemKind, Settings};
 
 use crate::menu_edit::{FlagField, MenuMsg, TextField, canonical_hotkey, split_hotkey};
-use crate::menu_view::{MenuUi, symbol_of};
+use crate::menu_view::{HotkeyUi, MenuUi, symbol_of};
 use crate::tree::{self, MoveDir};
 use crate::ui::key_picker::{KeyPickerEvents, combo_labels, key_picker};
+use crate::ui::editor::modal;
 use crate::ui::prelude::*;
 use crate::{ConfigApp, Msg, roots};
 use windows_reactor::*;
@@ -61,7 +62,7 @@ pub fn inspector_view(
     }
 
     // One key per item: switching to another starts every box fresh.
-    body = body.child(format!("fields-{}", id.get()), fields(settings, ui, item, is_root, inner, context));
+    body = body.child(format!("fields-{}", id.get()), fields(settings, item, is_root, inner, context));
     body = body.child("xml", xml_preview(item, ui, context));
 
     card().content(body)
@@ -188,7 +189,7 @@ fn confirm_delete(id: ItemId, context: &ViewContext<ConfigApp>) -> View {
 
 // ---- fields ----------------------------------------------------------
 
-fn fields(settings: &Settings, ui: &MenuUi<'_>, item: &Item, is_root: bool, viewport: Viewport, context: &ViewContext<ConfigApp>) -> View {
+fn fields(settings: &Settings, item: &Item, is_root: bool, viewport: Viewport, context: &ViewContext<ConfigApp>) -> View {
     let id = item.id;
     let text_of = move |field: TextField| context.callback(move |text: String| Msg::Menu(MenuMsg::Text(id, field, text)));
     let name = |placeholder: &str| {
@@ -222,7 +223,7 @@ fn fields(settings: &Settings, ui: &MenuUi<'_>, item: &Item, is_root: bool, view
             Stack::vertical(space::L)
                 .child("fields", grid(vec![("name", name("Name in the menu")), ("target", target), ("tooltip", tooltip()), ("icon", icon())]))
                 .child("default", flag("Default item (shown in bold)", FlagField::Default, item.default))
-                .child("hotkeys", hotkeys_section(settings, ui, item, context))
+                .child("hotkeys", hotkeys_section(settings, item, context))
                 .child("more", text::caption("Arguments, the working folder and the launch options come with the full app form."))
                 .maybe("menu", is_root.then(|| turn_into_menu(id, context)))
                 .into()
@@ -272,7 +273,7 @@ fn fields(settings: &Settings, ui: &MenuUi<'_>, item: &Item, is_root: bool, view
             Stack::vertical(space::L)
                 .child("fields", grid(vec![("name", name("Name in the menu")), ("tooltip", tooltip()), ("icon", icon()), ("shortcuts", shortcuts), ("style", style)]))
                 .child("switches", switches)
-                .child("hotkeys", hotkeys_section(settings, ui, item, context))
+                .child("hotkeys", hotkeys_section(settings, item, context))
                 .into()
         }
 
@@ -287,7 +288,7 @@ fn fields(settings: &Settings, ui: &MenuUi<'_>, item: &Item, is_root: bool, view
                 .child("fields", grid(vec![("name", name(placeholder)), ("icon", icon())]))
                 .child("default", flag("Default item (shown in bold)", FlagField::Default, item.default));
             if is_root {
-                form = form.child("hotkeys", hotkeys_section(settings, ui, item, context)).child("menu", turn_into_menu(id, context));
+                form = form.child("hotkeys", hotkeys_section(settings, item, context)).child("menu", turn_into_menu(id, context));
             }
             form.into()
         }
@@ -302,17 +303,12 @@ fn turn_into_menu(id: ItemId, context: &ViewContext<ConfigApp>) -> View {
         .into()
 }
 
-/// Width the picker gets inside its dialog: `ContentDialog`'s ~548px, less
-/// its padding and the scrollbar. The picker wraps to what it is given.
-const PICKER_DIALOG_WIDTH: f64 = 480.0;
-
 /// The item's hotkeys: each as keycaps with Edit (opens the shared key picker
 /// in a dialog), an Override switch and Remove; then "Add hotkey". A
 /// combination used by more than one hotkey in the file is flagged — the
 /// second one to register would silently lose.
 fn hotkeys_section(
     settings: &Settings,
-    ui: &MenuUi<'_>,
     item: &Item,
     context: &ViewContext<ConfigApp>,
 ) -> View {
@@ -350,24 +346,22 @@ fn hotkeys_section(
     }
 
     rows = rows.child("add", add_button("Add hotkey", context.callback(move |()| Msg::Menu(MenuMsg::HotkeyAdd(id)))));
-    rows = rows.child("picker", hotkey_dialog(item, ui, context));
     field("Hotkeys", rows)
 }
 
-/// The key picker in a dialog with OK / Cancel, open on the hotkey
-/// `ui.hotkeys` names (if it is one of this item's). The edit commits live, so
-/// the keycaps behind the dialog follow; Cancel restores the old text.
-fn hotkey_dialog(item: &Item, ui: &MenuUi<'_>, context: &ViewContext<ConfigApp>) -> View {
-    let id = item.id;
-    let open = ui.hotkeys.open.filter(|&(owner, index)| owner == id && index < item.hotkeys.len());
-    let closed = context.callback(|result: ContentDialogResult| {
-        Msg::Menu(MenuMsg::HotkeyClosed { accepted: result == ContentDialogResult::Primary })
-    });
-
-    let Some((_, index)) = open else {
-        return ContentDialog::new().is_open(false).on_closed(closed).content(View::empty());
-    };
-    let (modifiers, key) = split_hotkey(&item.hotkeys[index].key);
+/// The key picker in a modal with OK / Cancel, over the whole page, while a
+/// hotkey is being edited. The edit commits live, so the keycaps behind it
+/// follow; Cancel restores the old text.
+pub fn hotkey_modal(
+    settings: &Settings,
+    hotkeys: &HotkeyUi,
+    window: Viewport,
+    context: &ViewContext<ConfigApp>,
+) -> Option<View> {
+    let (id, index) = hotkeys.open?;
+    let item = tree::item(settings, id)?;
+    let entry = item.hotkeys.get(index)?;
+    let (modifiers, key) = split_hotkey(&entry.key);
     let events = KeyPickerEvents {
         on_key: context.callback(move |key| Msg::Menu(MenuMsg::HotkeyKey(id, index, key))),
         on_modifier: context.callback(move |modifier| Msg::Menu(MenuMsg::HotkeyModifier(id, index, modifier))),
@@ -375,15 +369,15 @@ fn hotkey_dialog(item: &Item, ui: &MenuUi<'_>, context: &ViewContext<ConfigApp>)
         on_search_changed: context.callback(|text| Msg::Menu(MenuMsg::HotkeySearch(text))),
         on_search_chosen: context.callback(move |text| Msg::Menu(MenuMsg::HotkeySearchChosen(id, index, text))),
     };
-    ContentDialog::new()
-        .is_open(true)
-        .title(format!("Hotkey for {}", roots::label(item)))
-        .primary_button_text("OK")
-        .close_button_text("Cancel")
+    Some(modal(
+        window,
+        format!("Hotkey for {}", roots::label(item)),
+        |viewport| key_picker(key, Some(modifiers), &hotkeys.picker, viewport, &events),
         // A combination needs a key: OK waits for one.
-        .is_primary_button_enabled(key.is_some())
-        .on_closed(closed)
-        .content(key_picker(key, Some(modifiers), &ui.hotkeys.picker, Viewport::new(PICKER_DIALOG_WIDTH), &events))
+        key.is_some(),
+        context.callback(|()| Msg::Menu(MenuMsg::HotkeyClosed { accepted: false })),
+        context.callback(|()| Msg::Menu(MenuMsg::HotkeyClosed { accepted: true })),
+    ))
 }
 
 /// The label of another item that has the same combination as `raw`, if any.
