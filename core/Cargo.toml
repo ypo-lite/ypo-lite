@@ -15,6 +15,11 @@ win = ["dep:windows", "dep:windows-core"]
 # Kept behind its own feature so a build dependency does not drag the
 # `windows` crate into the host build: see `core/src/build.rs`.
 build = ["dep:embed-resource"]
+# `overlay::ColorFont`/`Canvas::draw_text_color` through DirectWrite, so emoji
+# keep their colours. Off: the same API falls back to GDI (monochrome emoji)
+# and Direct2D/DirectWrite are never loaded. Not a default: an application
+# opts in (see y-snap's own `color-text`).
+color-text = ["win"]
 
 [dependencies]
 windows = { workspace = true, optional = true }

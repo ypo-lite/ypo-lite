@@ -54,6 +54,9 @@ pub struct MinButton {
     /// `None` (the default when `<minbutton>` is absent, or set to `"none"`)
     /// turns the behaviour off.
     pub right_click_action: Option<Action>,
+    /// Tiles per row of the popup — 2 with four tiles makes a 2×2 grid.
+    /// `0` (the default) puts every tile on one row.
+    pub columns: u32,
     pub items: Vec<QuickAction>,
 }
 
@@ -62,6 +65,7 @@ impl Default for MinButton {
         Self {
             hover_delay_ms: 700,
             right_click_action: None,
+            columns: 0,
             items: Vec::new(),
         }
     }
@@ -561,6 +565,7 @@ fn write_min_button(out: &mut String, min_button: &MinButton) {
     if min_button.hover_delay_ms != MinButton::default().hover_delay_ms {
         let _ = write!(out, " hover-delay=\"{}\"", min_button.hover_delay_ms);
     }
+    write_u32_if_changed(out, "columns", min_button.columns, MinButton::default().columns);
     match min_button.right_click_action {
         Some(action) => {
             let _ = write!(out, " right-click-action=\"{action}\"");
@@ -885,7 +890,7 @@ impl Reader {
         let Some(section) = root.child("minbutton") else {
             return MinButton::default();
         };
-        self.check(section, &["hover-delay", "right-click-action"]);
+        self.check(section, &["hover-delay", "right-click-action", "columns"]);
 
         // Right-click has a default action ("send to tray"); the section
         // being present at all is what turns the feature on, same as it
@@ -895,6 +900,7 @@ impl Reader {
             ..MinButton::default()
         };
         self.number(section, "hover-delay", &mut min_button.hover_delay_ms);
+        self.number(section, "columns", &mut min_button.columns);
 
         if let Some(text) = section.attr("right-click-action") {
             if text.trim().eq_ignore_ascii_case("none") {
@@ -1293,7 +1299,7 @@ mod tests {
         let settings = load(
             "minbutton",
             r#"<y-snap>
-                 <minbutton hover-delay="500" right-click-action="minimize">
+                 <minbutton hover-delay="500" columns="2" right-click-action="minimize">
                    <action action="traynize" label="Traynize"/>
                  </minbutton>
                </y-snap>"#,
@@ -1301,6 +1307,7 @@ mod tests {
 
         assert!(settings.warnings.is_empty(), "{:?}", settings.warnings);
         assert_eq!(settings.min_button.hover_delay_ms, 500);
+        assert_eq!(settings.min_button.columns, 2);
         assert_eq!(
             settings.min_button.right_click_action,
             Some(Action::Minimize)
@@ -1314,6 +1321,7 @@ mod tests {
 
         assert!(settings.warnings.is_empty(), "{:?}", settings.warnings);
         assert_eq!(settings.min_button.hover_delay_ms, 700);
+        assert_eq!(settings.min_button.columns, 0);
         assert_eq!(
             settings.min_button.right_click_action,
             Some(Action::Traynize)

@@ -176,6 +176,7 @@ impl YSnap {
         self.min_overlay = Some(min_overlay::MinOverlay::new(
             hwnd,
             settings.min_button.items.clone(),
+            settings.min_button.columns,
         ));
         self.action_overlay = Some(overlay::ActionOverlay::new(hwnd, settings.overlay.clone()));
 
@@ -420,6 +421,15 @@ impl YSnap {
 
         if let Some((action, target)) = action {
             self.perform(action, Some(target), 0);
+        }
+    }
+
+    /// The pointer moved onto, off, or between tiles of the minimize-button
+    /// popup. `usize::MAX` means off every tile.
+    fn on_min_tile_hover(&mut self, index: usize) {
+        if let (Some(min_overlay), Some(settings)) = (self.min_overlay.as_mut(), &self.settings) {
+            let index = (index != usize::MAX).then_some(index);
+            let _ = min_overlay.set_hover(index, &settings.overlay);
         }
     }
 
@@ -770,6 +780,11 @@ impl TrayApp for YSnap {
                 Some(LRESULT(0))
             }
 
+            min_overlay::WM_MIN_TILE_HOVER => {
+                self.on_min_tile_hover(wparam.0);
+                Some(LRESULT(0))
+            }
+
             overlay::WM_OVERLAY_ACTION => {
                 self.on_overlay_action(wparam.0);
                 Some(LRESULT(0))
@@ -810,6 +825,10 @@ impl TrayApp for YSnap {
         self.mouse_hook = None;
         self.min_overlay = None;
         self.action_overlay = None;
+        // After the overlays, whose canvases and fonts hold Direct2D
+        // objects. Left to process exit, tearing Direct2D/DirectWrite down
+        // takes seconds once anything has been drawn.
+        y_core::overlay::release_color_text();
         self.tray = None;
     }
 }

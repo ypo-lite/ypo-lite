@@ -54,6 +54,45 @@ use windows::core::{Error, HSTRING, PCWSTR, Result};
 
 use crate::window::{self, WindowHandler, WindowSpec};
 
+// Colour text (DirectWrite, so emoji keep their colours) sits behind the
+// `color-text` feature: it pulls Direct2D and DirectWrite into the process.
+// Without the feature `ColorFont`/`draw_text_color` fall back to GDI, so
+// callers need no `cfg` of their own.
+#[cfg(feature = "color-text")]
+mod color_text;
+#[cfg(feature = "color-text")]
+pub use color_text::{ColorFont, release as release_color_text};
+
+/// Nothing to release without the `color-text` feature.
+#[cfg(not(feature = "color-text"))]
+pub fn release_color_text() {}
+
+/// GDI stand-in for the DirectWrite `ColorFont`: same API, monochrome emoji.
+#[cfg(not(feature = "color-text"))]
+pub struct ColorFont(Font);
+
+#[cfg(not(feature = "color-text"))]
+impl ColorFont {
+    pub fn new(family: &str, height: i32, bold: bool) -> Result<Self> {
+        Font::new(family, height, bold).map(Self)
+    }
+}
+
+#[cfg(not(feature = "color-text"))]
+impl Canvas {
+    /// See [`Canvas::draw_text`]; this is it, the `color-text` feature being off.
+    pub fn draw_text_color(
+        &mut self,
+        text: &str,
+        rect: RECT,
+        font: &ColorFont,
+        color: Color,
+        align: TextAlign,
+    ) -> Result<()> {
+        self.draw_text(text, rect, &font.0, color, align)
+    }
+}
+
 /// A colour, straight (not premultiplied) — the way a human writes one.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Color {
@@ -375,6 +414,9 @@ pub struct Canvas {
     previous: HGDIOBJ,
     pixels: *mut u32,
     size: (i32, i32),
+    /// Direct2D's view of `dc`, created on the first [`Canvas::draw_text_color`].
+    #[cfg(feature = "color-text")]
+    target: Option<windows::Win32::Graphics::Direct2D::ID2D1DCRenderTarget>,
 }
 
 impl Canvas {
@@ -431,6 +473,8 @@ impl Canvas {
             previous,
             pixels: pixels as *mut u32,
             size,
+            #[cfg(feature = "color-text")]
+            target: None,
         })
     }
 
@@ -845,6 +889,11 @@ fn for_each_rect_corner_pixel(
 
 impl Drop for Canvas {
     fn drop(&mut self) {
+        // Release Direct2D's hold on the DC before deleting it.
+        #[cfg(feature = "color-text")]
+        {
+            self.target = None;
+        }
         unsafe {
             SelectObject(self.dc, self.previous);
             let _ = DeleteObject(self.bitmap.into());

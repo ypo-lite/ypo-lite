@@ -68,7 +68,7 @@ use y_core::{
     hotkey::key_name,
     ids::WM_APP_FIRST,
     monitor::{self, Monitor},
-    overlay::{Canvas, Color, Font, Overlay, OverlaySpec, TextAlign},
+    overlay::{Canvas, Color, ColorFont, Font, Overlay, OverlaySpec, TextAlign},
     virtual_desktop,
     window::WindowHandler,
 };
@@ -420,7 +420,7 @@ impl ActionOverlay {
 struct TileFonts {
     key: Font,
     label: Font,
-    icon: Font,
+    icon: ColorFont,
     /// A small corner badge on icon tiles, so the key that fires them is
     /// still visible even though the icon has taken over the spot the key
     /// letter would otherwise be drawn in. Sized off the same
@@ -436,7 +436,7 @@ impl TileFonts {
         Ok(Self {
             key: Font::new("Segoe UI", config.key_font_size as i32, true)?,
             label: Font::new("Segoe UI", config.label_font_size as i32, false)?,
-            icon: Font::new(&config.icon_font, config.icon_font_size as i32, false)?,
+            icon: ColorFont::new(&config.icon_font, config.icon_font_size as i32, false)?,
             badge: Font::new(
                 "Segoe UI",
                 (config.key_font_size * 3 / 4).max(11) as i32,
@@ -510,7 +510,7 @@ fn draw_tile(
 
     match item.icon.as_deref() {
         Some(icon) => {
-            canvas.draw_text(icon, glyph_rect, &fonts.icon, text, TextAlign::Centre)?;
+            canvas.draw_text_color(icon, glyph_rect, &fonts.icon, text, TextAlign::Centre)?;
             if let Some(key) = item.key {
                 // A muted blend of `text` toward this tile's own `back`, not
                 // a reduced alpha: draw_text stamps the alpha of its *whole*

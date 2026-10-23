@@ -3,6 +3,12 @@ name = "y-snap"
 version.workspace = true
 edition.workspace = true
 
+[features]
+default = ["color-text"]
+# Colour emoji in the overlays via DirectWrite. Compare with
+# `cargo run -p y-snap --no-default-features` (GDI, monochrome emoji).
+color-text = ["y-core/color-text"]
+
 [dependencies]
 y-core.workspace = true
 windows.workspace = true
