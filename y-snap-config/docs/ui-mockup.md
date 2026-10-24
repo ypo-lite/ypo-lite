@@ -18,7 +18,7 @@ real:
   palette swatches and the tile list on the left, a live preview on the
   right that mirrors the actual popup's tile grid (including the per-desktop
   group).
-- **Minimize button** — hover-delay slider, right-click action, popup tiles.
+- **Minimize button** — hover-delay slider, tiles per row, right-click action, popup tiles.
 
 Data shown is the real shipped `y-snap/rsc/y-snap.xml`, not placeholder text.
 

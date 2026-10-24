@@ -113,7 +113,7 @@ visible, unowned, non-topmost top-level windows, roughly what Alt+Tab shows.
 
 Two behaviours on a window's minimize button, no hotkey needed for either:
 
-* **Hover** shows a row of one-click tiles right under the button once the
+* **Hover** shows a grid of one-click tiles right under the button once the
   pointer has sat still over it for `hover-delay` milliseconds (700 by
   default) — the delay resets on any movement still inside the button, so it
   does not flash open while the pointer is only passing through on its way
@@ -121,7 +121,12 @@ Two behaviours on a window's minimize button, no hotkey needed for either:
   `<overlay>`'s own colours and corner radius. Each `<action>` takes
   `action`, `label` and `icon` — no `key`, no `group`; only actions that act
   on a single window are allowed (not `desktop-list`, not `overlay` itself).
-  An empty tile list turns the popup off without turning off the
+  `columns` is the number of tiles per row — `columns="2"` makes four tiles
+  a 2×2 grid; left out (or `0`) puts them all on one row. The tile under the
+  pointer is highlighted, and a tile whose toggle is on for the window
+  (maximized, pinned, always on top…) shows the overlay's active colours.
+  The popup is kept on the screen, so it moves left of the button's centre
+  on a maximized window. An empty tile list turns the popup off without turning off the
   right-click action below.
 * **A plain right-click** fires `right-click-action` directly — no popup.
   Defaults to `traynize`; `right-click-action="none"` turns it off.

@@ -87,7 +87,10 @@
 
 	<!--
 		hover-delay is how long the pointer has to stop moving over the
-		button, in milliseconds, before the row of tiles below appears.
+		button, in milliseconds, before the tiles below appear.
+
+			columns is how many tiles go on a row (columns="2" with four tiles
+			makes a 2x2 grid); leave it out for a single row.
 
 		right-click-action fires directly, no popup, on a plain right-click
 		over the button; "none" turns that off. Leave the whole section out

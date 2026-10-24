@@ -269,6 +269,7 @@ enum Msg {
     OverlayItemAdded,
 
     MinButtonDelayChanged(Option<f64>),
+    MinButtonColumnsChanged(Option<f64>),
     MinButtonRightClickChanged(Option<usize>),
     EditQuickAction(usize),
     QuickActionActionChanged(usize, Option<usize>),
@@ -892,6 +893,13 @@ impl ConfigApp {
                     self.dirty = true;
                 }
             }
+            Msg::MinButtonColumnsChanged(Some(columns)) => {
+                let columns = columns.max(0.0).round() as u32;
+                if columns != settings.min_button.columns {
+                    settings.min_button.columns = columns;
+                    self.dirty = true;
+                }
+            }
             Msg::MinButtonRightClickChanged(Some(choice)) => {
                 // Choice 0 is "(off)" — see `min_button::settings`.
                 let action = choice
@@ -1002,6 +1010,7 @@ impl ConfigApp {
             | Msg::OverlayItemGroupChanged(_, None)
             | Msg::OverlayItemDesktopChanged(_, None)
             | Msg::MinButtonDelayChanged(None)
+            | Msg::MinButtonColumnsChanged(None)
             | Msg::MinButtonRightClickChanged(None)
             | Msg::QuickActionActionChanged(_, None)
             | Msg::OverlayThemeChanged(None) => {}

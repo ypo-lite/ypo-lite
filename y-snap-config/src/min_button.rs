@@ -36,6 +36,9 @@ pub fn actions() -> Vec<Action> {
 const DELAY_MAX_MS: f64 = 2000.0;
 const DELAY_STEP_MS: f64 = 50.0;
 
+/// Upper bound of the tiles-per-row box; `0` means everything on one row.
+const COLUMNS_MAX: f64 = 12.0;
+
 const COLUMNS: [Column; 3] = [
     Column::fixed("Icon", 48.0),
     Column::flex("Tile", 160.0),
@@ -107,6 +110,18 @@ fn settings(
                     DELAY_STEP_MS,
                     context.callback(|v: f64| Msg::MinButtonDelayChanged(Some(v))),
                     context.callback(Msg::MinButtonDelayChanged),
+                ),
+            ),
+        ),
+        (
+            "columns",
+            field(
+                "Tiles per row (0 = a single row)",
+                number_box(
+                    Some(min_button.columns.into()),
+                    0.0,
+                    COLUMNS_MAX,
+                    context.callback(Msg::MinButtonColumnsChanged),
                 ),
             ),
         ),
@@ -288,7 +303,7 @@ fn tile_editor(
 // Preview
 // ---------------------------------------------------------------------------
 
-/// The popup's own geometry (`y-snap/src/min_overlay.rs`): one row of
+/// The popup's own geometry (`y-snap/src/min_overlay.rs`): a grid of
 /// 72×40 tiles, an 18px glyph centred in each.
 const POPUP_TILE: (f64, f64) = (72.0, 40.0);
 const POPUP_GLYPH_SIZE: f64 = 18.0;
@@ -302,7 +317,7 @@ const STUB_TITLE_WIDTH: f64 = 120.0;
 /// overlay's palette and corner radius, which the real popup shares.
 fn preview(min_button: &MinButton, overlay: &Overlay, viewport: Viewport) -> View {
     let tiles = min_button.items.len();
-    let popup_width = POPUP_TILE.0 * tiles as f64;
+    let popup_width = POPUP_TILE.0 * grid_columns(min_button) as f64;
     let stub_width = STUB_TITLE_WIDTH + 3.0 * CAPTION_BUTTON.0;
     let available = viewport
         .inset(CARD_INSET)
@@ -401,13 +416,25 @@ fn preview(min_button: &MinButton, overlay: &Overlay, viewport: Viewport) -> Vie
     )
 }
 
-/// The popup row, centred under the minimize button the way
+/// Tiles per row as the popup lays them out (`MinOverlay::columns`): the
+/// configured count capped at the number of tiles, or all of them when `0`.
+fn grid_columns(min_button: &MinButton) -> usize {
+    let tiles = min_button.items.len().max(1);
+    match min_button.columns as usize {
+        0 => tiles,
+        columns => columns.min(tiles),
+    }
+}
+
+/// The popup grid, centred under the minimize button the way
 /// `MinOverlay::show` positions it: its centre on the button's centre, so
 /// it pokes out past the window's right edge once it's wider than the
 /// two buttons right of it allow. Clamped to the stage.
 fn popup(min_button: &MinButton, overlay: &Overlay, scale: f64, available: f64) -> View {
     let (width, height) = (POPUP_TILE.0 * scale, POPUP_TILE.1 * scale);
-    let popup_width = width * min_button.items.len() as f64;
+    let columns = grid_columns(min_button);
+    let rows = min_button.items.len().div_ceil(columns).max(1);
+    let popup_width = width * columns as f64;
     let button_centre_from_right = 2.5 * CAPTION_BUTTON.0 * scale;
     let right = (button_centre_from_right - popup_width / 2.0)
         .clamp(0.0, (available - popup_width).max(0.0));
@@ -426,11 +453,11 @@ fn popup(min_button: &MinButton, overlay: &Overlay, scale: f64, available: f64) 
             .text_trimming(TextTrimming::CharacterEllipsis)
             .horizontal_alignment(HorizontalAlignment::Center)
             .vertical_alignment(VerticalAlignment::Center);
-        (index, cell(text, 0, index))
+        (index, cell(text, index / columns, index % columns))
     });
     let row: View = Grid::new()
-        .columns(vec![GridLength::Pixel(width); min_button.items.len()])
-        .rows([GridLength::Pixel(height)])
+        .columns(vec![GridLength::Pixel(width); columns])
+        .rows(vec![GridLength::Pixel(height); rows])
         .keyed_children(glyphs.collect::<Vec<_>>());
 
     Border::new()
