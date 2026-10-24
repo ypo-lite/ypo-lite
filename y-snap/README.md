@@ -15,7 +15,7 @@ Working: the configuration file, the tray icon and menu, hotkey registration
 (including reclaiming a combination the shell owns), the actions that act
 directly on a window — minimize, maximize, close, always-on-top, borderless,
 transparency, shade, hide-from-taskbar, center-cursor — the mouse hook (drag,
-resize, switch), the minimize-button popup, the action overlay (grid layout,
+resize), the minimize-button popup, the action overlay (grid layout,
 hover, click, key, `Escape`, click-outside), and the virtual desktop actions
 (`desktop-next`/`-prev`/`-new`/`-move`, `pin-toggle`, `desktop-list`'s
 per-desktop tiles) — see [`y-core`'s own `virtual_desktop`
@@ -92,16 +92,14 @@ a cost — the hook runs on every keystroke on the machine.
 <drag button="left" mod="Alt"/>
 ```
 
-`<drag>`, `<resize>` and `<switch>`, each with a `button` (`left`, `right`,
-`middle`, `wheel`) and a `mod` (the modifier half of a hotkey, or `none`;
+`<drag>` and `<resize>`, each with a `button` (`left`, `right` or
+`middle`) and a `mod` (the modifier half of a hotkey, or `none`;
 `Alt` if left out).
 
-All three are driven by one `WH_MOUSE_LL` hook, installed on y-snap's own
+Both are driven by one `WH_MOUSE_LL` hook, installed on y-snap's own
 thread rather than injected into other processes — see `mouse.rs`. Drag and
 resize grab and release with the same button; the window under the pointer at
 the moment of the press is the one they act on, same as `target="pointed"`.
-`<switch>`'s wheel steps the foreground window forward or back through the
-visible, unowned, non-topmost top-level windows, roughly what Alt+Tab shows.
 
 ### `<minbutton>`
 
@@ -210,7 +208,7 @@ planned for that.
 | `actions.rs` | action → Win32 call, in one place |
 | `target.rs` | choosing the window, and refusing the shell's |
 | `window.rs` | what gets done to a window, and how to undo it |
-| `mouse.rs` | the low-level mouse hook: drag, resize, switch, minimize-button hover |
+| `mouse.rs` | the low-level mouse hook: drag, resize, minimize-button hover |
 | `min_overlay.rs` | the minimize-button popup, and turning a click into an action |
 | `overlay.rs` | the action overlay: tile grid, hover, click, key, focus-driven close |
 

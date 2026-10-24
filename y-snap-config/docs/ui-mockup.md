@@ -13,7 +13,7 @@ Four screens, behind a left nav rail — the same shape `main.rs` now uses for
 real:
 
 - **Hotkeys** — table of key combo / action / target / desktop / steal-from-shell.
-- **Mouse gestures** — one card per gesture (drag/resize/switch): button + modifier chips.
+- **Mouse gestures** — one card per gesture (drag/resize): button + modifier chips.
 - **Action overlay** — the one screen worth mocking for real: layout fields,
   palette swatches and the tile list on the left, a live preview on the
   right that mirrors the actual popup's tile grid (including the per-desktop

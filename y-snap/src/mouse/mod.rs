@@ -1,7 +1,7 @@
-//! The low-level mouse hook: drag, resize, window switching, and hovering
-//! over a window's minimize button.
+//! The low-level mouse hook: drag, resize, and hovering over a window's
+//! minimize button.
 //!
-//! One `WH_MOUSE_LL` hook does all four, for the same reason
+//! One `WH_MOUSE_LL` hook does all three, for the same reason
 //! [`y_core::hotkey`]'s override path uses `WH_KEYBOARD_LL`: it runs on the
 //! thread that installed it — this application's own message-loop thread —
 //! so no DLL has to be injected into the target process to see clicks and
@@ -23,8 +23,8 @@
 //! Sharing the hook does not mean sharing the logic. What it does is split
 //! two ways that have nothing to do with each other:
 //!
-//! * [`gesture`] — dragging, resizing, and switching windows. Driven by
-//!   mouse buttons, the wheel, and modifier keys.
+//! * [`gesture`] — dragging and resizing windows. Driven by mouse buttons
+//!   and modifier keys.
 //! * [`hover`] — whether the pointer is over a window's minimize button,
 //!   for [`crate::min_overlay`]'s popup. Driven by `WM_MOUSEMOVE` alone.
 //!
@@ -58,7 +58,7 @@ use windows::Win32::{
         CallNextHookEx, GetCursorPos, HC_ACTION, HHOOK, KillTimer, MSLLHOOKSTRUCT, PostMessageW,
         SWP_NOACTIVATE, SWP_NOZORDER, SetTimer, SetWindowPos, SetWindowsHookExW,
         UnhookWindowsHookEx, WH_MOUSE_LL, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN,
-        WM_MBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_RBUTTONDOWN, WM_RBUTTONUP,
+        WM_MBUTTONUP, WM_MOUSEMOVE, WM_RBUTTONDOWN, WM_RBUTTONUP,
     },
 };
 use windows::core::Result;
@@ -167,7 +167,7 @@ impl MouseHook {
     /// where [`REHOOK_TIMER_ID`] and [`MIN_HOVER_TIMER_ID`] are armed.
     ///
     /// Installs even when every gesture in `mouse` is unset: hovering the
-    /// minimize button works on its own, independent of drag/resize/switch.
+    /// minimize button works on its own, independent of drag/resize.
     pub fn install(
         owner: HWND,
         mouse: Mouse,
@@ -344,13 +344,6 @@ unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) 
                 with_state_bool(|state| state.gesture.on_button_down(Button::Middle, info.pt))
             }
             WM_MBUTTONUP => with_state_bool(|state| state.gesture.on_button_up(Button::Middle)),
-            WM_MOUSEWHEEL => {
-                // MSLLHOOKSTRUCT packs the signed wheel delta into the high
-                // word of mouseData (a normal WM_MOUSEWHEEL carries it in
-                // wParam instead, but this is the low-level hook's struct).
-                let delta = (info.mouseData >> 16) as i16;
-                with_state_bool(|state| state.gesture.on_wheel(delta))
-            }
             _ => false,
         };
 

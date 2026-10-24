@@ -238,6 +238,60 @@ impl Settings {
         variables::expand(text, &expanded, builtins)
     }
 
+    /// `text` rewritten to start with a `%variable%` when it begins with the
+    /// folder one stands for (`C:\Program Files\App\a.exe` →
+    /// `%programfiles%\App\a.exe`), or `None` when nothing fits or the text
+    /// already starts with a token. The longest folder wins; at equal length
+    /// the file's own variable wins over a builtin (the later of two own
+    /// variables over the earlier). Matching is
+    /// case-insensitive and only at a folder boundary (`C:\Win` does not
+    /// claim `C:\Windows`). Only absolute paths count as candidates.
+    pub fn tokenize(&self, text: &str, builtins: &mut dyn Lookup) -> Option<String> {
+        if text.trim_start().starts_with('%') {
+            return None;
+        }
+        // (name, folder) — the last definition of a name is the one in force.
+        let mut candidates: Vec<(String, String)> = Vec::new();
+        for index in 0..self.variables.len() {
+            if let VarEntry::Var(var) = &self.variables[index] {
+                let value = self.resolved_value(index, builtins);
+                candidates.retain(|(name, _)| *name != var.name);
+                candidates.push((var.name.clone(), value));
+            }
+        }
+        let own = candidates.len();
+        for name in crate::builtins::NAMES {
+            if candidates.iter().any(|(taken, _)| taken == name) {
+                continue; // shadowed by the file's variable
+            }
+            if let Some(value) = builtins.get(name) {
+                candidates.push(((*name).to_owned(), value));
+            }
+        }
+
+        let mut best: Option<(usize, usize, &str)> = None; // (length, own?, name)
+        for (position, (name, value)) in candidates.iter().enumerate() {
+            let folder = value.trim_end_matches('\\');
+            let absolute = folder.contains(':') || folder.starts_with(r"\\");
+            if !absolute || folder.contains('%') {
+                continue;
+            }
+            let Some(head) = text.get(..folder.len()) else {
+                continue;
+            };
+            let boundary = text[folder.len()..].is_empty() || text[folder.len()..].starts_with('\\');
+            if !head.eq_ignore_ascii_case(folder) || !boundary {
+                continue;
+            }
+            let rank = usize::from(position < own);
+            if best.is_none_or(|(length, held, _)| (folder.len(), rank) >= (length, held)) {
+                best = Some((folder.len(), rank, name));
+            }
+        }
+        let (length, _, name) = best?;
+        Some(format!("%{name}%{}", &text[length..]))
+    }
+
     /// `fields` as y-pop would launch it: every attribute expanded, the shell
     /// choice settled against the file's default. What "Run now" hands to
     /// `y_pop::launch::launch`. A folder is opened, not listed.
@@ -405,6 +459,45 @@ mod tests {
             <app name="Unknown" exe="%nothing%\x.exe"/>
         </group>
     </y-pop>"#;
+
+    fn with_vars(vars: &str) -> Settings {
+        load(&format!("<y-pop><variables>{vars}</variables><group name=\"g\"/></y-pop>"))
+    }
+
+    #[test]
+    fn tokenize_uses_a_builtin_at_a_folder_boundary() {
+        let settings = with_vars("");
+        assert_eq!(
+            settings.tokenize(r"c:\windows\system32\a.exe", &mut builtins()),
+            Some(r"%win%\system32\a.exe".to_owned())
+        );
+        assert_eq!(settings.tokenize(r"C:\Windows", &mut builtins()), Some("%win%".to_owned()));
+        assert_eq!(settings.tokenize(r"C:\WindowsApps\a.exe", &mut builtins()), None);
+        assert_eq!(settings.tokenize(r"D:\x\a.exe", &mut builtins()), None);
+    }
+
+    #[test]
+    fn tokenize_prefers_the_longest_folder_then_the_files_own_variable() {
+        let settings = with_vars(r#"<var name="tools" value="%win%\System32"/><var name="sys" value="C:\Windows\System32"/>"#);
+        // Same folder twice: the file's own variable (the later one here).
+        assert_eq!(
+            settings.tokenize(r"C:\Windows\System32\cmd.exe", &mut builtins()),
+            Some(r"%sys%\cmd.exe".to_owned())
+        );
+        // Only the shorter folder applies.
+        assert_eq!(
+            settings.tokenize(r"C:\Windows\Fonts", &mut builtins()),
+            Some(r"%win%\Fonts".to_owned())
+        );
+    }
+
+    #[test]
+    fn tokenize_leaves_tokens_and_relative_values_alone() {
+        let settings = with_vars(r#"<var name="short" value="x"/>"#);
+        assert_eq!(settings.tokenize(r"%win%\a.exe", &mut builtins()), None);
+        assert_eq!(settings.tokenize(r"x\a.exe", &mut builtins()), None);
+        assert_eq!(settings.tokenize("", &mut builtins()), None);
+    }
 
     #[test]
     fn references_follow_the_readers_pairing() {

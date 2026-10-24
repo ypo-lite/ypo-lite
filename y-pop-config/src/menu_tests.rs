@@ -504,3 +504,208 @@ fn the_icon_picker_commits_live_and_cancel_puts_the_old_value_back() {
     app.edit_icon(IconMsg::Pick(None));
     assert_eq!(icon_of(&app, "A"), None);
 }
+
+// ---- dropped files ---------------------------------------------------
+
+/// The names directly inside the menu "Menu".
+fn menu_names(app: &ConfigApp) -> Vec<String> {
+    let menu = id(app, "Menu");
+    tree::item(settings(app), menu)
+        .expect("the menu")
+        .children
+        .iter()
+        .filter_map(|entry| match entry {
+            Entry::Item(item) => Some(item.name.clone().unwrap_or_default()),
+            Entry::Comment(_) => None,
+        })
+        .collect()
+}
+
+#[test]
+fn files_dropped_on_an_item_land_after_it_in_drop_order() {
+    use crate::menu_edit::DropTarget;
+    let mut app = app();
+    let a = id(&app, "A");
+    app.edit_menu(MenuMsg::Dropped(
+        DropTarget::Row(a),
+        vec![r"C:\nowhere\One.txt".into(), r"C:\nowhere\Two.txt".into()],
+    ));
+    assert_eq!(menu_names(&app), ["A", "One", "Two", "G1", "B"]);
+    assert!(app.dirty);
+    // The last one is selected, so the next drop or add follows it.
+    assert_eq!(app.selected(id(&app, "Menu")), id(&app, "Two"));
+}
+
+#[test]
+fn files_dropped_on_a_group_go_inside_even_when_it_is_folded() {
+    use crate::menu_edit::DropTarget;
+    let mut app = app();
+    let g1 = id(&app, "G1");
+    app.collapsed.insert(g1);
+    app.edit_menu(MenuMsg::Dropped(
+        DropTarget::Row(g1),
+        vec![r"C:\nowhere\Notes.txt".into()],
+    ));
+    let group = tree::item(settings(&app), g1).expect("the group");
+    assert_eq!(group.children.len(), 2);
+    assert!(!app.collapsed.contains(&g1), "the new item must be visible");
+}
+
+#[test]
+fn files_dropped_on_the_strip_go_where_the_toolbar_adds() {
+    use crate::menu_edit::DropTarget;
+    let mut app = app();
+    let b = id(&app, "B");
+    app.edit_menu(MenuMsg::Select(b));
+    app.edit_menu(MenuMsg::Dropped(
+        DropTarget::Zone,
+        vec![r"C:\nowhere\Report.pdf".into()],
+    ));
+    assert_eq!(menu_names(&app), ["A", "G1", "B", "Report"]);
+}
+
+#[test]
+fn dragging_over_a_row_only_highlights() {
+    use crate::menu_edit::DropTarget;
+    let mut app = app();
+    let a = id(&app, "A");
+    app.edit_menu(MenuMsg::DragOver(Some(DropTarget::Row(a))));
+    assert_eq!(app.drag_over, Some(DropTarget::Row(a)));
+    assert!(!app.dirty);
+    app.edit_menu(MenuMsg::DragOver(None));
+    assert_eq!(app.drag_over, None);
+}
+
+// ---- how a dropped file was made -------------------------------------
+
+fn dropped_folder(app: &mut ConfigApp) -> ItemId {
+    use crate::menu_edit::DropTarget;
+    let a = id(app, "A");
+    let folder = std::env::temp_dir().to_string_lossy().into_owned();
+    app.edit_menu(MenuMsg::Dropped(DropTarget::Row(a), vec![folder]));
+    app.selected(id(app, "Menu"))
+}
+
+#[test]
+fn a_drop_keeps_its_origin_until_another_item_is_selected() {
+    let mut app = app();
+    let dropped = dropped_folder(&mut app);
+    assert!(matches!(&app.origin, Some((item, _)) if *item == dropped));
+
+    app.edit_menu(MenuMsg::Select(dropped));
+    assert!(app.origin.is_some(), "selecting the same item keeps it");
+    app.edit_menu(MenuMsg::Select(id(&app, "A")));
+    assert!(app.origin.is_none());
+}
+
+#[test]
+fn the_strip_can_be_dismissed_and_adding_leaves_it() {
+    let mut app = app();
+    dropped_folder(&mut app);
+    app.edit_menu(MenuMsg::OriginDismiss);
+    assert!(app.origin.is_none());
+
+    dropped_folder(&mut app);
+    app.edit_menu(MenuMsg::Add(NewKind::Separator));
+    assert!(app.origin.is_none(), "the new item is the selection now");
+}
+
+#[test]
+fn switching_a_folder_to_a_submenu_and_back() {
+    use crate::menu_edit::OriginChange;
+    let mut app = app();
+    let dropped = dropped_folder(&mut app);
+    let browse = |app: &ConfigApp| match &tree::item(settings(app), dropped).expect("item").kind {
+        ItemKind::App(fields) => fields.browse,
+        other => panic!("not an app: {other:?}"),
+    };
+    assert!(!browse(&app));
+    app.edit_menu(MenuMsg::OriginSwitch(OriginChange::Browse));
+    assert!(browse(&app));
+    app.edit_menu(MenuMsg::OriginSwitch(OriginChange::Browse));
+    assert!(!browse(&app));
+    assert!(app.origin.is_some());
+}
+
+// ---- the app picker --------------------------------------------------
+
+#[test]
+fn the_app_picker_opens_closes_and_gives_way_to_more() {
+    let mut app = app();
+    app.edit_menu(MenuMsg::AppPickerToggled);
+    assert!(app.app_picker);
+    app.edit_menu(MenuMsg::AppPickerToggled);
+    assert!(!app.app_picker);
+
+    app.edit_menu(MenuMsg::AppPickerToggled);
+    app.edit_menu(MenuMsg::MoreToggled);
+    assert!(app.more_open && !app.app_picker, "one panel at a time");
+    app.edit_menu(MenuMsg::AppPickerToggled);
+    assert!(app.app_picker && !app.more_open);
+}
+
+#[test]
+fn manual_adds_an_empty_app_and_closes_the_picker() {
+    let mut app = app();
+    app.edit_menu(MenuMsg::AppPickerToggled);
+    app.edit_menu(MenuMsg::Add(NewKind::App));
+    assert!(!app.app_picker);
+    assert!(app.dirty);
+    let selected = app.selected(id(&app, "Menu"));
+    assert!(matches!(
+        tree::item(settings(&app), selected).map(|item| &item.kind),
+        Some(ItemKind::App(_))
+    ));
+}
+
+// ---- the Start menu source -------------------------------------------
+
+fn start_entry(name: &str) -> crate::start_menu::StartEntry {
+    crate::start_menu::StartEntry {
+        name: name.into(),
+        path: format!(r"C:\nowhere\Start\{name}.lnk"),
+        target: String::new(),
+    }
+}
+
+#[test]
+fn ticked_start_menu_shortcuts_are_added_in_list_order() {
+    let mut app = app();
+    app.start_entries = vec![
+        start_entry("Alpha"),
+        start_entry("Beta"),
+        start_entry("Gamma"),
+    ];
+    app.edit_menu(MenuMsg::AppPickerToggled);
+    app.edit_menu(MenuMsg::StartOpened);
+    app.edit_menu(MenuMsg::StartToggle(app.start_entries[2].path.clone()));
+    app.edit_menu(MenuMsg::StartToggle(app.start_entries[0].path.clone()));
+    app.edit_menu(MenuMsg::StartToggle(app.start_entries[1].path.clone()));
+    app.edit_menu(MenuMsg::StartToggle(app.start_entries[1].path.clone()));
+    assert_eq!(app.start_menu.checked.len(), 2);
+
+    app.edit_menu(MenuMsg::StartAdd);
+    assert_eq!(menu_names(&app), ["A", "G1", "B", "Alpha", "Gamma"]);
+    assert!(!app.app_picker && !app.start_open && app.start_menu.checked.is_empty());
+    assert!(app.dirty);
+}
+
+#[test]
+fn cancelling_the_start_menu_dialog_forgets_the_ticks_and_keeps_the_picker() {
+    let mut app = app();
+    app.start_entries = vec![start_entry("Alpha")];
+    app.edit_menu(MenuMsg::AppPickerToggled);
+    app.edit_menu(MenuMsg::StartOpened);
+    app.edit_menu(MenuMsg::StartToggle(app.start_entries[0].path.clone()));
+    app.edit_menu(MenuMsg::StartClosed);
+    assert!(!app.start_open && app.app_picker);
+    assert!(app.start_menu.checked.is_empty() && !app.dirty);
+}
+
+#[test]
+fn adding_with_nothing_ticked_changes_nothing() {
+    let mut app = app();
+    app.edit_menu(MenuMsg::AppPickerToggled);
+    app.edit_menu(MenuMsg::StartAdd);
+    assert!(!app.dirty);
+}

@@ -49,6 +49,7 @@
 //! | [`monitor`] | monitor geometry, work areas, per-monitor DPI |
 //! | [`config`] | portable `.ini` settings next to the executable |
 //! | [`xml`] | a small XML reader and writer (comments kept), for settings files that are not `.ini` |
+//! | [`file_info`] | where a `.lnk` points; an executable's `FileDescription` |
 //! | [`shell`] | "open this file/folder/program" through `ShellExecute` |
 //! | [`theme`] | whether Windows is asking for a dark palette |
 //! | [`startup`] | run-at-logon registration |
@@ -73,6 +74,8 @@ pub mod app;
 pub mod config;
 #[cfg(feature = "win")]
 pub mod dialog;
+#[cfg(feature = "win")]
+pub mod file_info;
 #[cfg(feature = "win")]
 pub mod hotkey;
 #[cfg(feature = "win")]

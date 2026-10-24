@@ -1,7 +1,7 @@
-//! The Mouse gestures screen: one card per gesture (drag/resize/switch),
+//! The Mouse gestures screen: one card per gesture (drag/resize),
 //! each a button plus modifier chips.
 //!
-//! Cards sit in an [`AutoGrid`] — three across when they fit, fewer as the
+//! Cards sit in an [`AutoGrid`] — two across when they fit, fewer as the
 //! window narrows. It replaces `VariableSizedWrapGrid`, whose one fixed
 //! item height (210px) clipped a card the moment its hint wrapped.
 
@@ -12,30 +12,23 @@ use windows::Win32::UI::Input::KeyboardAndMouse::HOT_KEY_MODIFIERS;
 use windows_reactor::*;
 use y_snap::config::{Button as MouseButton, Gesture, Mouse};
 
-pub const BUTTONS: [MouseButton; 4] = [
-    MouseButton::Left,
-    MouseButton::Right,
-    MouseButton::Middle,
-    MouseButton::Wheel,
-];
-const BUTTON_NAMES: [&str; 4] = ["Left", "Right", "Middle", "Wheel"];
+pub const BUTTONS: [MouseButton; 3] = [MouseButton::Left, MouseButton::Right, MouseButton::Middle];
+const BUTTON_NAMES: [&str; 3] = ["Left", "Right", "Middle"];
 
 /// Which mouse gesture a [`Msg`] refers to.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum GestureKind {
     Drag,
     Resize,
-    Switch,
 }
 
 impl GestureKind {
-    pub const ALL: [Self; 3] = [Self::Drag, Self::Resize, Self::Switch];
+    pub const ALL: [Self; 2] = [Self::Drag, Self::Resize];
 
     pub fn title(self) -> &'static str {
         match self {
             Self::Drag => "Drag",
             Self::Resize => "Resize",
-            Self::Switch => "Switch",
         }
     }
 
@@ -43,7 +36,6 @@ impl GestureKind {
         match self {
             Self::Drag => "Moves the window under the pointer.",
             Self::Resize => "Resizes from the nearest edge or corner.",
-            Self::Switch => "Cycles z-order under the pointer.",
         }
     }
 
@@ -51,7 +43,6 @@ impl GestureKind {
         match self {
             Self::Drag => mouse.drag,
             Self::Resize => mouse.resize,
-            Self::Switch => mouse.switch,
         }
     }
 
@@ -59,13 +50,12 @@ impl GestureKind {
         match self {
             Self::Drag => &mut mouse.drag,
             Self::Resize => &mut mouse.resize,
-            Self::Switch => &mut mouse.switch,
         }
     }
 }
 
 pub fn mouse_view(mouse: &Mouse, viewport: Viewport, context: &ViewContext<ConfigApp>) -> View {
-    let grid = AutoGrid::new(250.0).max_columns(3);
+    let grid = AutoGrid::new(250.0).max_columns(2);
     let card_viewport = grid
         .item_viewport(viewport, GestureKind::ALL.len())
         .inset(CARD_INSET);

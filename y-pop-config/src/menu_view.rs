@@ -12,7 +12,8 @@ use std::collections::HashSet;
 
 use y_pop::settings::{Item, ItemId, ItemKind, Settings};
 
-use crate::menu_edit::MenuMsg;
+use crate::menu_edit::{DropTarget, MenuMsg};
+use crate::start_menu::Load;
 use crate::tree::{self, NewKind, TreeRowKind};
 use crate::ui::key_picker::KeyPickerUi;
 use crate::ui::prelude::*;
@@ -25,6 +26,12 @@ pub struct MenuUi<'a> {
     pub selected: ItemId,
     pub collapsed: &'a HashSet<ItemId>,
     pub more_open: bool,
+    /// The app picker is open.
+    pub app_picker: bool,
+    /// What a dragged file is over.
+    pub drag_over: Option<DropTarget>,
+    /// How the selected item was made, after a drop.
+    pub origin: Option<&'a crate::from_file::Origin>,
     pub show_xml: bool,
     pub show_comments: bool,
     /// Resolves `%builtins%` for the target readout; filled lazily.
@@ -183,6 +190,7 @@ fn outline_pane(
             } => {
                 if let Some(item) = tree::item(settings, *id) {
                     let view = item_row(settings, item, row.depth, *hidden_comments, ui, context);
+                    let view = drop_target(view, DropTarget::Row(*id), ui, context);
                     outline = outline.child(format!("i{}", id.get()), view);
                 }
             }
@@ -204,9 +212,12 @@ fn outline_pane(
         }
     }
 
+    outline = outline.child("drop", drop_zone(ui, context));
+
     // Showing comments is a toggle in the status bar, not here.
     let toolbar = Stack::vertical(space::S)
         .child("add", add_row(inner, context))
+        .maybe("picker", ui.app_picker.then(|| app_picker(inner, context)))
         .maybe("more", ui.more_open.then(|| more_row(inner, context)));
 
     if pinned {
@@ -256,9 +267,15 @@ fn add_row(viewport: Viewport, context: &ViewContext<ConfigApp>) -> View {
         .max_columns(4)
         .gap(space::S, space::S)
         .items([
-            // Phase 8 turns this into the app picker; until then it adds an
-            // empty app to fill in.
-            ("app", tool(Symbol::AllApps, "App", true, add(NewKind::App))),
+            (
+                "app",
+                tool(
+                    Symbol::AllApps,
+                    "App…",
+                    true,
+                    context.callback(|()| Msg::Menu(MenuMsg::AppPickerToggled)),
+                ),
+            ),
             (
                 "group",
                 tool(Symbol::Folder, "Group", false, add(NewKind::Group)),
@@ -278,6 +295,65 @@ fn add_row(viewport: Viewport, context: &ViewContext<ConfigApp>) -> View {
             ),
         ])
         .build(viewport)
+}
+
+/// Where an app comes from. The choice of source is a row of buttons inline
+/// under the toolbar; the Start menu's long list opens as a dialog instead
+/// ([`start_modal`]), so it never pushes the outline out of view. The Store
+/// source (8.6) joins them.
+fn app_picker(viewport: Viewport, context: &ViewContext<ConfigApp>) -> View {
+    let grid = AutoGrid::new(120.0)
+        .max_columns(4)
+        .gap(space::S, space::S)
+        .items([
+            (
+                "browse",
+                tool(
+                    Symbol::OpenFile,
+                    "Browse…",
+                    false,
+                    context.callback(|()| Msg::Menu(MenuMsg::AppBrowse)),
+                ),
+            ),
+            (
+                "start",
+                tool(
+                    Symbol::AllApps,
+                    "Start menu…",
+                    false,
+                    context.callback(|()| Msg::Menu(MenuMsg::StartOpened)),
+                ),
+            ),
+            (
+                "manual",
+                tool(
+                    Symbol::Edit,
+                    "Manual",
+                    false,
+                    context.callback(|()| Msg::Menu(MenuMsg::Add(NewKind::App))),
+                ),
+            ),
+            (
+                "close",
+                tool(
+                    Symbol::Cancel,
+                    "Close",
+                    false,
+                    context.callback(|()| Msg::Menu(MenuMsg::AppPickerToggled)),
+                ),
+            ),
+        ])
+        .build(viewport);
+    Stack::vertical(space::S)
+        .child("title", text::section_title("Add an app"))
+        .child("grid", grid)
+        .child(
+            "hint",
+            text::caption(
+                "Browse adds several programs, shortcuts or files at once; Start menu picks from the installed shortcuts; Manual adds an empty app to fill in.",
+            ),
+        )
+        .into()
 }
 
 fn more_row(viewport: Viewport, context: &ViewContext<ConfigApp>) -> View {
@@ -542,4 +618,183 @@ impl MenuUi<'_> {
             size,
         )
     }
+}
+
+// ---- dropping files --------------------------------------------------
+
+/// Makes `view` take dropped files: a row accepts them (spec T5/§3.3), is
+/// outlined while one is over it, and sends the paths in drop order.
+fn drop_target(
+    view: impl Into<View>,
+    target: DropTarget,
+    ui: &MenuUi<'_>,
+    context: &ViewContext<ConfigApp>,
+) -> View {
+    let over = ui.drag_over == Some(target);
+    Border::new()
+        .border_thickness(Thickness::new(2.0, 2.0, 2.0, 2.0))
+        .corner_radius(CornerRadius::uniform(radius::CONTROL))
+        .border_brush_optional(over.then_some(ThemeBrush::Accent))
+        .drop_policy(
+            DragDropPolicy::new()
+                .storage_items(DragDropAction::new(DragDropOperation::Copy).caption("Add to menu")),
+        )
+        .on_drag_enter(context.callback(move |kind: DragKind| match kind {
+            DragKind::StorageItems => Msg::Menu(MenuMsg::DragOver(Some(target))),
+            _ => Msg::Ignored,
+        }))
+        .on_drag_leave(context.callback(|()| Msg::Menu(MenuMsg::DragOver(None))))
+        .on_drop(context.callback(move |data: DroppedData| match data {
+            DroppedData::StorageItems(items) => Msg::Menu(MenuMsg::Dropped(
+                target,
+                items.into_iter().map(|item| item.path).collect(),
+            )),
+            _ => Msg::Menu(MenuMsg::DragOver(None)),
+        }))
+        .content(view)
+}
+
+/// The strip under the rows: drop files here to add them where the marker is.
+fn drop_zone(ui: &MenuUi<'_>, context: &ViewContext<ConfigApp>) -> View {
+    let hint = Border::new()
+        .padding(Thickness::xy(space::M, space::S))
+        .content(text::caption(
+            "Drop programs, shortcuts or folders here to add them at the marker",
+        ));
+    drop_target(hint, DropTarget::Zone, ui, context)
+}
+
+// ---- the Start menu source ---------------------------------------------
+
+/// How tall the list of shortcuts is in its dialog before it scrolls.
+const START_LIST_HEIGHT: f64 = 380.0;
+
+/// The lower-case `exe` of every app already in this tray menu, expanded.
+fn programs_in_menu(
+    settings: &Settings,
+    root: ItemId,
+    builtins: &std::cell::RefCell<y_pop::builtins::Builtins>,
+) -> HashSet<String> {
+    let mut builtins = builtins.borrow_mut();
+    settings
+        .items()
+        .filter(|item| tree::is_inside(settings, root, item.id))
+        .filter_map(|item| match &item.kind {
+            ItemKind::App(app) => app.exe.as_deref(),
+            _ => None,
+        })
+        .map(|exe| {
+            settings
+                .expand_text(exe, &mut *builtins)
+                .trim()
+                .trim_matches('"')
+                .to_lowercase()
+        })
+        .collect()
+}
+
+/// What [`start_modal`] needs besides the settings.
+pub struct StartUi<'a> {
+    /// The tray menu the apps are added to.
+    pub root: ItemId,
+    pub start: &'a crate::start_menu::StartMenu,
+    pub entries: &'a [crate::start_menu::StartEntry],
+    pub builtins: &'a std::cell::RefCell<y_pop::builtins::Builtins>,
+    pub icons: &'a crate::app_icons::IconStore,
+}
+
+/// Search, tick, add: every shortcut under the Start menu's `Programs`
+/// folders, in a dialog over the whole window so the outline keeps its place
+/// underneath. Entries already in this menu are flagged, not hidden.
+pub fn start_modal(
+    settings: &Settings,
+    ui: &StartUi<'_>,
+    window: Viewport,
+    context: &ViewContext<ConfigApp>,
+) -> View {
+    let count = ui.start.checked.len();
+    let ok = context.callback(|()| Msg::Menu(MenuMsg::StartAdd));
+    let cancel = context.callback(|()| Msg::Menu(MenuMsg::StartClosed));
+    let title = match count {
+        0 => "Add apps from the Start menu".to_owned(),
+        1 => "Add apps from the Start menu — 1 ticked".to_owned(),
+        n => format!("Add apps from the Start menu — {n} ticked"),
+    };
+    crate::ui::editor::modal(
+        window,
+        title,
+        |_| start_list(settings, ui, context),
+        count > 0,
+        cancel,
+        ok,
+    )
+}
+
+fn start_list(settings: &Settings, ui: &StartUi<'_>, context: &ViewContext<ConfigApp>) -> View {
+    if ui.start.state != Load::Done {
+        return text::caption("Reading the Start menu…").into();
+    }
+
+    let (listed, more) = ui.start.listed(ui.entries);
+    let present = programs_in_menu(settings, ui.root, ui.builtins);
+    let mut list = Stack::vertical(space::XXS);
+    for entry in &listed {
+        let path = entry.path.clone();
+        let spec = crate::app_icons::IconSpec::File {
+            path: entry.path.clone(),
+            index: None,
+        };
+        let icon = crate::app_icons::icon_or_symbol(
+            ui.icons.image(Some(&spec), crate::app_icons::SHOWN),
+            Symbol::AllApps,
+            crate::app_icons::SHOWN,
+        );
+        let already = [entry.target.as_str(), entry.path.as_str()]
+            .iter()
+            .any(|text| !text.is_empty() && present.contains(&text.to_lowercase()));
+        let mut label = Stack::horizontal(space::S)
+            .child("icon", icon)
+            .child("name", text::single_line(entry.name.clone()));
+        if already {
+            label = label.child("already", text::caption("already in this menu"));
+        }
+        let check = CheckBox::new()
+            .is_checked(ui.start.checked.contains(&entry.path))
+            .on_is_checked_changed(
+                context.callback(move |_: bool| Msg::Menu(MenuMsg::StartToggle(path.clone()))),
+            )
+            .content(label);
+        list = list.child(entry.path.clone(), check);
+    }
+    if listed.is_empty() {
+        list = list.child("none", text::caption("No shortcut matches."));
+    }
+    if more > 0 {
+        list = list.child(
+            "more",
+            button(
+                &format!("Show more ({more} left)"),
+                false,
+                true,
+                context.callback(|()| Msg::Menu(MenuMsg::StartMore)),
+            ),
+        );
+    }
+
+    Stack::vertical(space::S)
+        .child(
+            "search",
+            text_box(
+                ui.start.search.clone(),
+                "Search the Start menu",
+                context.callback(|text: String| Msg::Menu(MenuMsg::StartSearch(text))),
+            ),
+        )
+        .child(
+            "list",
+            Border::new()
+                .height(START_LIST_HEIGHT)
+                .content(scroll_y(list)),
+        )
+        .into()
 }

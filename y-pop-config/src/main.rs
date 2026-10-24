@@ -25,6 +25,7 @@
 
 mod app_form;
 mod app_icons;
+mod from_file;
 mod general;
 mod icon_picker;
 mod inspector;
@@ -33,6 +34,7 @@ mod menu_view;
 mod prefs;
 mod roots;
 mod screens;
+mod start_menu;
 mod target_check;
 mod tree;
 mod variables;
@@ -106,6 +108,18 @@ struct ConfigApp {
     collapsed: HashSet<ItemId>,
     /// The row of less common things to add is open.
     more_open: bool,
+    /// The app picker is open under the toolbar.
+    app_picker: bool,
+    /// The Start menu dialog (the picker's "Start menu…") is open.
+    start_open: bool,
+    /// The Start menu source: what was found, the search, the ticks.
+    start_menu: start_menu::StartMenu,
+    start_entries: Vec<start_menu::StartEntry>,
+    /// How the item selected after a drop was made, for the strip at the top
+    /// of its inspector. Lives until another item is selected; never saved.
+    origin: Option<(ItemId, from_file::Origin)>,
+    /// What a file being dragged is over, for the outline to highlight.
+    drag_over: Option<menu_edit::DropTarget>,
     /// The inspector shows the XML an item is written as.
     show_xml: bool,
     /// The hotkey picker under an item's hotkey, when one is open.
@@ -220,6 +234,8 @@ enum Msg {
 
     /// An item's icon came back from the thread pool (PNG bytes, or none found).
     IconLoaded(app_icons::IconSpec, Option<Vec<u8>>),
+    /// The Start menu shortcuts were found and read on the thread pool.
+    StartMenuScanned(Vec<start_menu::StartEntry>),
     /// The icon picker.
     Icon(icon_picker::IconMsg),
 
@@ -291,6 +307,12 @@ impl Component for ConfigApp {
             selection: HashMap::new(),
             collapsed: HashSet::new(),
             more_open: false,
+            app_picker: false,
+            start_open: false,
+            start_menu: start_menu::StartMenu::default(),
+            start_entries: Vec::new(),
+            origin: None,
+            drag_over: None,
             show_xml: false,
             hotkeys: menu_view::HotkeyUi::default(),
             target_stash: HashMap::new(),
@@ -343,10 +365,15 @@ impl Component for ConfigApp {
             Msg::Menu(message) => self.edit_menu(message),
             Msg::Ignored => {}
             Msg::IconLoaded(spec, png) => self.icons.finish(spec, png),
+            Msg::StartMenuScanned(entries) => {
+                self.start_entries = entries;
+                self.start_menu.state = start_menu::Load::Done;
+            }
             Msg::Icon(message) => self.edit_icon(message),
 
             other => self.edit(other),
         }
+        self.request_start_menu(context);
         self.request_icons(context);
     }
 
@@ -408,6 +435,13 @@ impl Component for ConfigApp {
                     selected: self.selected(id),
                     collapsed: &self.collapsed,
                     more_open: self.more_open,
+                    app_picker: self.app_picker,
+                    drag_over: self.drag_over,
+                    origin: self
+                        .origin
+                        .as_ref()
+                        .filter(|(item, _)| *item == self.selected(id))
+                        .map(|(_, origin)| origin),
                     show_xml: self.show_xml,
                     show_comments: self.prefs.show_comments,
                     confirming_delete: self.confirming_delete == Some(id),
@@ -483,8 +517,8 @@ impl Component for ConfigApp {
             .keyed_children([("nav", nav), ("bar", bar)]);
         // A picker covers the whole window, bar included.
         let window = Viewport::new(self.window_width);
-        let modal =
-            inspector::hotkey_modal(settings, &self.hotkeys, window, context).or_else(|| {
+        let modal = inspector::hotkey_modal(settings, &self.hotkeys, window, context)
+            .or_else(|| {
                 icon_picker::icon_modal(
                     settings,
                     &self.icon_picker,
@@ -493,6 +527,21 @@ impl Component for ConfigApp {
                     window,
                     context,
                 )
+            })
+            .or_else(|| match self.screen {
+                Screen::Menu(root) if self.start_open => Some(menu_view::start_modal(
+                    settings,
+                    &menu_view::StartUi {
+                        root,
+                        start: &self.start_menu,
+                        entries: &self.start_entries,
+                        builtins: &self.builtins,
+                        icons: &self.icons,
+                    },
+                    window,
+                    context,
+                )),
+                _ => None,
             });
         // Always the same wrapper, the app always its first child: if the root
         // changed shape when a picker opened, the reactor would rebuild the
@@ -516,6 +565,17 @@ impl ConfigApp {
 }
 
 impl ConfigApp {
+    /// The first time the Start menu dialog opens, reads the Start menu on the
+    /// thread pool (kept for the session: it rarely changes under us).
+    fn request_start_menu(&mut self, context: &ComponentContext<Self>) {
+        if !self.start_open || self.start_menu.state != start_menu::Load::NotStarted {
+            return;
+        }
+        self.start_menu.state = start_menu::Load::Loading;
+        context
+            .spawn_background(|_| Msg::StartMenuScanned(start_menu::scan(&start_menu::folders())));
+    }
+
     /// Starts loading, on the thread pool, every icon the tree shows that has
     /// not been asked for yet. Called after every message: an edit to a
     /// target or an `icon=` can make a new one necessary.
@@ -528,6 +588,18 @@ impl ConfigApp {
                 .filter_map(|item| app_icons::spec_for(settings, item, &mut *builtins))
                 .collect();
             wanted.extend(self.icon_picker.visible());
+            if self.start_open && self.start_menu.state == start_menu::Load::Done {
+                wanted.extend(
+                    self.start_menu
+                        .listed(&self.start_entries)
+                        .0
+                        .into_iter()
+                        .map(|entry| app_icons::IconSpec::File {
+                            path: entry.path.clone(),
+                            index: None,
+                        }),
+                );
+            }
             wanted
         };
         for spec in wanted {
@@ -1043,6 +1115,12 @@ fn test_app(settings: Settings) -> ConfigApp {
         selection: HashMap::new(),
         collapsed: HashSet::new(),
         more_open: false,
+        app_picker: false,
+        start_open: false,
+        start_menu: start_menu::StartMenu::default(),
+        start_entries: Vec::new(),
+        origin: None,
+        drag_over: None,
         show_xml: false,
         hotkeys: menu_view::HotkeyUi::default(),
         target_stash: HashMap::new(),

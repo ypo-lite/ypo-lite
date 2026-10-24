@@ -17,7 +17,6 @@
 	<mouse>
 		<drag   button="left"  mod="Alt"/>
 		<resize button="right" mod="Alt"/>
-		<!-- <switch button="wheel" mod="Alt"/> -->
 	</mouse>
 
 	<!--

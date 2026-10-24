@@ -116,7 +116,7 @@ impl Hover {
         let _ = unsafe { SetTimer(Some(self.owner), MIN_HOVER_TIMER_ID, self.dwell_ms, None) };
     }
 
-    /// A right (or any other non-left/wheel) button just went down — claims
+    /// A right (or any other non-left) button just went down — claims
     /// it, swallowing the event, when it lands on a minimize button and
     /// `right-click-action` is configured on. `false` leaves it to
     /// [`super::gesture::Gesture`], the same as if this feature did not

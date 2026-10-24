@@ -101,7 +101,6 @@ pub struct Binding {
 pub struct Mouse {
     pub drag: Option<Gesture>,
     pub resize: Option<Gesture>,
-    pub switch: Option<Gesture>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -115,7 +114,6 @@ pub enum Button {
     Left,
     Right,
     Middle,
-    Wheel,
 }
 
 impl Button {
@@ -124,7 +122,6 @@ impl Button {
             "left" => Self::Left,
             "right" => Self::Right,
             "middle" => Self::Middle,
-            "wheel" => Self::Wheel,
             _ => return None,
         })
     }
@@ -135,7 +132,6 @@ impl Button {
             Self::Left => "left",
             Self::Right => "right",
             Self::Middle => "middle",
-            Self::Wheel => "wheel",
         }
     }
 }
@@ -407,11 +403,7 @@ impl Settings {
 
 fn write_mouse(out: &mut String, mouse: &Mouse) {
     out.push_str("\t<mouse>\n");
-    for (name, gesture) in [
-        ("drag", mouse.drag),
-        ("resize", mouse.resize),
-        ("switch", mouse.switch),
-    ] {
+    for (name, gesture) in [("drag", mouse.drag), ("resize", mouse.resize)] {
         let Some(gesture) = gesture else { continue };
         let _ = write!(out, "\t\t<{name} button=\"{}\"", gesture.button.name());
         // "Alt" is what a missing `mod` attribute reads as (see `Reader::mouse`).
@@ -565,7 +557,12 @@ fn write_min_button(out: &mut String, min_button: &MinButton) {
     if min_button.hover_delay_ms != MinButton::default().hover_delay_ms {
         let _ = write!(out, " hover-delay=\"{}\"", min_button.hover_delay_ms);
     }
-    write_u32_if_changed(out, "columns", min_button.columns, MinButton::default().columns);
+    write_u32_if_changed(
+        out,
+        "columns",
+        min_button.columns,
+        MinButton::default().columns,
+    );
     match min_button.right_click_action {
         Some(action) => {
             let _ = write!(out, " right-click-action=\"{action}\"");
@@ -857,7 +854,6 @@ impl Reader {
             let slot = match element.name() {
                 "drag" => &mut mouse.drag,
                 "resize" => &mut mouse.resize,
-                "switch" => &mut mouse.switch,
                 name => {
                     self.warn(element, format!("<{name}> is not a mouse gesture"));
                     continue;
@@ -1221,7 +1217,8 @@ mod tests {
                  <mouse>
                    <drag button="left" mod="Alt"/>
                    <resize button="right"/>
-                   <switch button="sideways" mod="Alt"/>
+                   <switch button="left" mod="Alt"/>
+                   <drag button="wheel"/>
                  </mouse>
                </y-snap>"#,
         );
@@ -1232,8 +1229,10 @@ mod tests {
 
         // No mod attribute: Alt, the default.
         assert_eq!(settings.mouse.resize.expect("resize").modifiers, MOD_ALT);
-        assert!(settings.mouse.switch.is_none());
-        assert_eq!(settings.warnings.len(), 1);
+        // `<switch>` is no longer a gesture, and `wheel` no longer a button:
+        // both warn, and the drag read above is left alone.
+        assert_eq!(drag.button, Button::Left);
+        assert_eq!(settings.warnings.len(), 2, "{:?}", settings.warnings);
     }
 
     #[test]

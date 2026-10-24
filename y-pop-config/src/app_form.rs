@@ -170,7 +170,8 @@ fn target(
             .build(viewport);
 
         let expanded = settings.expand_text(&raw, &mut *ui.builtins.borrow_mut());
-        Stack::vertical(space::S)
+        let suggestion = settings.tokenize(&raw, &mut *ui.builtins.borrow_mut());
+        let mut body = Stack::vertical(space::S)
             .child(
                 "field",
                 field(
@@ -179,8 +180,27 @@ fn target(
                 ),
             )
             .child("tools", tools)
-            .child("readout", readout(&expanded, folder))
-            .into()
+            .child("readout", readout(&expanded, folder));
+        if let Some(better) = suggestion {
+            let use_it = better.clone();
+            body = body.child(
+                "suggestion",
+                Stack::vertical(space::XS)
+                    .child("text", text::caption(format!("Could be written {better}")))
+                    .child(
+                        "use",
+                        button(
+                            "Use it",
+                            false,
+                            true,
+                            context.callback(move |()| {
+                                Msg::Menu(MenuMsg::Text(id, TextField::Target, use_it.clone()))
+                            }),
+                        ),
+                    ),
+            );
+        }
+        body.into()
     };
 
     Stack::vertical(space::M)

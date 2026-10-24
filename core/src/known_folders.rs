@@ -11,7 +11,7 @@ use std::collections::HashMap;
 
 use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::UI::Shell::{
-    FOLDERID_Desktop, FOLDERID_Documents, FOLDERID_LocalAppData, FOLDERID_Music, FOLDERID_Profile,
+    FOLDERID_CommonPrograms, FOLDERID_Desktop, FOLDERID_Documents, FOLDERID_LocalAppData, FOLDERID_Music, FOLDERID_Profile, FOLDERID_Programs,
     FOLDERID_ProgramFiles, FOLDERID_ProgramFilesX86, FOLDERID_RoamingAppData, FOLDERID_System,
     FOLDERID_SystemX86, FOLDERID_Videos, FOLDERID_Windows, KF_FLAG_DEFAULT, SHGetKnownFolderPath,
 };
@@ -33,6 +33,10 @@ pub enum KnownFolder {
     LocalAppData,
     RoamingAppData,
     Profile,
+    /// The current user's Start menu `Programs` folder.
+    StartMenuPrograms,
+    /// The Start menu `Programs` folder every user shares.
+    CommonStartMenuPrograms,
 }
 
 impl KnownFolder {
@@ -50,6 +54,8 @@ impl KnownFolder {
             Self::LocalAppData => &FOLDERID_LocalAppData,
             Self::RoamingAppData => &FOLDERID_RoamingAppData,
             Self::Profile => &FOLDERID_Profile,
+            Self::StartMenuPrograms => &FOLDERID_Programs,
+            Self::CommonStartMenuPrograms => &FOLDERID_CommonPrograms,
         }
     }
 }

@@ -5,7 +5,10 @@
 //!
 //! * `.exe`/`.dll`/`.ico`/`.lnk` carry their own icon (optionally one of
 //!   several, by index — the `,6` in PortAL's `ico="...,6"`) and are
-//!   extracted directly with `ExtractIconExW`. The index is passed to it
+//!   extracted directly with `ExtractIconExW` — except a `.lnk` without an
+//!   index, whose icon lives in the link itself and which only the shell
+//!   (`SHGetFileInfoW` on the real file) resolves; it is still cached per
+//!   file, not per extension. The index is passed to it
 //!   exactly as given, deliberately including a negative one: Windows
 //!   itself treats a negative `nIconIndex` as a *resource id* rather than a
 //!   position — the same `"shell32.dll,-41"` convention a `.lnk`'s icon
@@ -356,6 +359,10 @@ fn has_its_own_icon(extension: &str) -> bool {
     )
 }
 
+fn is_shortcut(extension: &str) -> bool {
+    extension.eq_ignore_ascii_case("lnk")
+}
+
 fn extension_of(path: &str) -> Option<&str> {
     path.rsplit_once('.').map(|(_, extension)| extension)
 }
@@ -419,6 +426,10 @@ impl IconCache {
     /// defaults to the first), otherwise the shell's generic icon for
     /// whatever type it is. `None` if Windows could not produce one.
     pub fn for_file(&mut self, path: &str, index: Option<i32>) -> Option<Icon> {
+        // A shortcut keeps its icon in the link, not in a resource
+        // `ExtractIconExW` could read: only the shell resolves it (its own
+        // `IconLocation`, else the target's). Still one entry per file.
+        let through_shell = index.is_none() && extension_of(path).is_some_and(is_shortcut);
         let index = index.unwrap_or(0);
         let key = match extension_of(path) {
             Some(extension) if has_its_own_icon(extension) => {
@@ -433,7 +444,7 @@ impl IconCache {
         self.cache
             .entry(key)
             .or_insert_with(|| {
-                if owns_icon {
+                if owns_icon && !through_shell {
                     extract_own_icon(path, index)
                 } else {
                     shell_icon(path, false)

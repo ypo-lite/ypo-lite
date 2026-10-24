@@ -104,12 +104,56 @@ pub(crate) fn depth_words(depth: u32) -> String {
     }
 }
 
+/// Where files dropped on the outline go.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum DropTarget {
+    /// On a row: inside it when it is a group, else right after it.
+    Row(ItemId),
+    /// On the drop strip: at the insertion point, as the toolbar adds.
+    Zone,
+}
+
+/// A choice on the strip that says how a dropped file was turned into an item.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum OriginChange {
+    /// A shortcut: itself or its target.
+    Shortcut,
+    /// A folder: a submenu or opened.
+    Browse,
+    /// Paths with `%variables%` or absolute.
+    Variables,
+}
+
 pub enum MenuMsg {
+    /// Switch one of the strip's choices.
+    OriginSwitch(OriginChange),
+    /// Close the strip.
+    OriginDismiss,
+    /// A file is being dragged over a target (`None`: it left).
+    DragOver(Option<DropTarget>),
+    /// Files were dropped, as full paths in drop order.
+    Dropped(DropTarget, Vec<String>),
     Select(ItemId),
     ToggleCollapsed(ItemId),
     Add(NewKind),
     /// The row of less common things to add.
     MoreToggled,
+    /// "App…": opens or closes the app picker under the toolbar.
+    AppPickerToggled,
+    /// The picker's Browse…: files from the open dialog, added as a drop on the strip would.
+    AppBrowse,
+    /// The picker's Start menu…: opens the dialog listing the shortcuts.
+    StartOpened,
+    /// The dialog's Cancel: closes it and forgets the ticks.
+    StartClosed,
+    /// The Start menu list's search box.
+    StartSearch(String),
+    /// The Start menu list's "Show more".
+    StartMore,
+    /// Ticks or unticks a Start menu shortcut (by its path).
+    StartToggle(String),
+    /// "Add N apps": the ticked shortcuts, as a drop on the strip would add them.
+    StartAdd,
     /// The "written to y-pop.xml" preview.
     XmlToggled,
     Move {
@@ -283,6 +327,26 @@ impl ConfigApp {
             .map(|path| path.to_string_lossy().into_owned())
     }
 
+    /// The app picker's Browse…: any number of programs, shortcuts or files.
+    fn browse_apps(&self) -> Vec<String> {
+        let options = y_core::dialog::OpenOptions {
+            title: Some("Add programs, shortcuts or files"),
+            filters: &[
+                ("Programs and shortcuts", "*.exe;*.lnk;*.bat;*.cmd"),
+                ("All files", "*.*"),
+            ],
+            multiple: true,
+            ..Default::default()
+        };
+        // The window being clicked is the foreground one.
+        let owner = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
+        y_core::dialog::open_files(Some(owner), &options)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect()
+    }
+
     /// "Run now": launches the app as y-pop would — expanded, with the
     /// current clipboard — and puts the outcome in the status bar.
     fn run_now(&mut self, id: ItemId) {
@@ -309,6 +373,9 @@ impl ConfigApp {
         match message {
             MenuMsg::Select(id) => {
                 self.selection.insert(root, id);
+                if self.origin.as_ref().is_some_and(|(item, _)| *item != id) {
+                    self.origin = None;
+                }
                 return;
             }
             MenuMsg::ToggleCollapsed(id) => {
@@ -319,6 +386,61 @@ impl ConfigApp {
             }
             MenuMsg::MoreToggled => {
                 self.more_open = !self.more_open;
+                self.app_picker = false;
+                return;
+            }
+            MenuMsg::AppPickerToggled => {
+                self.app_picker = !self.app_picker;
+                self.more_open = false;
+                return;
+            }
+            MenuMsg::StartSearch(text) => {
+                self.start_menu.set_search(text);
+                return;
+            }
+            MenuMsg::StartMore => {
+                self.start_menu.show_more();
+                return;
+            }
+            MenuMsg::StartToggle(path) => {
+                if !self.start_menu.checked.remove(&path) {
+                    self.start_menu.checked.insert(path);
+                }
+                return;
+            }
+            MenuMsg::StartOpened => {
+                self.start_open = true;
+                return;
+            }
+            MenuMsg::StartClosed => {
+                self.start_open = false;
+                self.start_menu.checked.clear();
+                return;
+            }
+            MenuMsg::StartAdd => {
+                self.app_picker = false;
+                self.start_open = false;
+                let paths = self.start_menu.checked_in_order(&self.start_entries);
+                self.start_menu.checked.clear();
+                if !paths.is_empty() {
+                    self.edit_menu(MenuMsg::Dropped(DropTarget::Zone, paths));
+                }
+                return;
+            }
+            MenuMsg::AppBrowse => {
+                self.app_picker = false;
+                let paths = self.browse_apps();
+                if !paths.is_empty() {
+                    self.edit_menu(MenuMsg::Dropped(DropTarget::Zone, paths));
+                }
+                return;
+            }
+            MenuMsg::OriginDismiss => {
+                self.origin = None;
+                return;
+            }
+            MenuMsg::DragOver(target) => {
+                self.drag_over = target;
                 return;
             }
             MenuMsg::XmlToggled => {
@@ -379,6 +501,86 @@ impl ConfigApp {
         };
 
         match message {
+            MenuMsg::Dropped(target, paths) => {
+                self.drag_over = None;
+                let over = match target {
+                    DropTarget::Row(id) => id,
+                    DropTarget::Zone => selected,
+                };
+                // Rows insert inside a group even when it is folded; the strip
+                // goes where the toolbar would add.
+                let none = std::collections::HashSet::new();
+                let folded = if target == DropTarget::Zone {
+                    &self.collapsed
+                } else {
+                    &none
+                };
+                if let Some(at) = tree::insertion_point(settings, root, Some(over), folded) {
+                    let mut items = Vec::new();
+                    let mut origin = None;
+                    for path in &paths {
+                        let resolved = crate::from_file::resolve(path);
+                        let builtins = &mut *self.builtins.borrow_mut();
+                        let id = settings.new_id();
+                        let mut tokenize = |text: &str| {
+                            settings
+                                .tokenize(text, &mut *builtins)
+                                .unwrap_or_else(|| text.to_owned())
+                        };
+                        let (item, made) = crate::from_file::item_from_file(
+                            id,
+                            path,
+                            &resolved,
+                            &mut tokenize,
+                            crate::from_file::Variant::default(),
+                        );
+                        origin = Some((id, made));
+                        items.push(item);
+                    }
+                    if let Some(id) = tree::insert(settings, at, items) {
+                        self.collapsed.remove(&at.parent);
+                        self.selection.insert(root, id);
+                        self.origin = origin;
+                        changed = true;
+                    }
+                }
+            }
+            MenuMsg::OriginSwitch(change) => {
+                if let Some((id, origin)) = self.origin.clone().filter(|(id, _)| *id == selected) {
+                    let mut variant = origin.variant;
+                    match change {
+                        OriginChange::Shortcut => variant.keep_shortcut = !variant.keep_shortcut,
+                        OriginChange::Browse => variant.browse = !variant.browse,
+                        OriginChange::Variables => variant.variables = !variant.variables,
+                    }
+                    let resolved = crate::from_file::resolve(&origin.path);
+                    let builtins = &mut *self.builtins.borrow_mut();
+                    let mut tokenize = |text: &str| {
+                        settings
+                            .tokenize(text, &mut *builtins)
+                            .unwrap_or_else(|| text.to_owned())
+                    };
+                    let was = crate::from_file::item_from_file(
+                        id,
+                        &origin.path,
+                        &resolved,
+                        &mut tokenize,
+                        origin.variant,
+                    )
+                    .0;
+                    let (now, remade) = crate::from_file::item_from_file(
+                        id,
+                        &origin.path,
+                        &resolved,
+                        &mut tokenize,
+                        variant,
+                    );
+                    if let Some(item) = tree::item_mut(settings, id) {
+                        changed = crate::from_file::switch(item, &was, &now);
+                    }
+                    self.origin = Some((id, remade));
+                }
+            }
             MenuMsg::Add(kind) => {
                 if let Some(at) =
                     tree::insertion_point(settings, root, Some(selected), &self.collapsed)
@@ -389,6 +591,7 @@ impl ConfigApp {
                         self.collapsed.remove(&at.parent);
                         self.selection.insert(root, id);
                         self.more_open = false;
+                        self.app_picker = false;
                         changed = true;
                     }
                 }
@@ -648,9 +851,19 @@ impl ConfigApp {
             }
 
             // Settled above.
-            MenuMsg::Select(_)
+            MenuMsg::OriginDismiss
+            | MenuMsg::DragOver(_)
+            | MenuMsg::Select(_)
             | MenuMsg::ToggleCollapsed(_)
             | MenuMsg::MoreToggled
+            | MenuMsg::AppPickerToggled
+            | MenuMsg::AppBrowse
+            | MenuMsg::StartOpened
+            | MenuMsg::StartClosed
+            | MenuMsg::StartSearch(_)
+            | MenuMsg::StartMore
+            | MenuMsg::StartToggle(_)
+            | MenuMsg::StartAdd
             | MenuMsg::XmlToggled
             | MenuMsg::HotkeyEdit(..)
             | MenuMsg::RunNow(_)
@@ -661,6 +874,13 @@ impl ConfigApp {
 
         if changed {
             self.dirty = true;
+        }
+        if self
+            .origin
+            .as_ref()
+            .is_some_and(|(item, _)| *item != self.selected(root))
+        {
+            self.origin = None;
         }
         if let Some((menu, item)) = navigate {
             self.go(Screen::Menu(menu));

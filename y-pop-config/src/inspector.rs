@@ -11,8 +11,11 @@
 
 use y_pop::settings::{Item, ItemId, ItemKind, Settings};
 
+use crate::from_file::{FileKind, Origin};
 use crate::icon_picker::IconMsg;
-use crate::menu_edit::{FlagField, MenuMsg, TextField, canonical_hotkey, split_hotkey};
+use crate::menu_edit::{
+    FlagField, MenuMsg, OriginChange, TextField, canonical_hotkey, split_hotkey,
+};
 use crate::menu_view::{HotkeyUi, MenuUi};
 use crate::tree::{self, MoveDir};
 use crate::ui::editor::modal;
@@ -43,6 +46,10 @@ pub fn inspector_view(
         .child(
             "header",
             header(settings, ui, item, is_root, inner, context),
+        )
+        .maybe(
+            "origin",
+            ui.origin.map(|origin| origin_strip(origin, inner, context)),
         )
         .maybe(
             "confirm",
@@ -81,6 +88,89 @@ pub fn inspector_view(
     body = body.child("xml", xml_preview(item, ui, context));
 
     card().content(body)
+}
+
+// ---- how it was made -----------------------------------------------
+
+/// "Created from Code.lnk", right after a drop, with the one-click alternatives
+/// (spec §3.3). It goes away with the selection and is never saved.
+fn origin_strip(origin: &Origin, viewport: Viewport, context: &ViewContext<ConfigApp>) -> View {
+    let variant = origin.variant;
+    let mut choices: Vec<(&str, &str, OriginChange)> = Vec::new();
+    match origin.kind {
+        FileKind::Link => choices.push(if variant.keep_shortcut {
+            (
+                "Use its target",
+                "Run what the shortcut points at, with its arguments",
+                OriginChange::Shortcut,
+            )
+        } else {
+            (
+                "Keep as shortcut",
+                "Run the .lnk itself",
+                OriginChange::Shortcut,
+            )
+        }),
+        FileKind::Folder => choices.push(if variant.browse {
+            (
+                "Open the folder",
+                "Open it in Explorer instead of listing it",
+                OriginChange::Browse,
+            )
+        } else {
+            (
+                "Show as submenu",
+                "List the folder's contents as a submenu",
+                OriginChange::Browse,
+            )
+        }),
+        _ => {}
+    }
+    if origin.tokenizable {
+        choices.push(if variant.variables {
+            (
+                "Use absolute path",
+                "Write the full path",
+                OriginChange::Variables,
+            )
+        } else {
+            (
+                "Use variables",
+                "Write the path with %variables% where one fits",
+                OriginChange::Variables,
+            )
+        });
+    }
+
+    let mut buttons = AutoGrid::new(140.0).max_columns(3).gap(space::S, space::S);
+    for (index, (label, tip, change)) in choices.into_iter().enumerate() {
+        buttons = buttons.item(
+            format!("choice{index}"),
+            button(
+                label,
+                false,
+                true,
+                context.callback(move |()| Msg::Menu(MenuMsg::OriginSwitch(change))),
+            )
+            .tooltip(tip),
+        );
+    }
+    buttons = buttons.item(
+        "dismiss",
+        button(
+            "Dismiss",
+            false,
+            true,
+            context.callback(|()| Msg::Menu(MenuMsg::OriginDismiss)),
+        ),
+    );
+    Stack::vertical(space::S)
+        .child(
+            "title",
+            text::body(format!("Created from {}", origin.file_name)),
+        )
+        .child("buttons", buttons.build(viewport))
+        .into()
 }
 
 // ---- header ----------------------------------------------------------

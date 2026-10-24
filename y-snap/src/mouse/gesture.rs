@@ -1,7 +1,7 @@
-//! Dragging, resizing and switching windows by mouse gesture.
+//! Dragging and resizing windows by mouse gesture.
 //!
-//! Everything here is driven purely by mouse buttons, the wheel, and the
-//! modifier keys held with them. What the pointer happens to be hovering —
+//! Everything here is driven purely by mouse buttons and the modifier keys
+//! held with them. What the pointer happens to be hovering —
 //! the minimize button popup — is [`super::hover`]'s business, not this
 //! module's; the two are kept apart so each can be read on its own.
 //!
@@ -44,16 +44,11 @@
 //! that can block is this thread's own message pump, which has no such
 //! timeout.
 
-use windows::Win32::Foundation::{HWND, LPARAM, POINT, RECT};
+use windows::Win32::Foundation::{HWND, POINT, RECT};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, HOT_KEY_MODIFIERS, MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, VIRTUAL_KEY,
     VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
 };
-use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GW_OWNER, GWL_EXSTYLE, GWL_STYLE, GetDesktopWindow, GetShellWindow, GetWindow,
-    GetWindowLongW, SetForegroundWindow, WS_EX_TOPMOST, WS_VISIBLE,
-};
-use windows::core::BOOL;
 
 use crate::config::{Button, Gesture as GestureConfig, Mouse};
 use crate::target;
@@ -64,7 +59,7 @@ use super::modifier_guard;
 /// A window resized down to nothing is not a feature.
 const MIN_SIZE: i32 = 32;
 
-/// Drag, resize and window-switch state.
+/// Drag and resize state.
 pub struct Gesture {
     config: Mouse,
     drag: Option<Move>,
@@ -234,18 +229,6 @@ impl Gesture {
         }
         false
     }
-
-    pub fn on_wheel(&mut self, delta: i16) -> bool {
-        let Some(gesture) = self.config.switch else {
-            return false;
-        };
-        if gesture.button != Button::Wheel || gesture.modifiers != modifiers_held() {
-            return false;
-        }
-
-        switch_window(delta > 0);
-        true
-    }
 }
 
 /// `gesture` if it is bound to `button` and its modifiers are exactly the
@@ -279,66 +262,4 @@ fn modifiers_held() -> HOT_KEY_MODIFIERS {
         modifiers |= MOD_SHIFT.0;
     }
     HOT_KEY_MODIFIERS(modifiers)
-}
-
-/// Moves the foreground window to the next or previous one in z-order.
-///
-/// Simpler than HulK's own version, which pushed the current window to the
-/// bottom of the stack before switching — an effect worth another look once
-/// this has been used for a while, but not needed for a first cut.
-fn switch_window(forward: bool) {
-    let windows = top_level_windows();
-    if windows.len() < 2 {
-        return;
-    }
-
-    let current = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
-    let index = windows
-        .iter()
-        .position(|&window| window == current)
-        .unwrap_or(0);
-    let next = if forward {
-        (index + 1) % windows.len()
-    } else {
-        (index + windows.len() - 1) % windows.len()
-    };
-
-    let _ = unsafe { SetForegroundWindow(windows[next]) };
-}
-
-/// Visible, non-topmost, unowned top-level windows, in z-order — a rough
-/// analogue of what Alt+Tab shows, and what the wheel gesture cycles through.
-fn top_level_windows() -> Vec<HWND> {
-    let mut windows: Vec<HWND> = Vec::new();
-    let _ = unsafe { EnumWindows(Some(collect_window), LPARAM(&raw mut windows as isize)) };
-    windows
-}
-
-unsafe extern "system" fn collect_window(hwnd: HWND, lparam: LPARAM) -> BOOL {
-    let windows = unsafe { &mut *(lparam.0 as *mut Vec<HWND>) };
-
-    let style = unsafe { GetWindowLongW(hwnd, GWL_STYLE) } as u32;
-    let ex_style = unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) } as u32;
-
-    if style & WS_VISIBLE.0 != 0 && ex_style & WS_EX_TOPMOST.0 == 0 {
-        let shell = unsafe { GetShellWindow() };
-        let desktop = unsafe { GetDesktopWindow() };
-
-        // The root of hwnd's owner chain, stopping at the shell or the
-        // desktop — mirrors HulK's own filter for "a real top-level window".
-        let mut root = hwnd;
-        loop {
-            let owner = unsafe { GetWindow(root, GW_OWNER) }.unwrap_or_default();
-            if owner.is_invalid() || owner == shell || owner == desktop {
-                break;
-            }
-            root = owner;
-        }
-
-        if root == hwnd && hwnd != shell {
-            windows.push(hwnd);
-        }
-    }
-
-    BOOL(1)
 }
