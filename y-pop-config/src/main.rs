@@ -7,7 +7,8 @@
 //!   functions on `Settings`: add, delete, find, label. No UI, tested.
 //! - [`prefs`] — "show comments" and the last screen, in `y-pop-config.ini`
 //!   next to `y-pop.xml`, never in it.
-//! - [`screens`] — one function per screen.
+//! - [`skin`], [`skin_view`], [`skin_preview`] — the Skin screen: the edits as
+//!   functions on `Settings`, the view, and the pictures of a menu.
 //!
 //! State lives in [`ConfigApp`]: the loaded `Settings` plus page-local UI
 //! state. Every screen is a function of that state and a `Viewport`, and
@@ -33,7 +34,9 @@ mod menu_edit;
 mod menu_view;
 mod prefs;
 mod roots;
-mod screens;
+mod skin;
+mod skin_preview;
+mod skin_view;
 mod start_menu;
 mod target_check;
 mod tree;
@@ -135,6 +138,8 @@ struct ConfigApp {
     icons: app_icons::IconStore,
     /// The icon picker modal, when one is open.
     icon_picker: icon_picker::IconPickerUi,
+    /// The Skin screen: the colour being edited, and its pictures.
+    skin_ui: skin::SkinUi,
     /// Renders what is copied while the window is alive — see
     /// `y_core::shell::ClipboardFlusher`. Held only for its `Drop`.
     _clipboard: Option<y_core::shell::ClipboardFlusher>,
@@ -245,6 +250,9 @@ enum Msg {
     /// The icon picker.
     Icon(icon_picker::IconMsg),
 
+    // Skin
+    Skin(skin::SkinMsg),
+
     // Variables
     VarNameChanged(usize, String),
     VarValueChanged(usize, String),
@@ -326,6 +334,7 @@ impl Component for ConfigApp {
             run_status: None,
             icons: app_icons::IconStore::default(),
             icon_picker: icon_picker::IconPickerUi::default(),
+            skin_ui: skin::SkinUi::default(),
             _clipboard: y_core::shell::ClipboardFlusher::start(),
             notes_ready: false,
             window_width: shell::INITIAL_WINDOW.0,
@@ -365,6 +374,7 @@ impl Component for ConfigApp {
                     self.dirty = true;
                     self.variables_ui = VariablesUi::default();
                     self.hotkeys = menu_view::HotkeyUi::default();
+                    self.skin_ui.editing = None;
                     self.leave_missing_menu();
                 }
             }
@@ -388,6 +398,7 @@ impl Component for ConfigApp {
                 self.start_menu.running = start_menu::Load::Done;
             }
             Msg::Icon(message) => self.edit_icon(message),
+            Msg::Skin(message) => self.edit_skin(message),
 
             other => self.edit(other),
         }
@@ -439,7 +450,7 @@ impl Component for ConfigApp {
             Screen::General => {
                 general::general_view(settings, &self.path, self.notes_ready, viewport, context)
             }
-            Screen::Skin => screens::skin(settings),
+            Screen::Skin => skin_view::skin_view(settings, &self.skin_ui, viewport, context),
             Screen::Variables => variables::variables_view(
                 settings,
                 &mut *self.builtins.borrow_mut(),
@@ -669,6 +680,7 @@ impl ConfigApp {
         self.screen = screen;
         self.confirming_delete = None;
         self.hotkeys = menu_view::HotkeyUi::default();
+        self.skin_ui.editing = None;
         self.run_status = None;
         self.remember_screen();
     }
@@ -894,6 +906,7 @@ impl ConfigApp {
         self.confirming_reload = false;
         self.confirming_delete = None;
         self.hotkeys = menu_view::HotkeyUi::default();
+        self.skin_ui.editing = None;
         self.run_status = None;
         self.undo = None;
         // A menu that is gone from the file is a screen that is gone.
@@ -1177,6 +1190,7 @@ fn test_app(settings: Settings) -> ConfigApp {
         run_status: None,
         icons: app_icons::IconStore::default(),
         icon_picker: icon_picker::IconPickerUi::default(),
+        skin_ui: skin::SkinUi::default(),
         _clipboard: None,
         notes_ready: true,
         window_width: 1000.0,

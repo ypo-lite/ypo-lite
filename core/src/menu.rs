@@ -78,6 +78,7 @@ use crate::overlay::Color;
 
 pub mod paint;
 pub use paint::{ICON_SIZE, handle_draw_item, handle_measure_item};
+pub mod preview;
 
 /// The mnemonic of a label — `P&ageant` is `a`, `&&` is a literal ampersand
 /// and not one — lowercased for comparison.

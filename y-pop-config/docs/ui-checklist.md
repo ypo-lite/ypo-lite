@@ -86,6 +86,16 @@ Every 👁 row is checked by resizing a real window across the thresholds:
 | 28 | The app picker | 👁 | "App…" opens "Add an app" under the toolbar (and closes "More"; "More" closes it). Browse… opens a multi-select dialog: pick two programs and a `.lnk`, they land at the marker in order, the last selected with its origin strip. Cancelling the dialog adds nothing. Manual adds an empty app and closes the panel. Close closes it. Check it wraps at narrow widths. |
 | 29 | The Start menu list in the app picker | 👁 | Open "App…": "Reading the Start menu…" first, then the list with icons arriving. Search narrows it (several words); tick a few, "Add N apps" counts them, adds them at the marker in list order and closes the picker. Apps already in the menu say so (add a program, reopen, check its Start menu entry is flagged). The list scrolls inside its 260 px box and the toolbar does not push the rows away; check at narrow widths and with the pinned layout. |
 
-## Placeholder screens
+## Skin (`skin_view.rs`, `skin.rs`, `skin_preview.rs`)
 
-Skin is still a stub from phase 3.
+| # | Requirement | Status | Notes |
+|---|---|---|---|
+| 1 | The five themes are cards with a picture of their menu | 👁 | `AutoGrid` (min 150, up to 5 columns), the chosen one Accent. Each picture is drawn by `y_core::menu::preview` (the real painter). Native's is an approximation (black on white, system blue): Windows draws the real one. Auto's caption names what it is now; flip Windows light/dark and revisit the screen. Check the pictures are sharp at 125–200 % and shrink, never overflow, at 560px. |
+| 2 | The preview is y-pop's own menu with the overrides on | 👁 | A fixed sample (hovered "Paint" with its submenu beside it, a shortcut, a titled separator, a disabled row). Compare it with a real y-pop menu under the same skin: row heights, text, arrow, hover, edge rule, icon-column gradient. Known differences: no icons, no system shadow or rounded popup corners, a one-pixel frame in a mix of text and back. Beside the controls when wide, above them when narrow. |
+| 3 | An override reads "theme: #…" until set, and goes back | 👁 | Five swatches; the hex is the theme's until set, then the colour and a ↺ button under it. |
+| 4 | The colour editor opens inline, edits live, and cancels | 👁 | The picker (no alpha) opens under the section the swatch is in; the preview follows while you drag. Cancel puts back the colour (or inherits again), Done keeps it. Opening the screen, or the editor, must not mark the file changed. |
+| 5 | Padding and margin inherit when empty | 👁 | Empty box = the theme's value, shown under it. Opening the screen must not mark the file changed. |
+| 6 | Border and the two gradients are written whole or not at all | 👁 | A switch each; on, it starts from what the theme gives (a Dark border starts at 1px), off drops it with its colours. A colour inside has no reset of its own. |
+| 7 | "N overrides on top of X" and Reset all | 👁 | Reset all is one Undo step; notes inside `<skin>` survive it. |
+| 8 | Native: overrides draw as Auto, and it says so | 👁 | Theme Native and nothing set: "nothing to preview". Set any override: the readout and the preview say Auto, as y-pop does. |
+| 9 | Nothing marks the file changed on opening | 👁 | `NumberBox`, `ComboBox` and `ColorPicker` report values when first set; each handler ignores an unchanged one (unit-tested in `skin.rs`). |
