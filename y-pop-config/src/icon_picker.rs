@@ -5,7 +5,7 @@
 //! the "Choose icon…" button under the Icon field. Top to bottom: the icon
 //! now in use at 32 px with the value that will be written; "From target"
 //! (clear the attribute); the sources — the item's own program, four system
-//! files, "Other file…" — and a page of the icons in the chosen source.
+//! files, the built-in icons, "Other file…" — and a page of the icons in the chosen source.
 //!
 //! Like the hotkey picker, a choice **commits as it is made** (so the tree
 //! behind it follows) and Cancel puts the old value back.
@@ -18,6 +18,7 @@
 //! Grids of 300+ icons (`shell32.dll`) are shown a page at a time: a page is
 //! [`PAGE`] icons, so the window never holds more than that many images.
 
+use y_pop::internal_icons;
 use y_pop::settings::{Item, ItemId, ItemKind, Settings};
 use y_pop::variables::Lookup;
 
@@ -50,6 +51,8 @@ pub enum Source {
     Named(usize),
     /// A file chosen with the dialog, as an absolute path.
     Other(String),
+    /// The built-in icons (`@name`), `y_pop::internal_icons::ALL`.
+    Internal,
 }
 
 /// The open picker: which item, what it had, what it is looking at.
@@ -74,17 +77,25 @@ impl IconPickerUi {
 
     /// The icons of the page now shown, for the background loader.
     pub fn visible(&self) -> Vec<IconSpec> {
-        if self.open.is_none() || self.path.is_empty() {
+        let internal = self.source == Some(Source::Internal);
+        if self.open.is_none() || (self.path.is_empty() && !internal) {
             return Vec::new();
         }
         let first = self.page * PAGE;
         let last = (first + PAGE).min(self.count as usize);
-        (first..last)
-            .map(|index| IconSpec::File {
+        (first..last).map(|index| self.spec_at(index)).collect()
+    }
+
+    /// The icon at `index` of the source now shown.
+    fn spec_at(&self, index: usize) -> IconSpec {
+        if self.source == Some(Source::Internal) {
+            IconSpec::Internal(internal_icons::ALL[index].name)
+        } else {
+            IconSpec::File {
                 path: self.path.clone(),
                 index: Some(index as i32),
-            })
-            .collect()
+            }
+        }
     }
 }
 
@@ -132,6 +143,12 @@ impl ConfigApp {
             }
             IconMsg::Pick(index) => {
                 let text = match index {
+                    Some(index) if self.icon_picker.source == Some(Source::Internal) => {
+                        match internal_icons::ALL.get(index as usize) {
+                            Some(internal) => internal.value(),
+                            None => return,
+                        }
+                    }
                     Some(index) => format!("{},{index}", self.icon_picker.raw),
                     None => String::new(),
                 };
@@ -174,10 +191,14 @@ impl ConfigApp {
         let current = original
             .as_deref()
             .map(|icon| split_icon_text(icon).0.to_ascii_lowercase());
+        let is_internal = original
+            .as_deref()
+            .is_some_and(|icon| internal_icons::find(icon).is_some());
         let source = NAMED
             .iter()
             .position(|(_, raw)| current.as_deref() == Some(&raw.to_ascii_lowercase()))
             .map(Source::Named)
+            .or(is_internal.then_some(Source::Internal))
             .or_else(|| {
                 current
                     .clone()
@@ -202,6 +223,17 @@ impl ConfigApp {
         let Some(item) = tree::item(settings, id) else {
             return;
         };
+        if source == Source::Internal {
+            self.icon_picker = IconPickerUi {
+                source: Some(source),
+                raw: String::new(),
+                path: String::new(),
+                count: internal_icons::ALL.len() as u32,
+                page: 0,
+                ..std::mem::take(&mut self.icon_picker)
+            };
+            return;
+        }
         let Some(raw) = source_raw(item, &source) else {
             return;
         };
@@ -236,6 +268,7 @@ fn source_raw(item: &Item, source: &Source) -> Option<String> {
         Source::Own => own_program(item),
         Source::Named(index) => NAMED.get(*index).map(|(_, raw)| (*raw).to_owned()),
         Source::Other(path) => Some(path.clone()),
+        Source::Internal => None,
     }
 }
 
@@ -310,6 +343,13 @@ pub fn icon_modal(
     // Which cell is the item's current icon: its `icon=`, expanded, when it
     // names this source.
     let chosen_index = current.as_deref().and_then(|icon| {
+        if selected == Some(&Source::Internal) {
+            let internal = internal_icons::find(icon)?;
+            return internal_icons::ALL
+                .iter()
+                .position(|other| other.name == internal.name)
+                .map(|index| index as i32);
+        }
         let (path, index) = split_icon_text(&settings.expand_text(icon, builtins));
         path.trim()
             .trim_matches('"')
@@ -340,6 +380,12 @@ pub fn icon_modal(
             true,
         ));
     }
+    sources.push(source_button(
+        "internal".into(),
+        "Built-in",
+        Source::Internal,
+        true,
+    ));
     let other_chosen = matches!(selected, Some(Source::Other(_)));
     sources.push((
         "other".into(),
@@ -395,12 +441,10 @@ fn grid(
 
     let first = picker.page * PAGE;
     let last = (first + PAGE).min(picker.count as usize);
+    let internal = picker.source == Some(Source::Internal);
 
     let cells = (first..last).map(|index| {
-        let spec = IconSpec::File {
-            path: picker.path.clone(),
-            index: Some(index as i32),
-        };
+        let spec = picker.spec_at(index);
         let face = icon_or_symbol(icons.image(Some(&spec), CELL), Symbol::Placeholder, CELL);
         let button = Button::new()
             .style(if chosen_index == Some(index as i32) {
@@ -412,7 +456,10 @@ fn grid(
             .fill()
             .on_click(context.callback(move |()| Msg::Icon(IconMsg::Pick(Some(index as u32)))))
             .content(face);
-        let button: View = button.tooltip(format!("Icon {index}"));
+        let button: View = match internal_icons::ALL.get(index).filter(|_| internal) {
+            Some(named) => button.tooltip(format!("{} (@{})", named.title, named.name)),
+            None => button.tooltip(format!("Icon {index}")),
+        };
         (index, button)
     });
     let grid = AutoGrid::new(CELL + 20.0)
@@ -426,7 +473,11 @@ fn grid(
         "caption",
         text::caption(format!(
             "{} · {} icon{}",
-            picker.path,
+            if internal {
+                "Built into y-pop, written @name"
+            } else {
+                &picker.path
+            },
             picker.count,
             if picker.count == 1 { "" } else { "s" }
         )),

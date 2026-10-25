@@ -56,6 +56,15 @@
 //! built, so it lives in `YPop::session`, not a local in `YPop::show_menu` —
 //! see that method.
 //!
+//! # Tooltips
+//!
+//! A native menu has no per-item window to hang a tooltip control off, so
+//! `main` watches `WM_MENUSELECT` instead: [`tooltip_for`] turns what it
+//! names into the item's `tooltip=` text and on-screen rectangle (recorded
+//! in [`Session`] as items are appended), and `crate::tooltip` shows it after
+//! a hover delay. Only tree nodes have tooltips — files `browse` discovers
+//! don't, there being no config to write one in.
+//!
 //! # Two id spaces, one command range each
 //!
 //! A selection out of the tree (`app`, `about`, `quit`) uses
@@ -72,13 +81,14 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use windows::Win32::Foundation::RECT;
 use windows::Win32::Graphics::Gdi::HBITMAP;
 use windows::Win32::UI::WindowsAndMessaging::HMENU;
 use windows::core::Result;
 
 use y_core::icon::{Bitmap, Icon, IconCache, StockIcon};
 use y_core::ids::IDM_FIRST;
-use y_core::menu::{self, MenuDesign, PopupMenu};
+use y_core::menu::{self, MenuDesign, MenuSelect, PopupMenu};
 
 use y_pop::model::{
     App, Browse, ConfigTree, Defaults, EventMask, NodeData, NodeId, NodeKind, OpenFolder,
@@ -111,6 +121,25 @@ pub struct Session {
     /// lazily by [`on_init_menu_popup`], reads this rather than re-resolving
     /// [`Theme`] itself, so a whole popup always themes consistently.
     design: Option<MenuDesign>,
+    /// Every item that has a `tooltip=` — see the module doc's "Tooltips"
+    /// section. Only items that have one are recorded, so a config without
+    /// tooltips costs nothing here.
+    tips: HashMap<TipKey, Arc<str>>,
+}
+
+/// How `WM_MENUSELECT` names an item: a leaf by command id, a submenu item
+/// by its position in its parent (it has no command id).
+#[derive(PartialEq, Eq, Hash)]
+enum TipKey {
+    Command(u32),
+    Submenu(usize, u32),
+}
+
+/// A tooltip to show: its text and the on-screen rectangle of the row it
+/// belongs to.
+pub struct Tip {
+    pub text: Arc<str>,
+    pub row: RECT,
 }
 
 struct PendingFolder {
@@ -144,6 +173,19 @@ impl Session {
             icons: IconCache::new(),
             bitmaps: Vec::new(),
             design,
+            tips: HashMap::new(),
+        }
+    }
+
+    /// The design this popup is painted with — `None` for `theme="native"`.
+    /// A tooltip borrows its colours from it.
+    pub fn design(&self) -> Option<MenuDesign> {
+        self.design
+    }
+
+    fn add_tip(&mut self, key: TipKey, node: &NodeData) {
+        if let Some(text) = &node.tooltip {
+            self.tips.insert(key, Arc::clone(text));
         }
     }
 
@@ -169,7 +211,8 @@ impl Session {
     }
 }
 
-/// `node.icon` if the config gave one, else a default depending on kind:
+/// `node.icon` if the config gave one (a file, or a built-in `@name` — see
+/// `y_pop::internal_icons`), else a default depending on kind:
 /// the generic folder icon for a `Group` (PortAL's own default — confirmed
 /// against a screenshot of PortAL's stock menu, not assumed — every
 /// submenu shows a folder unless its config gives it something else), the
@@ -179,6 +222,13 @@ impl Session {
 /// `icon="@app"` on a Store app asks for its own logo. A titled `Separator`
 /// gets none.
 fn resolve_icon(icons: &mut IconCache, node: &NodeData) -> Option<Icon> {
+    if let Some(internal) = node
+        .icon
+        .as_ref()
+        .and_then(|source| y_pop::internal_icons::find(&source.path))
+    {
+        return internal.load(icons);
+    }
     // `@app` is the Store app's own logo; on anything else it is as if no
     // icon had been given.
     let given = node.icon.as_ref().filter(|source| !source.is_app_logo());
@@ -270,6 +320,7 @@ fn append_children(tree: &ConfigTree, parent: NodeId, menu: &mut PopupMenu, sess
                 let shortcut = shortcut_text(&tree.defaults, node);
                 let _ = menu.add_submenu_with_shortcut(&node.name, submenu, shortcut.as_deref());
                 let position = menu.item_count().saturating_sub(1);
+                session.add_tip(TipKey::Submenu(menu.handle().0 as usize, position), node);
                 session.attach_icon(icon, |bitmap| {
                     menu.set_item_icon_by_position(position, bitmap)
                 });
@@ -291,6 +342,7 @@ fn append_children(tree: &ConfigTree, parent: NodeId, menu: &mut PopupMenu, sess
                 let shortcut = shortcut_text(&tree.defaults, node);
                 let _ = menu.add_submenu_with_shortcut(&node.name, submenu, shortcut.as_deref());
                 let position = menu.item_count().saturating_sub(1);
+                session.add_tip(TipKey::Submenu(menu.handle().0 as usize, position), node);
                 session.attach_icon(icon, |bitmap| {
                     menu.set_item_icon_by_position(position, bitmap)
                 });
@@ -312,10 +364,28 @@ fn append_children(tree: &ConfigTree, parent: NodeId, menu: &mut PopupMenu, sess
                 let icon = resolve_icon(&mut session.icons, node);
                 let shortcut = shortcut_text(&tree.defaults, node);
                 let _ = menu.add_item_with_shortcut(id, &node.name, shortcut.as_deref());
+                session.add_tip(TipKey::Command(id), node);
                 session.attach_icon(icon, |bitmap| menu.set_item_icon(id, bitmap));
             }
         }
     }
+}
+
+/// The tooltip for what `WM_MENUSELECT` just highlighted, if that item has
+/// one and is on screen. Items listed by `browse` never do.
+pub fn tooltip_for(session: &Session, select: MenuSelect) -> Option<Tip> {
+    let (key, menu, position) = match select {
+        MenuSelect::Command { menu, id } => {
+            (TipKey::Command(id), menu, menu::position_of(menu, id)?)
+        }
+        MenuSelect::Submenu { menu, position } => {
+            (TipKey::Submenu(menu.0 as usize, position), menu, position)
+        }
+        MenuSelect::Closed | MenuSelect::Other => return None,
+    };
+    let text = Arc::clone(session.tips.get(&key)?);
+    let row = menu::item_rect(menu, position)?;
+    Some(Tip { text, row })
 }
 
 /// Populates `hmenu` the moment it is about to be shown — call from `main`'s

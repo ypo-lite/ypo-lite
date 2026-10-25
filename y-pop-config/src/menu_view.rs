@@ -677,7 +677,7 @@ fn drop_zone(ui: &MenuUi<'_>, context: &ViewContext<ConfigApp>) -> View {
     let hint = Border::new()
         .padding(Thickness::xy(space::M, space::S))
         .content(text::caption(
-            "Drop programs, shortcuts or folders here to add them at the marker",
+            "Drop programs, shortcuts or folders here to add them at the marker (Start menu apps: use the picker)",
         ));
     drop_target(hint, DropTarget::Zone, ui, context)
 }

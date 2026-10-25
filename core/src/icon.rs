@@ -59,8 +59,12 @@ use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
 use windows::Win32::UI::Shell::{
     ExtractIconExW, IShellItem, IShellItemImageFactory, SHCreateItemFromParsingName, SHFILEINFOW,
     SHGFI_ICON, SHGFI_SMALLICON, SHGFI_USEFILEATTRIBUTES, SHGSI_ICON, SHGSI_SMALLICON,
-    SHGetFileInfoW, SHGetStockIconInfo, SHSTOCKICONID, SHSTOCKICONINFO, SIID_DELETE, SIID_INFO,
-    SIID_SETTINGS, SIIGBF_BIGGERSIZEOK, SIIGBF_ICONONLY,
+    SHGetFileInfoW, SHGetStockIconInfo, SHSTOCKICONID, SHSTOCKICONINFO, SIID_APPLICATION,
+    SIID_AUDIOFILES, SIID_DELETE, SIID_DESKTOPPC, SIID_DRIVEFIXED, SIID_DRIVENET, SIID_ERROR,
+    SIID_FIND, SIID_FOLDEROPEN, SIID_HELP, SIID_IMAGEFILES, SIID_INFO, SIID_KEY, SIID_LINK,
+    SIID_LOCK, SIID_MYNETWORK, SIID_PRINTER, SIID_RECYCLER, SIID_SERVER, SIID_SETTINGS, SIID_SHARE,
+    SIID_SHIELD, SIID_USERS, SIID_VIDEOFILES, SIID_WARNING, SIID_WORLD, SIID_ZIPFILE,
+    SIIGBF_BIGGERSIZEOK, SIIGBF_ICONONLY,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CopyIcon, CreateIconIndirect, DI_MASK, DI_NORMAL, DestroyIcon, DrawIconEx, GCLP_HICONSM,
@@ -388,7 +392,7 @@ enum CacheKey {
 }
 
 /// A shell stock icon — for the menu entries that have no file to take an
-/// icon from.
+/// icon from, and the built-in icons a config can ask for by name.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum StockIcon {
     /// The blue "i".
@@ -397,6 +401,30 @@ pub enum StockIcon {
     Delete,
     /// The cog.
     Settings,
+    Application,
+    Audio,
+    Computer,
+    Drive,
+    Error,
+    Find,
+    FolderOpen,
+    Help,
+    Images,
+    Key,
+    Link,
+    Lock,
+    Network,
+    NetworkDrive,
+    Printer,
+    RecycleBin,
+    Server,
+    Share,
+    Shield,
+    Users,
+    Video,
+    Warning,
+    World,
+    Zip,
 }
 
 impl StockIcon {
@@ -405,6 +433,30 @@ impl StockIcon {
             Self::Info => SIID_INFO,
             Self::Delete => SIID_DELETE,
             Self::Settings => SIID_SETTINGS,
+            Self::Application => SIID_APPLICATION,
+            Self::Audio => SIID_AUDIOFILES,
+            Self::Computer => SIID_DESKTOPPC,
+            Self::Drive => SIID_DRIVEFIXED,
+            Self::Error => SIID_ERROR,
+            Self::Find => SIID_FIND,
+            Self::FolderOpen => SIID_FOLDEROPEN,
+            Self::Help => SIID_HELP,
+            Self::Images => SIID_IMAGEFILES,
+            Self::Key => SIID_KEY,
+            Self::Link => SIID_LINK,
+            Self::Lock => SIID_LOCK,
+            Self::Network => SIID_MYNETWORK,
+            Self::NetworkDrive => SIID_DRIVENET,
+            Self::Printer => SIID_PRINTER,
+            Self::RecycleBin => SIID_RECYCLER,
+            Self::Server => SIID_SERVER,
+            Self::Share => SIID_SHARE,
+            Self::Shield => SIID_SHIELD,
+            Self::Users => SIID_USERS,
+            Self::Video => SIID_VIDEOFILES,
+            Self::Warning => SIID_WARNING,
+            Self::World => SIID_WORLD,
+            Self::Zip => SIID_ZIPFILE,
         }
     }
 }

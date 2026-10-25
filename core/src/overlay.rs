@@ -40,8 +40,8 @@ use windows::Win32::Graphics::Gdi::{
     AC_SRC_ALPHA, AC_SRC_OVER, BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BLENDFUNCTION,
     CreateCompatibleDC, CreateDIBSection, CreateFontW, DEFAULT_CHARSET, DIB_RGB_COLORS, DT_CENTER,
     DT_LEFT, DT_RIGHT, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject, DrawTextW, FF_DONTCARE,
-    FW_BOLD, FW_NORMAL, HBITMAP, HDC, HFONT, HGDIOBJ, SelectObject, SetBkMode, SetTextColor,
-    TRANSPARENT,
+    FW_BOLD, FW_NORMAL, GetDC, GetTextExtentPoint32W, HBITMAP, HDC, HFONT, HGDIOBJ, ReleaseDC,
+    SelectObject, SetBkMode, SetTextColor, TRANSPARENT,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::SetFocus;
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -941,6 +941,21 @@ impl Font {
         }
 
         Ok(Self { handle })
+    }
+
+    /// The width and height `text` takes on one line in this font, in pixels
+    /// — what an overlay sized to its content needs before it can be created.
+    pub fn measure(&self, text: &str) -> (i32, i32) {
+        let text: Vec<u16> = text.encode_utf16().collect();
+        let mut size = SIZE::default();
+        unsafe {
+            let dc = GetDC(None);
+            let previous = SelectObject(dc, self.handle.into());
+            let _ = GetTextExtentPoint32W(dc, &text, &mut size);
+            SelectObject(dc, previous);
+            ReleaseDC(None, dc);
+        }
+        (size.cx, size.cy)
     }
 }
 

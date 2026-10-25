@@ -566,7 +566,11 @@ fn fields(
             let mut form = Stack::vertical(space::L)
                 .child(
                     "fields",
-                    grid(vec![("name", name(placeholder)), ("icon", icon())]),
+                    grid(vec![
+                        ("name", name(placeholder)),
+                        ("tooltip", tooltip()),
+                        ("icon", icon()),
+                    ]),
                 )
                 .child(
                     "default",

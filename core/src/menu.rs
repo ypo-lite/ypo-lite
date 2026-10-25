@@ -60,15 +60,15 @@
 //! [`ItemKind`] needing to be visible to both — plain private items still
 //! reach `paint` for free, since it's a child module of this one.
 
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{CreateSolidBrush, DeleteObject, HBITMAP};
 use windows::Win32::UI::WindowsAndMessaging::{
-    AppendMenuW, CreatePopupMenu, DestroyMenu, GetMenuInfo, GetMenuItemCount, GetMenuItemInfoW,
-    HMENU, MENU_ITEM_FLAGS, MENUINFO, MENUITEMINFOW, MF_CHECKED, MF_DISABLED, MF_GRAYED,
-    MF_MENUBREAK, MF_OWNERDRAW, MF_POPUP, MF_SEPARATOR, MF_STRING, MFS_DISABLED, MFS_HILITE,
-    MFT_OWNERDRAW, MIIM_BITMAP, MIIM_DATA, MIIM_FTYPE, MIIM_STATE, MIIM_SUBMENU, MIM_BACKGROUND,
-    PostMessageW, SetForegroundWindow, SetMenuInfo, SetMenuItemInfoW, TPM_BOTTOMALIGN,
-    TPM_LEFTALIGN, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, WM_NULL,
+    AppendMenuW, CreatePopupMenu, DestroyMenu, GetMenuInfo, GetMenuItemCount, GetMenuItemID,
+    GetMenuItemInfoW, GetMenuItemRect, HMENU, MENU_ITEM_FLAGS, MENUINFO, MENUITEMINFOW, MF_CHECKED,
+    MF_DISABLED, MF_GRAYED, MF_MENUBREAK, MF_OWNERDRAW, MF_POPUP, MF_SEPARATOR, MF_STRING,
+    MFS_DISABLED, MFS_HILITE, MFT_OWNERDRAW, MIIM_BITMAP, MIIM_DATA, MIIM_FTYPE, MIIM_STATE,
+    MIIM_SUBMENU, MIM_BACKGROUND, PostMessageW, SetForegroundWindow, SetMenuInfo, SetMenuItemInfoW,
+    TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, WM_NULL,
 };
 use windows::core::{HSTRING, PCWSTR, Result};
 
@@ -1010,6 +1010,58 @@ pub fn item_count(menu: HMENU) -> u32 {
     unsafe { GetMenuItemCount(Some(menu)) }.max(0) as u32
 }
 
+/// The on-screen rectangle of the item at `position` in `menu` — `None` if
+/// the menu isn't being shown (or `position` is out of range). What a
+/// tooltip needs to sit next to the row `WM_MENUSELECT` just named.
+pub fn item_rect(menu: HMENU, position: u32) -> Option<RECT> {
+    let mut rect = RECT::default();
+    unsafe { GetMenuItemRect(None, menu, position, &mut rect) }
+        .ok()
+        .map(|()| rect)
+}
+
+/// The position of the item with command id `id` in `menu`, if it has one —
+/// `WM_MENUSELECT` names a leaf item by id, but [`item_rect`] wants a
+/// position.
+pub fn position_of(menu: HMENU, id: u32) -> Option<u32> {
+    (0..item_count(menu)).find(|&position| unsafe { GetMenuItemID(menu, position as i32) } == id)
+}
+
+/// What a `WM_MENUSELECT` message says changed.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MenuSelect {
+    /// The menu loop ended (`0xFFFF` flags, null menu): nothing is highlighted.
+    Closed,
+    /// A leaf item, by command id, in `menu`.
+    Command { menu: HMENU, id: u32 },
+    /// A submenu item, by position, in `menu` (the *parent* — the submenu's
+    /// own handle is not what the message carries).
+    Submenu { menu: HMENU, position: u32 },
+    /// Highlight moved onto something with neither (a separator, a disabled
+    /// item with no id) — whatever tooltip was up no longer applies.
+    Other,
+}
+
+/// Decodes `WM_MENUSELECT`'s parameters.
+pub fn decode_menu_select(wparam: WPARAM, lparam: LPARAM) -> MenuSelect {
+    let item = (wparam.0 & 0xFFFF) as u32;
+    let flags = ((wparam.0 >> 16) & 0xFFFF) as u32;
+    let menu = HMENU(lparam.0 as *mut _);
+
+    if flags == 0xFFFF && menu.is_invalid() {
+        MenuSelect::Closed
+    } else if menu.is_invalid() || flags & MF_SEPARATOR.0 != 0 {
+        MenuSelect::Other
+    } else if flags & MF_POPUP.0 != 0 {
+        MenuSelect::Submenu {
+            menu,
+            position: item,
+        }
+    } else {
+        MenuSelect::Command { menu, id: item }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use windows::Win32::Graphics::Gdi::CreateBitmap;
@@ -1018,6 +1070,35 @@ mod tests {
     };
 
     use super::*;
+
+    #[test]
+    fn menu_select_is_decoded_by_item_kind() {
+        let menu = LPARAM(0x1234);
+        let wparam = |item: usize, flags: usize| WPARAM(flags << 16 | item);
+
+        assert_eq!(
+            decode_menu_select(wparam(0, 0xFFFF), LPARAM(0)),
+            MenuSelect::Closed
+        );
+        assert_eq!(
+            decode_menu_select(wparam(105, 0), menu),
+            MenuSelect::Command {
+                menu: HMENU(0x1234 as *mut _),
+                id: 105
+            }
+        );
+        assert_eq!(
+            decode_menu_select(wparam(2, MF_POPUP.0 as usize), menu),
+            MenuSelect::Submenu {
+                menu: HMENU(0x1234 as *mut _),
+                position: 2
+            }
+        );
+        assert_eq!(
+            decode_menu_select(wparam(0, MF_SEPARATOR.0 as usize), menu),
+            MenuSelect::Other
+        );
+    }
 
     fn wide(text: &str) -> Vec<u16> {
         text.encode_utf16().collect()

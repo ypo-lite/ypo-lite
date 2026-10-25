@@ -43,6 +43,8 @@ pub enum IconSpec {
     Info,
     Delete,
     Settings,
+    /// A built-in icon (`icon="@name"`), by its catalogue name.
+    Internal(&'static str),
 }
 
 /// Pixels loaded; the screens draw it at [`SHOWN`] DIPs.
@@ -62,6 +64,9 @@ pub fn split_icon_text(expanded: &str) -> (String, Option<i32>) {
 /// The icon `item` shows in y-pop, if it has one.
 pub fn spec_for(settings: &Settings, item: &Item, builtins: &mut dyn Lookup) -> Option<IconSpec> {
     if let Some(text) = item.icon.as_deref().filter(|text| !text.trim().is_empty()) {
+        if let Some(internal) = y_pop::internal_icons::find(text) {
+            return Some(IconSpec::Internal(internal.name));
+        }
         // `@app` is a Store app's own logo; anywhere else it is as if no icon
         // had been given, as y-pop reads it.
         if !text.trim().eq_ignore_ascii_case(y_pop::model::APP_LOGO) {
@@ -101,7 +106,11 @@ pub fn load_png(spec: &IconSpec) -> Option<Vec<u8>> {
     static SHELL_ICON_LOADS: Mutex<()> = Mutex::new(());
     let _turn = matches!(
         spec,
-        IconSpec::Directory | IconSpec::Info | IconSpec::Delete | IconSpec::Settings
+        IconSpec::Directory
+            | IconSpec::Info
+            | IconSpec::Delete
+            | IconSpec::Settings
+            | IconSpec::Internal(_)
     )
     .then(|| {
         SHELL_ICON_LOADS
@@ -119,6 +128,8 @@ pub fn load_png(spec: &IconSpec) -> Option<Vec<u8>> {
             IconSpec::Info => cache.for_stock(StockIcon::Info),
             IconSpec::Delete => cache.for_stock(StockIcon::Delete),
             IconSpec::Settings => cache.for_stock(StockIcon::Settings),
+            IconSpec::Internal(name) => y_pop::internal_icons::find(&format!("@{name}"))
+                .and_then(|internal| internal.load(&mut cache)),
         };
         icon.and_then(|icon| icon.to_png(LOADED))
     };
@@ -382,6 +393,31 @@ mod tests {
             })
         );
         assert_eq!(found[3], Some(IconSpec::Directory));
+    }
+
+    #[test]
+    fn a_built_in_icon_name_is_its_own_spec_on_any_item() {
+        let found = specs(
+            r#"<y-pop><group name="G" icon="@Folder">
+                 <app name="a" exe="a.exe" icon="@about"/>
+                 <app name="b" exe="b.exe" icon="@nonsense"/>
+               </group></y-pop>"#,
+        );
+        assert_eq!(found[0], Some(IconSpec::Internal("folder")));
+        assert_eq!(found[1], Some(IconSpec::Internal("about")));
+        // Not in the catalogue: a path like any other.
+        assert!(matches!(&found[2], Some(IconSpec::File { path, .. }) if path == "@nonsense"));
+    }
+
+    #[test]
+    fn every_built_in_icon_loads() {
+        for internal in y_pop::internal_icons::ALL {
+            assert!(
+                load_png(&IconSpec::Internal(internal.name)).is_some(),
+                "{}",
+                internal.name
+            );
+        }
     }
 
     #[test]

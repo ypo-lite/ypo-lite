@@ -1045,9 +1045,22 @@ asking further:
   whole-tree behaviour today; no design gap to close.
 
 6. **`Presenter` trait + `list` presenter (B)** — not started.
-7. **Async icon cache + live refresh, tooltips** — not started. Wraps a
-   worker pool around step 4's extraction functions; not a replacement for
-   the sync `IconCache`, which stays the foundation both paths build on.
+7. 🟡 **Async icon cache + live refresh, tooltips.** **Tooltips shipped
+   (native backend):** `tooltip="..."` on a node shows after a 500 ms hover.
+   `main` forwards `WM_MENUSELECT` (`y_core::menu::decode_menu_select`);
+   `menu::tooltip_for` resolves it against tips recorded in `Session` as items
+   are appended (leaf by command id, submenu item by parent handle + position);
+   `y-pop/src/tooltip.rs` arms a one-shot `SetTimer` on the owner window and
+   then shows a small click-through `Overlay` under the row
+   (`y_core::menu::item_rect`), coloured from the popup's `MenuDesign` (pale
+   yellow for `theme="native"`). Deliberately not a `TTM_*` control, unlike
+   the sketch above: the overlay themes for free and is the same piece the
+   `list` presenter will reuse. Simplifications: one line, no wrapping;
+   `browse`-discovered files have no tooltips; delay isn't configurable.
+   Not exercised against a live popup yet — only the decode logic is unit
+   tested. **Not done:** the async icon worker pool — wraps a pool around
+   step 4's extraction functions; not a replacement for the sync
+   `IconCache`, which stays the foundation both paths build on.
 8. 🟡 **Events, file watcher/live reload, variables.** `start`/`exit` events
    shipped in step 2; custom `<var>`s and builtin expansion shipped in step
    1. Reloading without a restart shipped with `y-pop-config` (`y_pop::ipc`: a
@@ -1061,8 +1074,19 @@ asking further:
    deliberately deferred until profiling a real config shows layer 1 isn't
    enough.
 10. **`runner` / `radial` presenters** — not started; blocked on step 6.
+    Specification proposal and an interactive mockup:
+    [`overlay-modes.md`](overlay-modes.md). Its revision 2 turns `runner`
+    into a config-wide search (`<search>`, not a `popup-style`) and adds
+    numpad control to `radial`.
 
 **Also shipped, not itemized in the original plan at all:**
+
+- **Built-in icons** (`icon="@name"`, `y-pop/src/internal_icons.rs`): y-pop's
+  own icon (`@ypop`, read from `y-pop.exe`), About/Quit/Settings/folder and
+  ~25 shell stock icons (`@lock`, `@world`, `@printer`, …). One catalogue
+  feeds y-pop's `resolve_icon` and the "Built-in" source of `y-pop-config`'s
+  icon picker. `@app` stays a Store app's logo; an unknown `@name` is read as a
+  file path.
 
 - **Tray click-detection fix** (`y_core::tray::TrayEvent::Select`, a `core`
   change) — the original `ContextMenu`/`DoubleClick`/`Other` split let

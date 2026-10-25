@@ -16,6 +16,7 @@
 
 pub mod builtins;
 pub mod config;
+pub mod internal_icons;
 pub mod ipc;
 pub mod launch;
 pub mod model;

@@ -14,10 +14,11 @@
 
 mod browse;
 mod menu;
+mod tooltip;
 
 use windows::Win32::UI::WindowsAndMessaging::{
     HMENU, MB_ICONINFORMATION, MB_OK, MessageBoxW, WM_DRAWITEM, WM_HOTKEY, WM_INITMENUPOPUP,
-    WM_MEASUREITEM, WM_MENUCHAR,
+    WM_MEASUREITEM, WM_MENUCHAR, WM_MENUSELECT, WM_TIMER,
 };
 use windows::core::{HSTRING, PCWSTR};
 
@@ -59,6 +60,8 @@ struct YPop {
     /// from (and resolves its selection against) the current tree, so the
     /// tree is only swapped once it has closed.
     reload_pending: bool,
+    /// Hover tooltips for the open popup — see `tooltip`'s module doc.
+    tooltip: tooltip::Tooltip,
 }
 
 impl YPop {
@@ -83,6 +86,7 @@ impl YPop {
             session: None,
             reload_message: ipc::reload_message(),
             reload_pending: false,
+            tooltip: tooltip::Tooltip::default(),
         }
     }
 
@@ -141,6 +145,7 @@ impl YPop {
         self.session = Some(session);
 
         let selected = popup.track(hwnd, position);
+        self.tooltip.hide(hwnd);
         // Taken, not just read: nothing after this point still needs a
         // browse folder's bookkeeping, and a stray WM_INITMENUPOPUP for
         // some *other* menu arriving after this popup has closed (should
@@ -342,6 +347,22 @@ impl TrayApp for YPop {
         // a typed key to an `&` mnemonic itself — see `handle_menu_char`.
         if msg == WM_MENUCHAR {
             return y_core::menu::handle_menu_char(wparam, lparam);
+        }
+
+        // Tooltips: the highlight moving in an open popup, and the hover
+        // delay running out. Both arrive re-entrantly from `track`'s own
+        // message loop, like WM_INITMENUPOPUP below.
+        if msg == WM_MENUSELECT {
+            if let Some(session) = self.session.as_ref() {
+                let select = y_core::menu::decode_menu_select(wparam, lparam);
+                let tip = menu::tooltip_for(session, select);
+                self.tooltip.highlight(hwnd, tip, session.design());
+            }
+            // Not handled: let DefWindowProc see it too (status-bar text).
+            return None;
+        }
+        if msg == WM_TIMER && self.tooltip.on_timer(hwnd, wparam.0) {
+            return Some(LRESULT(0));
         }
 
         // Registered at run time, so a guard rather than a constant pattern;
