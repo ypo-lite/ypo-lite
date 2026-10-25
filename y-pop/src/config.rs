@@ -330,6 +330,18 @@ mod tests {
     }
 
     #[test]
+    fn the_app_logo_value_is_read_as_the_reserved_icon() {
+        let tree = load_str(
+            r#"<y-pop><app name="Calc" app-id="Pub.Calc_x!App" icon="@app"/></y-pop>"#,
+            &mut builtins(),
+        )
+        .expect("valid");
+        let node = tree.node(tree.roots[0]);
+        assert!(node.icon.as_ref().is_some_and(|icon| icon.is_app_logo()));
+        assert!(tree.warnings.is_empty());
+    }
+
+    #[test]
     fn identical_strings_are_interned_once() {
         let tree = load_str(
             r#"<y-pop>

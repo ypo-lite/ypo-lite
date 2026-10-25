@@ -279,7 +279,8 @@ impl Settings {
             let Some(head) = text.get(..folder.len()) else {
                 continue;
             };
-            let boundary = text[folder.len()..].is_empty() || text[folder.len()..].starts_with('\\');
+            let boundary =
+                text[folder.len()..].is_empty() || text[folder.len()..].starts_with('\\');
             if !head.eq_ignore_ascii_case(folder) || !boundary {
                 continue;
             }
@@ -461,7 +462,9 @@ mod tests {
     </y-pop>"#;
 
     fn with_vars(vars: &str) -> Settings {
-        load(&format!("<y-pop><variables>{vars}</variables><group name=\"g\"/></y-pop>"))
+        load(&format!(
+            "<y-pop><variables>{vars}</variables><group name=\"g\"/></y-pop>"
+        ))
     }
 
     #[test]
@@ -471,14 +474,22 @@ mod tests {
             settings.tokenize(r"c:\windows\system32\a.exe", &mut builtins()),
             Some(r"%win%\system32\a.exe".to_owned())
         );
-        assert_eq!(settings.tokenize(r"C:\Windows", &mut builtins()), Some("%win%".to_owned()));
-        assert_eq!(settings.tokenize(r"C:\WindowsApps\a.exe", &mut builtins()), None);
+        assert_eq!(
+            settings.tokenize(r"C:\Windows", &mut builtins()),
+            Some("%win%".to_owned())
+        );
+        assert_eq!(
+            settings.tokenize(r"C:\WindowsApps\a.exe", &mut builtins()),
+            None
+        );
         assert_eq!(settings.tokenize(r"D:\x\a.exe", &mut builtins()), None);
     }
 
     #[test]
     fn tokenize_prefers_the_longest_folder_then_the_files_own_variable() {
-        let settings = with_vars(r#"<var name="tools" value="%win%\System32"/><var name="sys" value="C:\Windows\System32"/>"#);
+        let settings = with_vars(
+            r#"<var name="tools" value="%win%\System32"/><var name="sys" value="C:\Windows\System32"/>"#,
+        );
         // Same folder twice: the file's own variable (the later one here).
         assert_eq!(
             settings.tokenize(r"C:\Windows\System32\cmd.exe", &mut builtins()),

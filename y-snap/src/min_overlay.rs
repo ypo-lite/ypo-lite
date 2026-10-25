@@ -212,9 +212,8 @@ impl MinOverlay {
             // Same precedence as the action overlay's tiles (`tile_colors`):
             // hover wins over the toggle's on-state. The state is read at
             // each paint, so it is current whenever the popup is shown.
-            let active = target.is_some_and(|window| {
-                actions::toggle_state(item.action, window).unwrap_or(false)
-            });
+            let active = target
+                .is_some_and(|window| actions::toggle_state(item.action, window).unwrap_or(false));
             let text = if self.hovered == Some(index) {
                 canvas.fill_rect(rect, palette.hover_back);
                 palette.hover_text

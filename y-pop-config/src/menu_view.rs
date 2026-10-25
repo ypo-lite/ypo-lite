@@ -13,7 +13,7 @@ use std::collections::HashSet;
 use y_pop::settings::{Item, ItemId, ItemKind, Settings};
 
 use crate::menu_edit::{DropTarget, MenuMsg};
-use crate::start_menu::Load;
+use crate::start_menu::Source;
 use crate::tree::{self, NewKind, TreeRowKind};
 use crate::ui::key_picker::KeyPickerUi;
 use crate::ui::prelude::*;
@@ -321,7 +321,25 @@ fn app_picker(viewport: Viewport, context: &ViewContext<ConfigApp>) -> View {
                     Symbol::AllApps,
                     "Start menu…",
                     false,
-                    context.callback(|()| Msg::Menu(MenuMsg::StartOpened)),
+                    context.callback(|()| Msg::Menu(MenuMsg::StartOpened(Source::Shortcuts, None))),
+                ),
+            ),
+            (
+                "store",
+                tool(
+                    Symbol::Shop,
+                    "Store apps…",
+                    false,
+                    context.callback(|()| Msg::Menu(MenuMsg::StartOpened(Source::Store, None))),
+                ),
+            ),
+            (
+                "running",
+                tool(
+                    Symbol::Play,
+                    "Running apps…",
+                    false,
+                    context.callback(|()| Msg::Menu(MenuMsg::StartOpened(Source::Running, None))),
                 ),
             ),
             (
@@ -350,7 +368,7 @@ fn app_picker(viewport: Viewport, context: &ViewContext<ConfigApp>) -> View {
         .child(
             "hint",
             text::caption(
-                "Browse adds several programs, shortcuts or files at once; Start menu picks from the installed shortcuts; Manual adds an empty app to fill in.",
+                "Browse adds several programs, shortcuts or files at once; Start menu, Store apps and Running apps pick from a list; Manual adds an empty app to fill in.",
             ),
         )
         .into()
@@ -669,7 +687,8 @@ fn drop_zone(ui: &MenuUi<'_>, context: &ViewContext<ConfigApp>) -> View {
 /// How tall the list of shortcuts is in its dialog before it scrolls.
 const START_LIST_HEIGHT: f64 = 380.0;
 
-/// The lower-case `exe` of every app already in this tray menu, expanded.
+/// The lower-case `exe` of every app already in this tray menu, expanded, and
+/// `shell:AppsFolder\<id>` for every Store app (the path of its picker entry).
 fn programs_in_menu(
     settings: &Settings,
     root: ItemId,
@@ -680,12 +699,16 @@ fn programs_in_menu(
         .items()
         .filter(|item| tree::is_inside(settings, root, item.id))
         .filter_map(|item| match &item.kind {
-            ItemKind::App(app) => app.exe.as_deref(),
+            ItemKind::App(app) => match (&app.app_id, &app.exe) {
+                (Some(id), _) => Some(format!(r"{}\{id}", y_core::apps_folder::FOLDER)),
+                (None, Some(exe)) => Some(exe.clone()),
+                (None, None) => None,
+            },
             _ => None,
         })
         .map(|exe| {
             settings
-                .expand_text(exe, &mut *builtins)
+                .expand_text(&exe, &mut *builtins)
                 .trim()
                 .trim_matches('"')
                 .to_lowercase()
@@ -704,8 +727,9 @@ pub struct StartUi<'a> {
 }
 
 /// Search, tick, add: every shortcut under the Start menu's `Programs`
-/// folders, in a dialog over the whole window so the outline keeps its place
-/// underneath. Entries already in this menu are flagged, not hidden.
+/// folders, or every Store app, in a dialog over the whole window so the
+/// outline keeps its place underneath. Entries already in this menu are
+/// flagged, not hidden. With a target item it picks one Store app for it.
 pub fn start_modal(
     settings: &Settings,
     ui: &StartUi<'_>,
@@ -715,10 +739,14 @@ pub fn start_modal(
     let count = ui.start.checked.len();
     let ok = context.callback(|()| Msg::Menu(MenuMsg::StartAdd));
     let cancel = context.callback(|()| Msg::Menu(MenuMsg::StartClosed));
-    let title = match count {
-        0 => "Add apps from the Start menu".to_owned(),
-        1 => "Add apps from the Start menu — 1 ticked".to_owned(),
-        n => format!("Add apps from the Start menu — {n} ticked"),
+    let title = match (ui.start.target, ui.start.source, count) {
+        (Some(_), _, _) => "Choose a Store app".to_owned(),
+        (None, Source::Shortcuts, 0) => "Add apps from the Start menu".to_owned(),
+        (None, Source::Store, 0) => "Add Store apps".to_owned(),
+        (None, Source::Running, 0) => "Add running apps".to_owned(),
+        (None, Source::Shortcuts, n) => format!("Add apps from the Start menu — {n} ticked"),
+        (None, Source::Store, n) => format!("Add Store apps — {n} ticked"),
+        (None, Source::Running, n) => format!("Add running apps — {n} ticked"),
     };
     crate::ui::editor::modal(
         window,
@@ -731,8 +759,13 @@ pub fn start_modal(
 }
 
 fn start_list(settings: &Settings, ui: &StartUi<'_>, context: &ViewContext<ConfigApp>) -> View {
-    if ui.start.state != Load::Done {
-        return text::caption("Reading the Start menu…").into();
+    if !ui.start.ready() {
+        return text::caption(match ui.start.source {
+            Source::Shortcuts => "Reading the Start menu…",
+            Source::Store => "Reading the Store apps…",
+            Source::Running => "Looking for open windows…",
+        })
+        .into();
     }
 
     let (listed, more) = ui.start.listed(ui.entries);
@@ -740,10 +773,7 @@ fn start_list(settings: &Settings, ui: &StartUi<'_>, context: &ViewContext<Confi
     let mut list = Stack::vertical(space::XXS);
     for entry in &listed {
         let path = entry.path.clone();
-        let spec = crate::app_icons::IconSpec::File {
-            path: entry.path.clone(),
-            index: None,
-        };
+        let spec = entry.icon_spec();
         let icon = crate::app_icons::icon_or_symbol(
             ui.icons.image(Some(&spec), crate::app_icons::SHOWN),
             Symbol::AllApps,
@@ -767,7 +797,7 @@ fn start_list(settings: &Settings, ui: &StartUi<'_>, context: &ViewContext<Confi
         list = list.child(entry.path.clone(), check);
     }
     if listed.is_empty() {
-        list = list.child("none", text::caption("No shortcut matches."));
+        list = list.child("none", text::caption("Nothing matches."));
     }
     if more > 0 {
         list = list.child(

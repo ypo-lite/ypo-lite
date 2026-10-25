@@ -45,6 +45,15 @@ pub fn window_process_id(window: HWND) -> u32 {
 /// The executable name of process `pid`, without directory or `.exe` —
 /// `"notepad"`. `None` if the process is gone or closed to us.
 pub fn executable_stem(pid: u32) -> Option<String> {
+    let path = executable_path(pid)?;
+    Path::new(&path)
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().into_owned())
+}
+
+/// The full path of the executable of process `pid`. `None` if the process is
+/// gone or closed to us.
+pub fn executable_path(pid: u32) -> Option<String> {
     let process = Process::open(pid)?;
 
     let mut buffer = [0u16; 1024];
@@ -59,10 +68,7 @@ pub fn executable_stem(pid: u32) -> Option<String> {
     }
     .ok()?;
 
-    let path = String::from_utf16_lossy(&buffer[..length as usize]);
-    Path::new(&path)
-        .file_stem()
-        .map(|stem| stem.to_string_lossy().into_owned())
+    Some(String::from_utf16_lossy(&buffer[..length as usize]))
 }
 
 /// Whether process `pid` runs elevated. `None` when that cannot be read —

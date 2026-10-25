@@ -48,22 +48,25 @@
 use std::collections::HashMap;
 use std::ffi::c_void;
 
-use windows::Win32::Foundation::{ERROR_TIMEOUT, GetLastError, HWND, LPARAM, WPARAM};
+use windows::Win32::Foundation::{ERROR_TIMEOUT, GetLastError, HWND, LPARAM, SIZE, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    BI_RGB, BITMAP, BITMAPINFO, BITMAPINFOHEADER, CreateCompatibleDC, CreateDIBSection,
-    DIB_RGB_COLORS, DeleteDC, DeleteObject, GetObjectW, HBITMAP, SelectObject,
+    BI_RGB, BITMAP, BITMAPINFO, BITMAPINFOHEADER, CreateBitmap, CreateCompatibleDC,
+    CreateDIBSection, DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC, GetDIBits, GetObjectW,
+    HBITMAP, ReleaseDC, SelectObject,
 };
 use windows::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL};
+use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
 use windows::Win32::UI::Shell::{
-    ExtractIconExW, SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON, SHGFI_USEFILEATTRIBUTES, SHGSI_ICON,
-    SHGSI_SMALLICON, SHGetFileInfoW, SHGetStockIconInfo, SHSTOCKICONID, SHSTOCKICONINFO,
-    SIID_DELETE, SIID_INFO, SIID_SETTINGS,
+    ExtractIconExW, IShellItem, IShellItemImageFactory, SHCreateItemFromParsingName, SHFILEINFOW,
+    SHGFI_ICON, SHGFI_SMALLICON, SHGFI_USEFILEATTRIBUTES, SHGSI_ICON, SHGSI_SMALLICON,
+    SHGetFileInfoW, SHGetStockIconInfo, SHSTOCKICONID, SHSTOCKICONINFO, SIID_DELETE, SIID_INFO,
+    SIID_SETTINGS, SIIGBF_BIGGERSIZEOK, SIIGBF_ICONONLY,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CopyIcon, DI_MASK, DI_NORMAL, DestroyIcon, DrawIconEx, GCLP_HICONSM, GetClassLongPtrW, HICON,
-    SMTO_ABORTIFHUNG, SendMessageTimeoutW, WM_GETICON,
+    CopyIcon, CreateIconIndirect, DI_MASK, DI_NORMAL, DestroyIcon, DrawIconEx, GCLP_HICONSM,
+    GetClassLongPtrW, HICON, ICONINFO, SMTO_ABORTIFHUNG, SendMessageTimeoutW, WM_GETICON,
 };
-use windows::core::HSTRING;
+use windows::core::{HSTRING, Interface};
 
 /// An icon this process extracted — [`Drop`] destroys the underlying
 /// `HICON`, the same RAII shape as [`crate::tray::TrayIcon`].
@@ -380,6 +383,8 @@ enum CacheKey {
     Directory,
     /// One of the shell's stock icons (see [`StockIcon`]).
     Stock(i32),
+    /// The logo of a packaged app, by its AppUserModelID.
+    Store(String),
 }
 
 /// A shell stock icon — for the menu entries that have no file to take an
@@ -472,6 +477,17 @@ impl IconCache {
             .and_then(Icon::duplicate)
     }
 
+    /// The logo of the packaged (Store) app `app_id` — its
+    /// AppUserModelID, `Publisher.App_8wekyb3d8bbwe!App` — as the shell shows
+    /// it. `None` if the app is not installed or has no logo to give.
+    pub fn for_store_app(&mut self, app_id: &str) -> Option<Icon> {
+        self.cache
+            .entry(CacheKey::Store(app_id.to_owned()))
+            .or_insert_with(|| store_logo(app_id))
+            .as_ref()
+            .and_then(Icon::duplicate)
+    }
+
     /// The generic "closed folder" icon — not specific to any one
     /// directory, so takes no path.
     pub fn for_directory(&mut self) -> Option<Icon> {
@@ -491,6 +507,152 @@ impl IconCache {
             .or_insert_with(|| shell_icon("folder", true))
             .as_ref()
             .and_then(Icon::duplicate)
+    }
+}
+
+/// Pixels asked of the shell for a Store logo; menus and lists scale it down.
+const LOGO: i32 = 64;
+
+/// How many times the shell is asked for a logo before giving up.
+const LOGO_ATTEMPTS: u32 = 4;
+
+/// The wait before the first retry; it doubles each time (250, 500, 1000 ms),
+/// so a shell that is busy is given room rather than hammered.
+const LOGO_RETRY_BASE_MS: u64 = 250;
+
+/// The shell's image of the packaged app `app_id` (`shell:AppsFolder\<id>`),
+/// turned into an icon so everything that draws an [`Icon`] works on it.
+///
+/// The shell extracts a packaged app's logo lazily and can answer `E_PENDING`
+/// or a failed extraction while it is still resolving the package's resources
+/// (seen live: the same app got its logo on one launch and not the next). So a
+/// failure is retried a few times, with a fresh item and a short wait, first
+/// icon-only and then letting the shell fall back to a thumbnail, before the
+/// app is declared logo-less.
+fn store_logo(app_id: &str) -> Option<Icon> {
+    // S_FALSE and RPC_E_CHANGED_MODE both mean there is an apartment.
+    let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+
+    let name = HSTRING::from(format!(r"{}\{app_id}", crate::apps_folder::FOLDER));
+    for attempt in 0..LOGO_ATTEMPTS {
+        if attempt > 0 {
+            let wait = LOGO_RETRY_BASE_MS << (attempt - 1);
+            std::thread::sleep(std::time::Duration::from_millis(wait));
+        }
+        let Ok(item) = (unsafe { SHCreateItemFromParsingName::<_, _, IShellItem>(&name, None) })
+        else {
+            continue;
+        };
+        let Ok(factory) = item.cast::<IShellItemImageFactory>() else {
+            continue;
+        };
+        for flags in [SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK, SIIGBF_BIGGERSIZEOK] {
+            let Ok(image) = (unsafe { factory.GetImage(SIZE { cx: LOGO, cy: LOGO }, flags) })
+            else {
+                continue;
+            };
+            let icon = icon_from_image(image);
+            let _ = unsafe { DeleteObject(image.into()) };
+            if icon.is_some() {
+                return icon;
+            }
+        }
+    }
+    None
+}
+
+/// An icon with the pixels of `image`, a 32-bit bitmap from the shell.
+///
+/// The pixels are read top-down and, whether the shell gave them
+/// premultiplied (a channel never above alpha is taken as that) or straight,
+/// handed to `CreateIconIndirect` straight, as an icon file's are: the same
+/// convention every other [`Icon`] here has, so `to_bitmap` treats them alike.
+fn icon_from_image(image: HBITMAP) -> Option<Icon> {
+    let mut info = BITMAP::default();
+    let got = unsafe {
+        GetObjectW(
+            image.into(),
+            size_of::<BITMAP>() as i32,
+            Some((&mut info as *mut BITMAP).cast::<c_void>()),
+        )
+    };
+    let (width, height) = (info.bmWidth, info.bmHeight);
+    if got == 0 || width <= 0 || height <= 0 {
+        return None;
+    }
+
+    let mut header = BITMAPINFO {
+        bmiHeader: BITMAPINFOHEADER {
+            biSize: size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: width,
+            biHeight: -height, // top-down
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB.0,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let mut pixels = vec![0u8; width as usize * height as usize * 4];
+    let screen = unsafe { GetDC(None) };
+    let read = unsafe {
+        GetDIBits(
+            screen,
+            image,
+            0,
+            height as u32,
+            Some(pixels.as_mut_ptr().cast::<c_void>()),
+            &mut header,
+            DIB_RGB_COLORS,
+        )
+    };
+    unsafe { ReleaseDC(None, screen) };
+    if read == 0 {
+        return None;
+    }
+
+    unpremultiply_or_opaque(&mut pixels);
+
+    let color =
+        unsafe { CreateBitmap(width, height, 1, 32, Some(pixels.as_ptr().cast::<c_void>())) };
+    // The mask is ignored by a 32-bit colour bitmap with alpha, but must exist.
+    let mask = unsafe { CreateBitmap(width, height, 1, 1, None) };
+    let made = unsafe {
+        CreateIconIndirect(&ICONINFO {
+            fIcon: true.into(),
+            xHotspot: 0,
+            yHotspot: 0,
+            hbmMask: mask,
+            hbmColor: color,
+        })
+    };
+    let _ = unsafe { DeleteObject(color.into()) };
+    let _ = unsafe { DeleteObject(mask.into()) };
+    made.ok().map(Icon)
+}
+
+/// BGRA pixels made straight. Premultiplied ones (no channel above alpha) are
+/// divided by it; a bitmap with no alpha at all (every byte 0) becomes opaque.
+fn unpremultiply_or_opaque(pixels: &mut [u8]) {
+    if pixels.chunks_exact(4).all(|pixel| pixel[3] == 0) {
+        for pixel in pixels.chunks_exact_mut(4) {
+            pixel[3] = 255;
+        }
+        return;
+    }
+    let premultiplied = pixels
+        .chunks_exact(4)
+        .all(|pixel| pixel[..3].iter().all(|&channel| channel <= pixel[3]));
+    if !premultiplied {
+        return;
+    }
+    for pixel in pixels.chunks_exact_mut(4) {
+        let alpha = pixel[3] as u32;
+        if alpha != 0 && alpha != 255 {
+            for channel in &mut pixel[..3] {
+                *channel = ((*channel as u32 * 255) / alpha).min(255) as u8;
+            }
+        }
     }
 }
 
@@ -712,6 +874,37 @@ mod tests {
         let _ = cache.for_file(r"C:\a.exe", None);
         let _ = cache.for_file(r"C:\b.exe", None);
         assert_eq!(cache.cache.len(), 2, "distinct files, distinct entries");
+    }
+
+    #[test]
+    fn shell_pixels_are_made_straight_or_opaque() {
+        // Premultiplied: 50% alpha, channels halved → back to full.
+        let mut pixels = [64, 32, 16, 128];
+        unpremultiply_or_opaque(&mut pixels);
+        assert_eq!(pixels, [127, 63, 31, 128]);
+        // Already straight (a channel above alpha): left alone.
+        let mut pixels = [200, 10, 10, 100, 0, 0, 0, 255];
+        unpremultiply_or_opaque(&mut pixels);
+        assert_eq!(pixels, [200, 10, 10, 100, 0, 0, 0, 255]);
+        // No alpha channel at all: opaque.
+        let mut pixels = [1, 2, 3, 0, 4, 5, 6, 0];
+        unpremultiply_or_opaque(&mut pixels);
+        assert_eq!(pixels, [1, 2, 3, 255, 4, 5, 6, 255]);
+    }
+
+    #[test]
+    fn a_real_store_app_has_a_logo_and_it_is_cached_per_app() {
+        let _guard = serialized();
+        let Some(app) = crate::apps_folder::store_apps().into_iter().next() else {
+            return; // a machine without packaged apps
+        };
+        let mut cache = IconCache::new();
+        let icon = cache.for_store_app(&app.app_id);
+        assert!(icon.is_some(), "{}", app.app_id);
+        assert!(icon.unwrap().to_png(16).is_some());
+        let _ = cache.for_store_app(&app.app_id);
+        assert_eq!(cache.cache.len(), 1);
+        assert!(cache.for_store_app("No.Such_app!App").is_none());
     }
 
     #[test]

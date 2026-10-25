@@ -14,6 +14,7 @@ use y_pop::settings::{AppFields, HotkeyEntry, ItemId, ItemKind, Renderer};
 
 use crate::menu_view::HotkeyUi;
 use crate::roots;
+use crate::start_menu::Source;
 use crate::tree::{self, MoveDir, NewKind};
 use crate::ui::key_picker::{KeyPickerUi, MODIFIERS};
 use crate::ui::keys::{self, KeyCategory};
@@ -142,8 +143,9 @@ pub enum MenuMsg {
     AppPickerToggled,
     /// The picker's Browse…: files from the open dialog, added as a drop on the strip would.
     AppBrowse,
-    /// The picker's Start menu…: opens the dialog listing the shortcuts.
-    StartOpened,
+    /// Opens the dialog on one list: the picker's Start menu… and Store apps…
+    /// (to add several), or, with an item, the Store field's Browse… (to choose one).
+    StartOpened(Source, Option<ItemId>),
     /// The dialog's Cancel: closes it and forgets the ticks.
     StartClosed,
     /// The Start menu list's search box.
@@ -403,12 +405,11 @@ impl ConfigApp {
                 return;
             }
             MenuMsg::StartToggle(path) => {
-                if !self.start_menu.checked.remove(&path) {
-                    self.start_menu.checked.insert(path);
-                }
+                self.start_menu.toggle(path);
                 return;
             }
-            MenuMsg::StartOpened => {
+            MenuMsg::StartOpened(source, target) => {
+                self.start_menu.open(source, target);
                 self.start_open = true;
                 return;
             }
@@ -420,10 +421,43 @@ impl ConfigApp {
             MenuMsg::StartAdd => {
                 self.app_picker = false;
                 self.start_open = false;
-                let paths = self.start_menu.checked_in_order(&self.start_entries);
+                let paths = self.start_menu.checked_in_order(self.source_entries());
                 self.start_menu.checked.clear();
-                if !paths.is_empty() {
-                    self.edit_menu(MenuMsg::Dropped(DropTarget::Zone, paths));
+                match self.start_menu.target.take() {
+                    // One Store app for an item being edited.
+                    Some(item) => {
+                        if let Some(entry) = self
+                            .start_entries
+                            .iter()
+                            .find(|entry| paths.contains(&entry.path))
+                        {
+                            let app_id =
+                                entry.path[y_core::apps_folder::FOLDER.len() + 1..].to_owned();
+                            let unnamed = self.settings.as_ref().ok().is_none_or(|settings| {
+                                tree::item(settings, item).is_none_or(|item| {
+                                    item.name.as_deref().is_none_or(str::is_empty)
+                                })
+                            });
+                            let name = entry.name.clone();
+                            let no_icon = self.settings.as_ref().ok().is_none_or(|settings| {
+                                tree::item(settings, item).is_none_or(|item| {
+                                    item.icon.as_deref().is_none_or(str::is_empty)
+                                })
+                            });
+                            self.edit_menu(MenuMsg::Text(item, TextField::AppId, app_id));
+                            if no_icon {
+                                let logo = y_pop::model::APP_LOGO.to_owned();
+                                self.edit_menu(MenuMsg::Text(item, TextField::Icon, logo));
+                            }
+                            if unnamed {
+                                self.edit_menu(MenuMsg::Text(item, TextField::Name, name));
+                            }
+                        }
+                    }
+                    None if !paths.is_empty() => {
+                        self.edit_menu(MenuMsg::Dropped(DropTarget::Zone, paths));
+                    }
+                    None => {}
                 }
                 return;
             }
@@ -858,7 +892,7 @@ impl ConfigApp {
             | MenuMsg::MoreToggled
             | MenuMsg::AppPickerToggled
             | MenuMsg::AppBrowse
-            | MenuMsg::StartOpened
+            | MenuMsg::StartOpened(..)
             | MenuMsg::StartClosed
             | MenuMsg::StartSearch(_)
             | MenuMsg::StartMore

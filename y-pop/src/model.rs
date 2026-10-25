@@ -194,14 +194,27 @@ impl EventMask {
     }
 }
 
+/// The reserved `icon=` value that asks for a Store app's own logo, resolved
+/// from its `app-id` when the icon is loaded. On anything but a Store app it
+/// means nothing, and the item gets its default icon.
+pub const APP_LOGO: &str = "@app";
+
 /// Where an icon comes from: a file path plus an optional index, the same
 /// `"path,index"` shorthand PortAL's `ico="...,6"` uses for a multi-icon
 /// `.exe`/`.dll`/`.ico`. `None` on an `App` node means "extract the icon
 /// from `exe` itself" — resolved when the icon is actually loaded, not here.
+/// A path of [`APP_LOGO`] is not a file.
 #[derive(Clone, Debug)]
 pub struct IconSource {
     pub path: Arc<str>,
     pub index: Option<i32>,
+}
+
+impl IconSource {
+    /// Whether this is [`APP_LOGO`] rather than a file.
+    pub fn is_app_logo(&self) -> bool {
+        self.path.trim().eq_ignore_ascii_case(APP_LOGO)
+    }
 }
 
 /// One node of the tree — a menu item, in whatever the active renderer turns

@@ -11,6 +11,7 @@ use y_pop::settings::{AppFields, Item, ItemId, Settings, VarEntry};
 
 use crate::menu_edit::{FlagField, MenuMsg, TargetMode, TextField, depth_words};
 use crate::menu_view::MenuUi;
+use crate::start_menu::Source;
 use crate::target_check::{self, Found};
 use crate::ui::prelude::*;
 use crate::{ConfigApp, Msg};
@@ -130,12 +131,32 @@ fn target(
 
     let body: View = if mode == TargetMode::Store {
         let app_id = app.app_id.clone().unwrap_or_default();
+        let browse: View = button(
+            "Browse…",
+            false,
+            true,
+            context.callback(move |()| Msg::Menu(MenuMsg::StartOpened(Source::Store, Some(id)))),
+        )
+        .tooltip("Choose from the installed Store apps");
         Stack::vertical(space::S)
             .child(
                 "field",
-                field("Store app id", text_box(app_id, "Publisher.App_8wekyb3d8bbwe!App", text_of(id, TextField::AppId, context))),
+                field(
+                    "Store app id",
+                    text_box(
+                        app_id,
+                        "Publisher.App_8wekyb3d8bbwe!App",
+                        text_of(id, TextField::AppId, context),
+                    ),
+                ),
             )
-            .child("hint", text::caption("The app's AppUserModelID. Choosing from the installed apps comes with the app picker."))
+            .child("browse", browse)
+            .child(
+                "hint",
+                text::caption(
+                    "The app's AppUserModelID. Browse fills it in, and the name when it is empty.",
+                ),
+            )
             .into()
     } else {
         let raw = app.exe.clone().unwrap_or_default();

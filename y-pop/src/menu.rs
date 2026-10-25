@@ -175,13 +175,20 @@ impl Session {
 /// submenu shows a folder unless its config gives it something else), the
 /// icon its own `exe` carries for an `App`, a shell stock icon for `About`
 /// (info), `Quit` (red cross) and `Settings` (cog) — a divergence from
-/// PortAL, which left those bare; `icon=` on the node still overrides. A
-/// titled `Separator` gets none.
+/// PortAL, which left those bare; `icon=` on the node still overrides, and
+/// `icon="@app"` on a Store app asks for its own logo. A titled `Separator`
+/// gets none.
 fn resolve_icon(icons: &mut IconCache, node: &NodeData) -> Option<Icon> {
-    if let Some(source) = &node.icon {
+    // `@app` is the Store app's own logo; on anything else it is as if no
+    // icon had been given.
+    let given = node.icon.as_ref().filter(|source| !source.is_app_logo());
+    if let Some(source) = given {
         return icons.for_file(&source.path, source.index);
     }
     match &node.kind {
+        NodeKind::App(app) if node.icon.is_some() && app.app_id.is_some() => {
+            icons.for_store_app(app.app_id.as_deref()?)
+        }
         NodeKind::Group => icons.for_directory(),
         // A browse app's own "exe" names a folder, not a file — the
         // generic folder icon, not whatever `for_file` would guess from a

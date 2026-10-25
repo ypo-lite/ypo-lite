@@ -4,7 +4,8 @@ use y_pop::settings::{Entry, ItemKind};
 use y_pop::variables::Variable;
 
 use super::*;
-use crate::menu_edit::{FlagField, MenuMsg, TextField};
+use crate::menu_edit::{FlagField, MenuMsg, TargetMode, TextField};
+use crate::start_menu::Source;
 use crate::tree::{self, MoveDir, NewKind};
 
 const XML: &str = r#"<y-pop>
@@ -391,8 +392,6 @@ fn app_fields<'a>(app: &'a ConfigApp, name: &str) -> &'a y_pop::settings::AppFie
 
 #[test]
 fn switching_the_target_mode_keeps_what_was_typed_in_the_other_one() {
-    use crate::menu_edit::TargetMode;
-
     let mut app = app();
     let a = id(&app, "A");
     app.edit_menu(MenuMsg::TargetMode(a, TargetMode::Store));
@@ -665,6 +664,7 @@ fn start_entry(name: &str) -> crate::start_menu::StartEntry {
         name: name.into(),
         path: format!(r"C:\nowhere\Start\{name}.lnk"),
         target: String::new(),
+        store: false,
     }
 }
 
@@ -677,7 +677,7 @@ fn ticked_start_menu_shortcuts_are_added_in_list_order() {
         start_entry("Gamma"),
     ];
     app.edit_menu(MenuMsg::AppPickerToggled);
-    app.edit_menu(MenuMsg::StartOpened);
+    app.edit_menu(MenuMsg::StartOpened(Source::Shortcuts, None));
     app.edit_menu(MenuMsg::StartToggle(app.start_entries[2].path.clone()));
     app.edit_menu(MenuMsg::StartToggle(app.start_entries[0].path.clone()));
     app.edit_menu(MenuMsg::StartToggle(app.start_entries[1].path.clone()));
@@ -695,11 +695,104 @@ fn cancelling_the_start_menu_dialog_forgets_the_ticks_and_keeps_the_picker() {
     let mut app = app();
     app.start_entries = vec![start_entry("Alpha")];
     app.edit_menu(MenuMsg::AppPickerToggled);
-    app.edit_menu(MenuMsg::StartOpened);
+    app.edit_menu(MenuMsg::StartOpened(Source::Shortcuts, None));
     app.edit_menu(MenuMsg::StartToggle(app.start_entries[0].path.clone()));
     app.edit_menu(MenuMsg::StartClosed);
     assert!(!app.start_open && app.app_picker);
     assert!(app.start_menu.checked.is_empty() && !app.dirty);
+}
+
+fn store_entry(name: &str, app_id: &str) -> crate::start_menu::StartEntry {
+    crate::start_menu::StartEntry {
+        name: name.into(),
+        path: format!(r"shell:AppsFolder\{app_id}"),
+        target: String::new(),
+        store: true,
+    }
+}
+
+#[test]
+fn the_two_lists_are_kept_apart() {
+    let mut app = app();
+    app.start_entries = vec![
+        start_entry("Alpha"),
+        store_entry("Calculator", "Pub.Calc_x!App"),
+    ];
+    let names = |app: &ConfigApp| -> Vec<String> {
+        app.start_menu
+            .listed(&app.start_entries)
+            .0
+            .iter()
+            .map(|entry| entry.name.clone())
+            .collect()
+    };
+    app.edit_menu(MenuMsg::StartOpened(Source::Shortcuts, None));
+    assert_eq!(names(&app), ["Alpha"]);
+    app.edit_menu(MenuMsg::StartOpened(Source::Store, None));
+    assert_eq!(names(&app), ["Calculator"]);
+}
+
+#[test]
+fn running_programs_are_listed_from_their_own_entries_and_added_as_programs() {
+    let mut app = app();
+    app.start_entries = vec![start_entry("Alpha")];
+    app.running_entries = vec![crate::start_menu::StartEntry {
+        name: "Notepad".into(),
+        path: r"C:\Windows\notepad.exe".into(),
+        target: String::new(),
+        store: false,
+    }];
+    app.edit_menu(MenuMsg::StartOpened(Source::Running, None));
+    // Reopening a running list reads it again; the others are kept.
+    assert_eq!(app.start_menu.running, crate::start_menu::Load::NotStarted);
+    assert_eq!(app.source_entries().len(), 1);
+    assert_eq!(app.source_entries()[0].name, "Notepad");
+
+    app.edit_menu(MenuMsg::StartToggle(r"C:\Windows\notepad.exe".into()));
+    app.edit_menu(MenuMsg::StartAdd);
+    // Named by the machine's own description of the program, so look at what
+    // it launches instead.
+    let added = settings(&app)
+        .items()
+        .filter_map(|item| match &item.kind {
+            ItemKind::App(fields) => fields.exe.as_deref(),
+            _ => None,
+        })
+        .any(|exe| exe.to_lowercase().ends_with("notepad.exe"));
+    assert!(added && app.dirty);
+}
+
+#[test]
+fn choosing_a_store_app_for_an_item_sets_its_id_and_fills_an_empty_name() {
+    let mut app = app();
+    let a = id(&app, "A");
+    app.start_entries = vec![
+        store_entry("Calculator", "Pub.Calc_x!App"),
+        store_entry("Clock", "Pub.Clock_x!App"),
+    ];
+    app.edit_menu(MenuMsg::TargetMode(a, TargetMode::Store));
+    app.dirty = false;
+
+    app.edit_menu(MenuMsg::StartOpened(Source::Store, Some(a)));
+    app.edit_menu(MenuMsg::StartToggle(app.start_entries[0].path.clone()));
+    app.edit_menu(MenuMsg::StartToggle(app.start_entries[1].path.clone()));
+    assert_eq!(app.start_menu.checked.len(), 1, "one choice, not several");
+    app.edit_menu(MenuMsg::StartAdd);
+
+    assert!(!app.start_open && app.dirty);
+    assert_eq!(
+        app_fields(&app, "A").app_id.as_deref(),
+        Some("Pub.Clock_x!App")
+    );
+    // "A" already has a name: it is kept.
+    assert_eq!(
+        tree::item(settings(&app), a).and_then(|item| item.name.as_deref()),
+        Some("A")
+    );
+    assert_eq!(
+        tree::item(settings(&app), a).and_then(|item| item.icon.as_deref()),
+        Some("@app")
+    );
 }
 
 #[test]

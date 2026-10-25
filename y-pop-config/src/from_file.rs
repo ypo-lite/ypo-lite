@@ -38,7 +38,7 @@ pub struct Resolved {
     pub is_dir: bool,
     /// For a `.lnk`.
     pub link: Option<ShellLinkInfo>,
-    /// For an executable: its `FileDescription`.
+    /// For an executable: its `FileDescription`; for a Store app, its display name.
     pub description: Option<String>,
 }
 
@@ -154,8 +154,16 @@ pub fn item_from_file(
     match kind {
         FileKind::Store => {
             let app_id = &path[STORE_PREFIX.len()..];
-            item.name = Some(store_name(app_id));
+            item.name = Some(
+                resolved
+                    .description
+                    .clone()
+                    .filter(|name| !name.trim().is_empty())
+                    .unwrap_or_else(|| store_name(app_id)),
+            );
             app.app_id = Some(app_id.to_owned());
+            // Its own logo, not the generic icon (the user can clear it).
+            item.icon = Some(y_pop::model::APP_LOGO.to_owned());
         }
         FileKind::Folder => {
             item.name = Some(file_name(path));
@@ -250,6 +258,11 @@ pub fn resolve(path: &str) -> Resolved {
         FileKind::Program => {
             resolved.description = y_core::file_info::file_description(Path::new(path))
         }
+        // The display name, kept in `description` like a program's.
+        FileKind::Store => {
+            resolved.description =
+                y_core::apps_folder::display_name_of(&path[STORE_PREFIX.len()..]);
+        }
         _ => {}
     }
     resolved
@@ -273,7 +286,8 @@ fn icon_location(link: &ShellLinkInfo, tokenize: &mut dyn FnMut(&str) -> String)
 }
 
 /// A readable name from an AppUserModelID: `Microsoft.WindowsCalculator_8wekyb3d8bbwe!App`
-/// → `WindowsCalculator`. The real display name needs the shell (8.6).
+/// → `WindowsCalculator`. Only the fallback: [`resolve`] asks the shell for the
+/// real display name.
 fn store_name(app_id: &str) -> String {
     let package = app_id.split(['_', '!']).next().unwrap_or(app_id);
     let name = package.rsplit('.').next().unwrap_or(package);
@@ -435,6 +449,19 @@ mod tests {
     }
 
     #[test]
+    fn a_store_app_takes_the_name_the_shell_gave() {
+        let resolved = Resolved {
+            description: Some("Calculator".into()),
+            ..Resolved::default()
+        };
+        let (item, _) = make(
+            r"shell:AppsFolder\Microsoft.WindowsCalculator_8wekyb3d8bbwe!App",
+            &resolved,
+        );
+        assert_eq!(item.name.as_deref(), Some("Calculator"));
+    }
+
+    #[test]
     fn a_store_app_becomes_an_app_id() {
         let (item, origin) = make(
             r"shell:AppsFolder\Microsoft.WindowsCalculator_8wekyb3d8bbwe!App",
@@ -446,6 +473,7 @@ mod tests {
             Some("Microsoft.WindowsCalculator_8wekyb3d8bbwe!App")
         );
         assert_eq!(app(&item).exe, None);
+        assert_eq!(item.icon.as_deref(), Some("@app"), "its own logo");
         assert_eq!(origin.kind, FileKind::Store);
     }
 

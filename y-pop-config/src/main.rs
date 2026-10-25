@@ -115,6 +115,8 @@ struct ConfigApp {
     /// The Start menu source: what was found, the search, the ticks.
     start_menu: start_menu::StartMenu,
     start_entries: Vec<start_menu::StartEntry>,
+    /// The programs running when the "Running apps" list last opened.
+    running_entries: Vec<start_menu::StartEntry>,
     /// How the item selected after a drop was made, for the strip at the top
     /// of its inspector. Lives until another item is selected; never saved.
     origin: Option<(ItemId, from_file::Origin)>,
@@ -234,8 +236,12 @@ enum Msg {
 
     /// An item's icon came back from the thread pool (PNG bytes, or none found).
     IconLoaded(app_icons::IconSpec, Option<Vec<u8>>),
+    /// A Store logo that failed has waited long enough: ask for it again.
+    IconRetry,
     /// The Start menu shortcuts were found and read on the thread pool.
     StartMenuScanned(Vec<start_menu::StartEntry>),
+    /// The running programs were listed on the thread pool.
+    RunningScanned(Vec<start_menu::StartEntry>),
     /// The icon picker.
     Icon(icon_picker::IconMsg),
 
@@ -311,6 +317,7 @@ impl Component for ConfigApp {
             start_open: false,
             start_menu: start_menu::StartMenu::default(),
             start_entries: Vec::new(),
+            running_entries: Vec::new(),
             origin: None,
             drag_over: None,
             show_xml: false,
@@ -364,17 +371,30 @@ impl Component for ConfigApp {
 
             Msg::Menu(message) => self.edit_menu(message),
             Msg::Ignored => {}
-            Msg::IconLoaded(spec, png) => self.icons.finish(spec, png),
+            Msg::IconLoaded(spec, png) => {
+                self.icons.finish(spec, png);
+                self.schedule_icon_retry(context);
+            }
+            Msg::IconRetry => {
+                self.icons.retry_due();
+                self.schedule_icon_retry(context);
+            }
             Msg::StartMenuScanned(entries) => {
                 self.start_entries = entries;
                 self.start_menu.state = start_menu::Load::Done;
+            }
+            Msg::RunningScanned(entries) => {
+                self.running_entries = entries;
+                self.start_menu.running = start_menu::Load::Done;
             }
             Msg::Icon(message) => self.edit_icon(message),
 
             other => self.edit(other),
         }
         self.request_start_menu(context);
+        self.request_running(context);
         self.request_icons(context);
+        self.schedule_icon_retry(context);
     }
 
     fn view(&self, _input: &(), context: &mut ViewContext<Self>) -> View {
@@ -534,7 +554,7 @@ impl Component for ConfigApp {
                     &menu_view::StartUi {
                         root,
                         start: &self.start_menu,
-                        entries: &self.start_entries,
+                        entries: self.source_entries(),
                         builtins: &self.builtins,
                         icons: &self.icons,
                     },
@@ -576,6 +596,27 @@ impl ConfigApp {
             .spawn_background(|_| Msg::StartMenuScanned(start_menu::scan(&start_menu::folders())));
     }
 
+    /// Each time the running programs list opens, lists them on the thread
+    /// pool: unlike the Start menu, what is running changes under us.
+    fn request_running(&mut self, context: &ComponentContext<Self>) {
+        if !self.start_open
+            || self.start_menu.source != start_menu::Source::Running
+            || self.start_menu.running != start_menu::Load::NotStarted
+        {
+            return;
+        }
+        self.start_menu.running = start_menu::Load::Loading;
+        context.spawn_background(|_| Msg::RunningScanned(start_menu::scan_running()));
+    }
+
+    /// The entries of the list the Start menu dialog shows.
+    fn source_entries(&self) -> &[start_menu::StartEntry] {
+        match self.start_menu.source {
+            start_menu::Source::Running => &self.running_entries,
+            start_menu::Source::Shortcuts | start_menu::Source::Store => &self.start_entries,
+        }
+    }
+
     /// Starts loading, on the thread pool, every icon the tree shows that has
     /// not been asked for yet. Called after every message: an edit to a
     /// target or an `icon=` can make a new one necessary.
@@ -588,16 +629,13 @@ impl ConfigApp {
                 .filter_map(|item| app_icons::spec_for(settings, item, &mut *builtins))
                 .collect();
             wanted.extend(self.icon_picker.visible());
-            if self.start_open && self.start_menu.state == start_menu::Load::Done {
+            if self.start_open && self.start_menu.ready() {
                 wanted.extend(
                     self.start_menu
-                        .listed(&self.start_entries)
+                        .listed(self.source_entries())
                         .0
                         .into_iter()
-                        .map(|entry| app_icons::IconSpec::File {
-                            path: entry.path.clone(),
-                            index: None,
-                        }),
+                        .map(|entry| entry.icon_spec()),
                 );
             }
             wanted
@@ -609,6 +647,17 @@ impl ConfigApp {
                     Msg::IconLoaded(spec, png)
                 });
             }
+        }
+    }
+
+    /// Wakes the app when the earliest failed Store logo is due for another
+    /// try. One sleeping task at most, so the pool is never tied up by retries.
+    fn schedule_icon_retry(&mut self, context: &ComponentContext<Self>) {
+        if let Some(delay) = self.icons.next_wake() {
+            context.spawn_background(move |_| {
+                std::thread::sleep(delay);
+                Msg::IconRetry
+            });
         }
     }
 
@@ -1119,6 +1168,7 @@ fn test_app(settings: Settings) -> ConfigApp {
         start_open: false,
         start_menu: start_menu::StartMenu::default(),
         start_entries: Vec::new(),
+        running_entries: Vec::new(),
         origin: None,
         drag_over: None,
         show_xml: false,

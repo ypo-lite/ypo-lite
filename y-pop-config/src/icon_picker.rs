@@ -97,6 +97,8 @@ pub enum IconMsg {
     Page(isize),
     /// The icon at this position of the source; `None`: from the target.
     Pick(Option<u32>),
+    /// A Store app's own logo (`icon="@app"`).
+    AppLogo,
     Closed {
         accepted: bool,
     },
@@ -135,6 +137,7 @@ impl ConfigApp {
                 };
                 self.set_icon_text(text);
             }
+            IconMsg::AppLogo => self.set_icon_text(y_pop::model::APP_LOGO.to_owned()),
             IconMsg::Closed { accepted } => {
                 if !accepted {
                     let original = self.icon_picker.original.clone().unwrap_or_default();
@@ -252,6 +255,10 @@ pub fn icon_modal(
     // What is in use now, and what will be written.
     let used = crate::app_icons::spec_for(settings, item, builtins);
     let current = item.icon.clone().filter(|icon| !icon.is_empty());
+    let store_app = matches!(&item.kind, ItemKind::App(app) if app.app_id.is_some());
+    let logo_chosen = current
+        .as_deref()
+        .is_some_and(|icon| icon.trim().eq_ignore_ascii_case(y_pop::model::APP_LOGO));
     let now: View = Stack::horizontal(space::M)
         .child(
             "icon",
@@ -270,17 +277,32 @@ pub fn icon_modal(
                 )
                 .child(
                     "text",
-                    text::caption(current.clone().unwrap_or_else(|| default_words(item))),
+                    text::caption(if logo_chosen {
+                        "the app's own logo".to_owned()
+                    } else {
+                        current.clone().unwrap_or_else(|| default_words(item))
+                    }),
                 ),
         )
         .child(
             "clear",
             button(
-                "From target",
+                if store_app { "Generic" } else { "From target" },
                 current.is_none(),
                 current.is_some(),
                 context.callback(|()| Msg::Icon(IconMsg::Pick(None))),
             ),
+        )
+        .maybe(
+            "logo",
+            store_app.then(|| {
+                button(
+                    "App logo",
+                    logo_chosen,
+                    !logo_chosen,
+                    context.callback(|()| Msg::Icon(IconMsg::AppLogo)),
+                )
+            }),
         )
         .into();
 
@@ -354,6 +376,7 @@ fn default_words(item: &Item) -> String {
     match &item.kind {
         ItemKind::Group => "the folder icon".to_owned(),
         ItemKind::App(app) if app.browse => "the folder icon".to_owned(),
+        ItemKind::App(app) if app.app_id.is_some() => "the generic icon".to_owned(),
         ItemKind::App(_) => "the program's own icon".to_owned(),
         _ => "the default icon".to_owned(),
     }

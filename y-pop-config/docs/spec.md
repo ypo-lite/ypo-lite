@@ -327,11 +327,12 @@ Closed in phase 0.1.
    path into the package folder (it holds the version and goes stale). The
    `icon` attribute decides:
    - **empty**: the generic icon (A);
-   - **a reserved value** (to decide, e.g. `icon="@app"`): y-pop resolves the
-     app's own logo from its `app-id` at load time through the shell (C).
-   It stays a single attribute and the schema gains no new one. C is a y-pop
-   feature (reader, `Settings`, icon cache) and comes after the picker; until
-   then the picker writes no `icon` for a Store app.
+   - **`icon="@app"`** (decided in 8.8): y-pop resolves the app's own logo
+     from its `app-id` at load time through the shell (C). On anything that is
+     not a Store app it means nothing, and the item gets its default icon.
+   It stays a single attribute and the schema gains no new one. The picker
+   writes `icon="@app"` for the Store apps it adds; the user can clear it or
+   pick a file icon instead.
 3. **Start with Windows: not in the config app.** Not an attribute, not a
    General switch. The user's startup is handled outside the editor for now.
 4. **Shared UI: done, and wider than the toolkit.** Anything common to our

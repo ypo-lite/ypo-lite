@@ -50,6 +50,8 @@
 //! | [`config`] | portable `.ini` settings next to the executable |
 //! | [`xml`] | a small XML reader and writer (comments kept), for settings files that are not `.ini` |
 //! | [`file_info`] | where a `.lnk` points; an executable's `FileDescription` |
+//! | [`apps_folder`] | the packaged (Store) apps in `shell:AppsFolder` |
+//! | [`open_windows`] | the programs with a window open now, as the taskbar lists them |
 //! | [`shell`] | "open this file/folder/program" through `ShellExecute` |
 //! | [`theme`] | whether Windows is asking for a dark palette |
 //! | [`startup`] | run-at-logon registration |
@@ -71,6 +73,8 @@ pub mod build;
 #[cfg(feature = "win")]
 pub mod app;
 #[cfg(feature = "win")]
+pub mod apps_folder;
+#[cfg(feature = "win")]
 pub mod config;
 #[cfg(feature = "win")]
 pub mod dialog;
@@ -90,6 +94,8 @@ pub mod memory;
 pub mod menu;
 #[cfg(feature = "win")]
 pub mod monitor;
+#[cfg(feature = "win")]
+pub mod open_windows;
 #[cfg(feature = "win")]
 pub mod overlay;
 pub mod png;

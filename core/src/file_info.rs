@@ -44,7 +44,8 @@ pub fn read_shell_link(path: &Path) -> Option<ShellLinkInfo> {
     // S_FALSE and RPC_E_CHANGED_MODE both mean there is an apartment.
     let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
 
-    let link: IShellLinkW = unsafe { CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER) }.ok()?;
+    let link: IShellLinkW =
+        unsafe { CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER) }.ok()?;
     let file: IPersistFile = link.cast().ok()?;
     unsafe { file.Load(&HSTRING::from(path.as_os_str()), STGM_READ) }.ok()?;
 
@@ -113,8 +114,14 @@ pub fn file_description(path: &Path) -> Option<String> {
     let query = HSTRING::from(format!(
         "\\StringFileInfo\\{language:04x}{code_page:04x}\\FileDescription"
     ));
-    let found =
-        unsafe { VerQueryValueW(block.as_ptr().cast(), PCWSTR(query.as_ptr()), &mut value, &mut length) };
+    let found = unsafe {
+        VerQueryValueW(
+            block.as_ptr().cast(),
+            PCWSTR(query.as_ptr()),
+            &mut value,
+            &mut length,
+        )
+    };
     if !found.as_bool() || value.is_null() || length == 0 {
         return None;
     }
@@ -128,7 +135,10 @@ pub fn file_description(path: &Path) -> Option<String> {
 
 /// A NUL-terminated UTF-16 buffer as text (up to the first NUL).
 fn text(buffer: &[u16]) -> String {
-    let end = buffer.iter().position(|&unit| unit == 0).unwrap_or(buffer.len());
+    let end = buffer
+        .iter()
+        .position(|&unit| unit == 0)
+        .unwrap_or(buffer.len());
     String::from_utf16_lossy(&buffer[..end])
 }
 
