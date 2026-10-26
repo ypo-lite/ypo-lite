@@ -108,8 +108,9 @@ pub fn load_str(text: &str, builtins: &mut dyn Lookup) -> Result<ConfigTree, xml
         theme_overrides: reader.theme_overrides(root),
     };
 
-    let roots = reader.read_children(root);
-    Ok(reader.finish(roots, defaults))
+    let roots = reader.read_roots(root);
+    let search = reader.read_search(root);
+    Ok(reader.finish(roots, defaults, search))
 }
 
 /// Where the configuration file lives, in the order the places are tried —
@@ -149,7 +150,7 @@ fn argument_path() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{NodeKind, OpenFolder, PresenterStyle};
+    use crate::model::{MenusBrowse, NodeKind, OpenFolder, PresenterStyle, ResultsLayout, Section};
     use crate::variables::Variable;
 
     fn builtins() -> Vec<Variable> {
@@ -506,6 +507,303 @@ mod tests {
             .collect();
         assert_eq!(names, ["Settings…", "Prefs"]);
         assert!(matches!(tree.node(tree.roots[0]).kind, NodeKind::Settings));
+    }
+
+    const SPEC_EXAMPLE: &str = r#"<y-pop>
+        <search hotkey="Alt+Space" results="sections" row-actions="true">
+            <recent count="5"/>
+            <menus browse="columns"/>
+            <start-menu/>
+            <group name="Admin tools">
+                <app name="Registry Editor" exe="%win%\regedit.exe"/>
+                <app name="Services" exe="services.msc"/>
+            </group>
+            <app name="Scripts" exe="%win%\Scripts" browse="true"/>
+            <plugin name="Calculator" src="plugins\calc.wasm" prefix="="/>
+        </search>
+        <group name="Work"><app name="Notepad" exe="notepad.exe"/></group>
+    </y-pop>"#;
+
+    #[test]
+    fn no_search_element_means_no_search() {
+        let tree = load_str(r#"<y-pop><quit/></y-pop>"#, &mut builtins()).expect("valid");
+        assert!(tree.search.is_none());
+        assert!(tree.search_hotkey().is_none());
+    }
+
+    #[test]
+    fn the_spec_example_loads_with_only_the_plugin_warning() {
+        let tree = load_str(SPEC_EXAMPLE, &mut builtins()).expect("valid");
+        assert_eq!(tree.warnings.len(), 1, "{:?}", tree.warnings);
+        assert!(tree.warnings[0].contains("not implemented yet"));
+
+        let search = tree.search.as_ref().expect("a <search>");
+        assert!(search.hotkey.is_some());
+        assert!(!search.collapsed);
+        assert_eq!(search.results, ResultsLayout::Sections);
+        assert!(search.row_actions);
+        assert!(search.history);
+        assert!(matches!(
+            search.sections.as_slice(),
+            [
+                Section::Recent { count: 5 },
+                Section::Menus { .. },
+                Section::StartMenu { .. },
+                Section::Group(_),
+                Section::Folder(_),
+                Section::Plugin(_),
+            ]
+        ));
+        // Search-only nodes are not tray icons.
+        assert_eq!(tree.roots.len(), 1);
+        assert_eq!(tree.node(tree.roots[0]).name.as_ref(), "Work");
+    }
+
+    #[test]
+    fn search_only_nodes_are_in_the_arena_and_reached_by_all_nodes() {
+        let tree = load_str(SPEC_EXAMPLE, &mut builtins()).expect("valid");
+        let names: Vec<&str> = tree
+            .all_nodes()
+            .map(|id| tree.node(id).name.as_ref())
+            .collect();
+        for expected in [
+            "Admin tools",
+            "Registry Editor",
+            "Services",
+            "Scripts",
+            "Notepad",
+        ] {
+            assert!(names.contains(&expected), "{expected} in {names:?}");
+        }
+
+        let search = tree.search.as_ref().unwrap();
+        let Some(Section::Group(group)) = search
+            .sections
+            .iter()
+            .find(|section| matches!(section, Section::Group(_)))
+        else {
+            panic!("a group section")
+        };
+        assert_eq!(tree.children(*group).count(), 2);
+        let Some(Section::Folder(folder)) = search
+            .sections
+            .iter()
+            .find(|section| matches!(section, Section::Folder(_)))
+        else {
+            panic!("a folder section")
+        };
+        let NodeKind::App(app) = &tree.node(*folder).kind else {
+            panic!("an app")
+        };
+        assert!(app.browse.is_some());
+    }
+
+    #[test]
+    fn an_empty_search_gets_the_default_sections() {
+        let tree = load_str(
+            r#"<y-pop><search hotkey="Alt+Space"/></y-pop>"#,
+            &mut builtins(),
+        )
+        .expect("valid");
+        assert!(tree.warnings.is_empty(), "{:?}", tree.warnings);
+        let search = tree.search.unwrap();
+        assert!(matches!(
+            search.sections.as_slice(),
+            [
+                Section::Recent { count: 5 },
+                Section::Menus {
+                    browse: MenusBrowse::Columns,
+                    ..
+                },
+                Section::StartMenu { .. }
+            ]
+        ));
+    }
+
+    #[test]
+    fn written_sections_are_exactly_the_list_except_that_menus_is_always_there() {
+        let tree = load_str(
+            r#"<y-pop><search><start-menu/><recent/></search></y-pop>"#,
+            &mut builtins(),
+        )
+        .expect("valid");
+        assert!(tree.warnings.is_empty(), "{:?}", tree.warnings);
+        assert!(matches!(
+            tree.search.unwrap().sections.as_slice(),
+            [
+                Section::StartMenu { .. },
+                Section::Recent { count: 5 },
+                Section::Menus { .. }
+            ]
+        ));
+
+        // Without <recent>, <menus> goes first.
+        let tree = load_str(
+            r#"<y-pop><search><start-menu/></search></y-pop>"#,
+            &mut builtins(),
+        )
+        .expect("valid");
+        assert!(matches!(
+            tree.search.unwrap().sections.as_slice(),
+            [Section::Menus { .. }, Section::StartMenu { .. }]
+        ));
+    }
+
+    #[test]
+    fn section_attributes_are_read() {
+        let tree = load_str(
+            r#"<y-pop><search collapsed="true" results="flat" row-actions="false" history="false">
+                <recent count="9"/>
+                <menus browse="a-z" include="y-pop; Admin tools"/>
+                <start-menu exclude="*uninstall*;Help"/>
+            </search></y-pop>"#,
+            &mut builtins(),
+        )
+        .expect("valid");
+        assert!(tree.warnings.is_empty(), "{:?}", tree.warnings);
+
+        let search = tree.search.unwrap();
+        assert!(search.collapsed);
+        assert_eq!(search.results, ResultsLayout::Flat);
+        assert!(!search.row_actions);
+        assert!(!search.history);
+        let [
+            Section::Recent { count: 9 },
+            Section::Menus { browse, include },
+            Section::StartMenu { exclude },
+        ] = search.sections.as_slice()
+        else {
+            panic!("{:?}", search.sections)
+        };
+        assert_eq!(*browse, MenusBrowse::AZ);
+        assert_eq!(
+            include.iter().map(|name| name.as_ref()).collect::<Vec<_>>(),
+            ["y-pop", "Admin tools"]
+        );
+        assert_eq!(
+            exclude.iter().map(|name| name.as_ref()).collect::<Vec<_>>(),
+            ["*uninstall*", "Help"]
+        );
+    }
+
+    #[test]
+    fn the_search_hotkey_gets_the_id_after_every_node_hotkey() {
+        let tree = load_str(
+            r#"<y-pop>
+                <search hotkey="Alt+Space" override="true"/>
+                <group name="A"><hotkey key="Win+D"/><quit/></group>
+            </y-pop>"#,
+            &mut builtins(),
+        )
+        .expect("valid");
+        assert!(tree.warnings.is_empty(), "{:?}", tree.warnings);
+
+        let node_ids: Vec<u32> = tree.hotkey_bindings().map(|(id, _)| id).collect();
+        let (id, binding) = tree.search_hotkey().expect("a search hotkey");
+        assert!(binding.can_override);
+        assert!(!node_ids.contains(&id));
+        assert_eq!(id, y_core::ids::IDH_FIRST + node_ids.len() as u32);
+        assert_eq!(tree.hotkey_owner(id), None);
+    }
+
+    #[test]
+    fn search_warnings() {
+        let warnings = |xml: &str| {
+            load_str(xml, &mut builtins())
+                .expect("valid")
+                .warnings
+                .join("\n")
+        };
+
+        assert!(
+            warnings(r#"<y-pop><search/><search/></y-pop>"#).contains("a second <search>"),
+            "second <search>"
+        );
+        assert!(
+            warnings(r#"<y-pop><search hotkey="Nonsense+"/></y-pop>"#)
+                .contains("is not a key combination")
+        );
+        assert!(warnings(r#"<y-pop><search results="grid"/></y-pop>"#).contains("unknown results"));
+        assert!(warnings(r#"<y-pop><search typo="1"/></y-pop>"#).contains("no typo attribute"));
+        assert!(
+            warnings(r#"<y-pop><search><widget/></search></y-pop>"#)
+                .contains("unknown element <widget>")
+        );
+        assert!(
+            warnings(r#"<y-pop><search><recent/><recent/></search></y-pop>"#)
+                .contains("a second <recent>")
+        );
+        assert!(
+            warnings(r#"<y-pop><search><menus browse="tree"/></search></y-pop>"#)
+                .contains("unknown browse")
+        );
+        assert!(
+            warnings(r#"<y-pop><search><recent count="many"/></search></y-pop>"#)
+                .contains("not a non-negative integer")
+        );
+        assert!(
+            warnings(r#"<y-pop><search><app name="X" exe="x.exe"/></search></y-pop>"#)
+                .contains("must be a browsed folder")
+        );
+        assert!(
+            warnings(r#"<y-pop><search><plugin name="P"/></search></y-pop>"#)
+                .contains("needs both a name and a src")
+        );
+        assert!(
+            warnings(r#"<y-pop><group name="G"><search/></group></y-pop>"#)
+                .contains("unknown element <search>")
+        );
+    }
+
+    #[test]
+    fn a_hotkey_in_a_search_only_group_is_ignored_with_a_warning() {
+        let tree = load_str(
+            r#"<y-pop><search>
+                <group name="Tools"><hotkey key="Win+T"/><quit/></group>
+            </search></y-pop>"#,
+            &mut builtins(),
+        )
+        .expect("valid");
+        assert_eq!(tree.warnings.len(), 1, "{:?}", tree.warnings);
+        assert!(tree.warnings[0].contains("ignored"));
+        assert_eq!(tree.hotkey_bindings().count(), 0);
+    }
+
+    #[test]
+    fn keywords_are_read_off_any_node_and_interned() {
+        let tree = load_str(
+            r#"<y-pop>
+                <app name="Mail" exe="a.exe" keywords="email outlook"/>
+                <group name="G" keywords="email outlook"><quit keywords="exit close"/></group>
+            </y-pop>"#,
+            &mut builtins(),
+        )
+        .expect("valid");
+        assert!(tree.warnings.is_empty(), "{:?}", tree.warnings);
+
+        let mail = tree.node(tree.roots[0]);
+        let group = tree.node(tree.roots[1]);
+        assert_eq!(mail.keywords.as_deref(), Some("email outlook"));
+        assert!(std::sync::Arc::ptr_eq(
+            mail.keywords.as_ref().unwrap(),
+            group.keywords.as_ref().unwrap()
+        ));
+        let quit = tree.node(group.children[0]);
+        assert_eq!(quit.keywords.as_deref(), Some("exit close"));
+    }
+
+    #[test]
+    fn the_runner_style_warning_points_at_search() {
+        let tree = load_str(
+            r#"<y-pop popup="overlay" popup-style="runner"><quit/></y-pop>"#,
+            &mut builtins(),
+        )
+        .expect("valid");
+        assert!(
+            tree.warnings
+                .iter()
+                .any(|warning| warning.contains("replaced by <search>"))
+        );
     }
 
     #[test]

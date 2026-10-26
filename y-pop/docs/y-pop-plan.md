@@ -1077,7 +1077,9 @@ asking further:
     Specification proposal and an interactive mockup:
     [`overlay-modes.md`](overlay-modes.md). Its revision 2 turns `runner`
     into a config-wide search (`<search>`, not a `popup-style`) and adds
-    numpad control to `radial`.
+    numpad control to `radial`. Its revision 4 adds sections (recent, Start
+    menu, search-only groups and folders) and plugins (later); the
+    implementation plan for search is [`search-plan.md`](search-plan.md).
 
 **Also shipped, not itemized in the original plan at all:**
 

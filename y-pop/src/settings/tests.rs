@@ -639,3 +639,178 @@ fn launch_app_expands_and_settles_the_shell_choice() {
     let b = settings.launch_app(apps[1], &mut builtins());
     assert!(!b.shell && b.elevate);
 }
+
+const WITH_SEARCH: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<y-pop>
+	<variables>
+		<var name="tools" value="%win%\tools"/>
+	</variables>
+	<!-- the launcher -->
+	<search hotkey="Alt+Space" override="true" collapsed="true" results="flat" row-actions="false" history="false" future="x">
+		<recent count="7"/>
+
+		<!-- natural order -->
+		<menus browse="a-z" include="y-pop;Admin tools" later="1"/>
+		<start-menu exclude="*uninstall*"/>
+		<!-- only here -->
+		<group name="Admin tools" keywords="admin root">
+			<app name="Registry" exe="%tools%\regedit.exe"/>
+			<app name="Services" exe="services.msc" keywords="svc"/>
+		</group>
+		<app name="Scripts" exe="%tools%\Scripts" browse="true" depth="2"/>
+		<plugin name="Calculator" src="plugins\calc.wasm" prefix="=" allow="clipboard"/>
+		<!-- trailing -->
+	</search>
+	<group name="Work">
+		<app name="Notepad" exe="notepad.exe" keywords="text edit"/>
+	</group>
+</y-pop>
+"#;
+
+fn search_of(settings: &Settings) -> &SearchSettings {
+    settings.search.as_ref().expect("a <search>")
+}
+
+#[test]
+fn search_is_loaded_as_elements_not_as_a_comment() {
+    let settings = load(WITH_SEARCH);
+    assert!(
+        !settings
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("kept in the file as a comment")),
+        "{:?}",
+        settings.warnings
+    );
+
+    let search = search_of(&settings);
+    assert_eq!(search.hotkey.as_deref(), Some("Alt+Space"));
+    assert!(search.can_override);
+    assert_eq!(search.collapsed, Some(true));
+    assert_eq!(search.results, Some(ResultsMode::Flat));
+    assert_eq!(search.row_actions, Some(false));
+    assert_eq!(search.history, Some(false));
+    assert_eq!(search.lead, [Comment::new("the launcher")]);
+    assert_eq!(
+        search.extra_attrs,
+        [("future".to_owned(), "x".to_owned())],
+        "unknown attributes are kept"
+    );
+
+    let kinds: Vec<&str> = search
+        .children
+        .iter()
+        .map(|child| match child {
+            SearchEntry::Comment(_) => "comment",
+            SearchEntry::Item(item) => item.kind.element(),
+            SearchEntry::Section(section) => section.kind.element(),
+        })
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            "recent",
+            "menus",
+            "start-menu",
+            "group",
+            "app",
+            "plugin",
+            "comment"
+        ],
+        "comments directly above an element are attached to it"
+    );
+    let SearchEntry::Section(menus) = &search.children[1] else {
+        panic!("menus")
+    };
+    assert_eq!(menus.lead, [Comment::new("natural order")]);
+    assert!(menus.blank_before, "the empty line above it is kept");
+    // Only the tray menu is a root.
+    assert_eq!(settings.roots.len(), 1);
+}
+
+#[test]
+fn search_survives_a_round_trip_with_every_kind_of_child() {
+    let before = load(WITH_SEARCH);
+    let written = before.to_xml();
+
+    let original = config::load_str(WITH_SEARCH, &mut builtins()).expect("valid");
+    let again = config::load_str(&written, &mut builtins()).expect("valid");
+    assert_eq!(original.warnings, again.warnings);
+    assert_eq!(dump(&original), dump(&again), "the same nodes");
+    assert_eq!(
+        format!("{:?}", original.search),
+        format!("{:?}", again.search),
+        "the same search"
+    );
+
+    assert_eq!(
+        comment_texts(WITH_SEARCH),
+        comment_texts(&written),
+        "the same comments"
+    );
+    let after = load(&written);
+    assert_eq!(search_of(&before), search_of(&after));
+    assert_eq!(before.roots, after.roots);
+}
+
+#[test]
+fn a_file_with_search_is_written_byte_for_byte_again() {
+    assert_eq!(load(WITH_SEARCH).to_xml(), WITH_SEARCH);
+}
+
+#[test]
+fn search_items_keep_a_hotkey_the_reader_ignores() {
+    let text =
+        r#"<y-pop><search><group name="G"><hotkey key="Win+T"/><quit/></group></search></y-pop>"#;
+    let settings = load(text);
+    assert!(
+        settings
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("ignored")),
+        "the reader's own warning is reported: {:?}",
+        settings.warnings
+    );
+    assert!(settings.to_xml().contains("<hotkey key=\"Win+T\"/>"));
+}
+
+#[test]
+fn a_second_search_and_a_search_in_a_group_are_kept_as_comments() {
+    let settings = load(
+        r#"<y-pop><search hotkey="Alt+Space"/><search hotkey="Alt+Q"/><group name="G"><search/><quit/></group></y-pop>"#,
+    );
+    assert_eq!(search_of(&settings).hotkey.as_deref(), Some("Alt+Space"));
+    let written = settings.to_xml();
+    assert_eq!(
+        comment_texts(&written),
+        ["<search hotkey=\"Alt+Q\"/>", "<search/>"]
+    );
+}
+
+#[test]
+fn a_bad_search_value_stays_as_it_was() {
+    let text = r#"<y-pop><search results="grid"><menus browse="tree"/><recent count="many"/></search></y-pop>"#;
+    let written = load(text).to_xml();
+    assert!(written.contains("results=\"grid\""), "{written}");
+    assert!(written.contains("browse=\"tree\""), "{written}");
+    assert!(written.contains("count=\"many\""), "{written}");
+}
+
+#[test]
+fn renaming_a_variable_reaches_the_search_items() {
+    let mut settings = load(WITH_SEARCH);
+    assert!(
+        settings
+            .variable_users(0)
+            .iter()
+            .any(|user| matches!(user, UsedIn::Item { .. }))
+    );
+    let users = settings.variable_users(0).len();
+    assert_eq!(users, 2, "Registry and Scripts");
+
+    let rewritten = settings.rename_variable(0, "utils").expect("free name");
+    assert_eq!(rewritten, 2);
+    let written = settings.to_xml();
+    assert!(written.contains(r"%utils%\regedit.exe"), "{written}");
+    assert!(written.contains(r"%utils%\Scripts"), "{written}");
+}

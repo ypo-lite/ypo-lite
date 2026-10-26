@@ -27,6 +27,29 @@
 //!   directly, and neither is free to repeat for every one of what could be
 //!   hundreds of listed files in a browsed folder.
 //!
+//! # Sizes
+//!
+//! [`IconCache::new`] serves the small icons a menu draws. A cache made with
+//! [`IconCache::with_size`] serves icons meant to be drawn that large, from
+//! the best source for the size (a cache holds one size, so its keys do not
+//! carry it):
+//!
+//! * up to 16 px: the small slot (`SM_CXSMICON`);
+//! * up to 32 px: the large slot, which `ExtractIconExW` and
+//!   `SHGetFileInfoW` give at exactly the system's large icon size, so
+//!   drawing it at 32 is 1:1 and at 20 is a downscale of a good source
+//!   rather than an upscale of a small one;
+//! * above 32 px: the shell's own image factory (`IShellItemImageFactory`,
+//!   what Store logos already go through), which returns the file's icon at
+//!   the size asked — the 48 px and 256 px frames an executable carries —
+//!   where the large slot would stop at 32. It needs the file to exist and
+//!   ignores an icon index, so those cases fall back to the large slot;
+//!   stock icons and the generic folder icon stop at 32 for the same
+//!   reason (no file to hand the factory).
+//!
+//! Chosen by reasoning about the sources, not by comparing renders: it
+//! wants a look on the machine (a 👁 in `y-pop`'s `docs/search-plan.md`).
+//!
 //! Synchronous only — a slow shell lookup (a file on a network share or a
 //! removable disk) blocks the caller here. An async, cached-and-refreshed
 //! version is later work (see `y-pop`'s `docs/y-pop-plan.md`), not this
@@ -58,13 +81,13 @@ use windows::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBU
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
 use windows::Win32::UI::Shell::{
     ExtractIconExW, IShellItem, IShellItemImageFactory, SHCreateItemFromParsingName, SHFILEINFOW,
-    SHGFI_ICON, SHGFI_SMALLICON, SHGFI_USEFILEATTRIBUTES, SHGSI_ICON, SHGSI_SMALLICON,
-    SHGetFileInfoW, SHGetStockIconInfo, SHSTOCKICONID, SHSTOCKICONINFO, SIID_APPLICATION,
-    SIID_AUDIOFILES, SIID_DELETE, SIID_DESKTOPPC, SIID_DRIVEFIXED, SIID_DRIVENET, SIID_ERROR,
-    SIID_FIND, SIID_FOLDEROPEN, SIID_HELP, SIID_IMAGEFILES, SIID_INFO, SIID_KEY, SIID_LINK,
-    SIID_LOCK, SIID_MYNETWORK, SIID_PRINTER, SIID_RECYCLER, SIID_SERVER, SIID_SETTINGS, SIID_SHARE,
-    SIID_SHIELD, SIID_USERS, SIID_VIDEOFILES, SIID_WARNING, SIID_WORLD, SIID_ZIPFILE,
-    SIIGBF_BIGGERSIZEOK, SIIGBF_ICONONLY,
+    SHGFI_ICON, SHGFI_LARGEICON, SHGFI_SMALLICON, SHGFI_USEFILEATTRIBUTES, SHGSI_ICON,
+    SHGSI_LARGEICON, SHGSI_SMALLICON, SHGetFileInfoW, SHGetStockIconInfo, SHSTOCKICONID,
+    SHSTOCKICONINFO, SIID_APPLICATION, SIID_AUDIOFILES, SIID_DELETE, SIID_DESKTOPPC,
+    SIID_DRIVEFIXED, SIID_DRIVENET, SIID_ERROR, SIID_FIND, SIID_FOLDEROPEN, SIID_HELP,
+    SIID_IMAGEFILES, SIID_INFO, SIID_KEY, SIID_LINK, SIID_LOCK, SIID_MYNETWORK, SIID_PRINTER,
+    SIID_RECYCLER, SIID_SERVER, SIID_SETTINGS, SIID_SHARE, SIID_SHIELD, SIID_USERS,
+    SIID_VIDEOFILES, SIID_WARNING, SIID_WORLD, SIID_ZIPFILE, SIIGBF_BIGGERSIZEOK, SIIGBF_ICONONLY,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CopyIcon, CreateIconIndirect, DI_MASK, DI_NORMAL, DestroyIcon, DrawIconEx, GCLP_HICONSM,
@@ -232,6 +255,24 @@ impl Icon {
         }
 
         Some(Bitmap(bitmap))
+    }
+
+    /// This icon drawn at `size`×`size` as `0xAARRGGBB` words, premultiplied
+    /// and top row first — the layout of `overlay::Canvas`'s pixels, so
+    /// `Canvas::blit` can composite it. Goes through [`Icon::to_bitmap`], so
+    /// it draws and handles masks the same way; `None` if that fails.
+    pub fn to_pixels(&self, size: i32) -> Option<Vec<u32>> {
+        let bgra = self.to_bitmap(size)?.pixels(size)?;
+        let row = size as usize * 4;
+        // The bitmap is bottom-up.
+        let mut pixels = Vec::with_capacity(bgra.len() / 4);
+        for line in bgra.chunks_exact(row).rev() {
+            pixels.extend(
+                line.chunks_exact(4)
+                    .map(|bgra| u32::from_le_bytes([bgra[0], bgra[1], bgra[2], bgra[3]])),
+            );
+        }
+        Some(pixels)
     }
 
     /// This icon as PNG bytes, `size`×`size` with straight alpha — what a UI
@@ -471,11 +512,37 @@ impl StockIcon {
 #[derive(Default)]
 pub struct IconCache {
     cache: HashMap<CacheKey, Option<Icon>>,
+    /// The size, in pixels, the icons are meant to be drawn at; `0` is
+    /// "small". See the module doc's "Sizes".
+    size: i32,
 }
 
+/// The largest size the small slot serves, and the large slot after it.
+const SMALL_MAX: i32 = 16;
+const LARGE_MAX: i32 = 32;
+
 impl IconCache {
+    /// A cache of small icons, the size a menu draws.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// A cache of icons meant to be drawn `size` pixels square — see the
+    /// module doc's "Sizes" for where each size comes from. An icon is still
+    /// scaled to the exact size when drawn (`Icon::to_bitmap`).
+    pub fn with_size(size: i32) -> Self {
+        Self {
+            size,
+            ..Self::default()
+        }
+    }
+
+    fn large(&self) -> bool {
+        self.size > SMALL_MAX
+    }
+
+    fn jumbo(&self) -> bool {
+        self.size > LARGE_MAX
     }
 
     /// The icon for the file at `path` — its own, if it's one of the kinds
@@ -498,21 +565,35 @@ impl IconCache {
 
         // By reference: `key` still has to move into `.entry(key)` below.
         let owns_icon = matches!(&key, CacheKey::File(..));
+        let (large, size) = (self.large(), self.size);
+        // The image factory knows nothing of an icon index.
+        let from_image = self.jumbo() && index == 0;
         self.cache
             .entry(key)
             .or_insert_with(|| {
-                if owns_icon && !through_shell {
-                    extract_own_icon(path, index)
-                } else {
-                    shell_icon(path, false)
-                }
+                from_image
+                    .then(|| shell_image(&HSTRING::from(path), size))
+                    .flatten()
+                    .or_else(|| {
+                        if owns_icon && !through_shell {
+                            extract_own_icon(path, index, large)
+                        } else {
+                            shell_icon(path, false, large)
+                        }
+                    })
             })
             .as_ref()
             .and_then(Icon::duplicate)
     }
 
-    /// A shell stock icon, small size. `None` if Windows has none to give.
+    /// A shell stock icon, small or (for a cache above 16 px) large; never
+    /// larger. `None` if Windows has none to give.
     pub fn for_stock(&mut self, stock: StockIcon) -> Option<Icon> {
+        let which = if self.large() {
+            SHGSI_LARGEICON
+        } else {
+            SHGSI_SMALLICON
+        };
         self.cache
             .entry(CacheKey::Stock(stock.id().0))
             .or_insert_with(|| {
@@ -520,7 +601,7 @@ impl IconCache {
                     cbSize: size_of::<SHSTOCKICONINFO>() as u32,
                     ..Default::default()
                 };
-                unsafe { SHGetStockIconInfo(stock.id(), SHGSI_ICON | SHGSI_SMALLICON, &mut info) }
+                unsafe { SHGetStockIconInfo(stock.id(), SHGSI_ICON | which, &mut info) }
                     .ok()
                     .filter(|()| !info.hIcon.is_invalid())
                     .map(|()| Icon(info.hIcon))
@@ -543,6 +624,7 @@ impl IconCache {
     /// The generic "closed folder" icon — not specific to any one
     /// directory, so takes no path.
     pub fn for_directory(&mut self) -> Option<Icon> {
+        let large = self.large();
         self.cache
             .entry(CacheKey::Directory)
             // A *non-empty* placeholder, not `""` — confirmed live, not
@@ -556,7 +638,7 @@ impl IconCache {
             // means the shell never touches the filesystem to check it
             // exists — see the module doc), so the literal text is
             // arbitrary; it exists only to not be empty.
-            .or_insert_with(|| shell_icon("folder", true))
+            .or_insert_with(|| shell_icon("folder", true, large))
             .as_ref()
             .and_then(Icon::duplicate)
     }
@@ -582,32 +664,36 @@ const LOGO_RETRY_BASE_MS: u64 = 250;
 /// icon-only and then letting the shell fall back to a thumbnail, before the
 /// app is declared logo-less.
 fn store_logo(app_id: &str) -> Option<Icon> {
-    // S_FALSE and RPC_E_CHANGED_MODE both mean there is an apartment.
-    let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
-
     let name = HSTRING::from(format!(r"{}\{app_id}", crate::apps_folder::FOLDER));
     for attempt in 0..LOGO_ATTEMPTS {
         if attempt > 0 {
             let wait = LOGO_RETRY_BASE_MS << (attempt - 1);
             std::thread::sleep(std::time::Duration::from_millis(wait));
         }
-        let Ok(item) = (unsafe { SHCreateItemFromParsingName::<_, _, IShellItem>(&name, None) })
-        else {
+        if let Some(icon) = shell_image(&name, LOGO) {
+            return Some(icon);
+        }
+    }
+    None
+}
+
+/// The shell's image of the item `name` (a path, or `shell:AppsFolder\…`) at
+/// `size` pixels, as an icon: first icon-only, then letting the shell fall
+/// back to a thumbnail. One attempt.
+fn shell_image(name: &HSTRING, size: i32) -> Option<Icon> {
+    // S_FALSE and RPC_E_CHANGED_MODE both mean there is an apartment.
+    let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+
+    let item = unsafe { SHCreateItemFromParsingName::<_, _, IShellItem>(name, None) }.ok()?;
+    let factory = item.cast::<IShellItemImageFactory>().ok()?;
+    for flags in [SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK, SIIGBF_BIGGERSIZEOK] {
+        let Ok(image) = (unsafe { factory.GetImage(SIZE { cx: size, cy: size }, flags) }) else {
             continue;
         };
-        let Ok(factory) = item.cast::<IShellItemImageFactory>() else {
-            continue;
-        };
-        for flags in [SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK, SIIGBF_BIGGERSIZEOK] {
-            let Ok(image) = (unsafe { factory.GetImage(SIZE { cx: LOGO, cy: LOGO }, flags) })
-            else {
-                continue;
-            };
-            let icon = icon_from_image(image);
-            let _ = unsafe { DeleteObject(image.into()) };
-            if icon.is_some() {
-                return icon;
-            }
+        let icon = icon_from_image(image);
+        let _ = unsafe { DeleteObject(image.into()) };
+        if icon.is_some() {
+            return icon;
         }
     }
     None
@@ -716,10 +802,16 @@ pub fn count_in_file(path: &str) -> u32 {
     // Index -1 with no buffers asks only for the count.
     unsafe { ExtractIconExW(&wide, -1, None, None, 0) }
 }
-fn extract_own_icon(path: &str, index: i32) -> Option<Icon> {
+fn extract_own_icon(path: &str, index: i32, large: bool) -> Option<Icon> {
     let wide = HSTRING::from(path);
     let mut icon = HICON::default();
-    let extracted = unsafe { ExtractIconExW(&wide, index, None, Some(&mut icon), 1) };
+    // The large slot is the first out-parameter, the small one the second.
+    let (large_slot, small_slot) = if large {
+        (Some(&mut icon as *mut HICON), None)
+    } else {
+        (None, Some(&mut icon as *mut HICON))
+    };
+    let extracted = unsafe { ExtractIconExW(&wide, index, large_slot, small_slot, 1) };
     (extracted > 0 && !icon.is_invalid()).then_some(Icon(icon))
 }
 
@@ -730,19 +822,24 @@ fn extract_own_icon(path: &str, index: i32) -> Option<Icon> {
 /// point of caching by extension (or, for a directory, not caching by path
 /// at all) in the first place: the specific file was never going to matter
 /// to the answer, so the lookup should not depend on it existing either.
-fn shell_icon(path: &str, is_directory: bool) -> Option<Icon> {
+fn shell_icon(path: &str, is_directory: bool, large: bool) -> Option<Icon> {
     let wide = HSTRING::from(path);
     let mut info = SHFILEINFOW::default();
 
     // See the module doc: USEFILEATTRIBUTES is reliable for a directory,
     // not for a regular file — so only the directory branch uses it.
+    let size = if large {
+        SHGFI_LARGEICON
+    } else {
+        SHGFI_SMALLICON
+    };
     let (attributes, flags) = if is_directory {
         (
             FILE_ATTRIBUTE_DIRECTORY,
-            SHGFI_ICON | SHGFI_SMALLICON | SHGFI_USEFILEATTRIBUTES,
+            SHGFI_ICON | size | SHGFI_USEFILEATTRIBUTES,
         )
     } else {
-        (FILE_ATTRIBUTE_NORMAL, SHGFI_ICON | SHGFI_SMALLICON)
+        (FILE_ATTRIBUTE_NORMAL, SHGFI_ICON | size)
     };
 
     let result = unsafe {
@@ -1019,5 +1116,102 @@ mod tests {
         // served straight from the cache, never queried at all.
         let icon = cache.for_file(r"Z:\this\path\does\not\exist.md", None);
         assert!(icon.is_some());
+    }
+
+    fn notepad() -> String {
+        std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_owned()) + r"\notepad.exe"
+    }
+
+    #[test]
+    fn to_pixels_is_top_down_premultiplied_and_not_empty() {
+        let _guard = serialized();
+        let icon = IconCache::new()
+            .for_file(&notepad(), None)
+            .expect("an icon");
+        let pixels = icon.to_pixels(16).expect("pixels");
+        assert_eq!(pixels.len(), 16 * 16);
+
+        assert!(pixels.iter().any(|&p| p >> 24 != 0), "something is drawn");
+        for &pixel in &pixels {
+            let alpha = pixel >> 24;
+            for shift in [0, 8, 16] {
+                assert!(
+                    (pixel >> shift) & 0xFF <= alpha,
+                    "premultiplied: {pixel:#010x}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn every_size_tier_yields_an_icon_that_draws_at_its_size() {
+        let _guard = serialized();
+        for size in [16, 20, 32, 48, 64] {
+            let mut cache = IconCache::with_size(size);
+            let icon = cache
+                .for_file(&notepad(), None)
+                .unwrap_or_else(|| panic!("no icon at {size}"));
+            let pixels = icon.to_pixels(size).expect("pixels");
+            assert_eq!(pixels.len() as i32, size * size);
+            assert!(pixels.iter().any(|&p| p >> 24 != 0), "blank at {size}");
+
+            assert!(cache.for_directory().is_some(), "folder at {size}");
+            assert!(
+                cache.for_stock(StockIcon::Info).is_some(),
+                "stock at {size}"
+            );
+        }
+    }
+
+    /// A bigger tier is a different source, not the small icon blown up: the
+    /// large slot of an executable is a 32 px frame, so drawing it at 32 has
+    /// more distinct pixels than the small one stretched to the same size.
+    #[test]
+    fn a_bigger_cache_gives_a_richer_icon() {
+        let _guard = serialized();
+        let distinct = |size: i32| {
+            let icon = IconCache::with_size(size)
+                .for_file(&notepad(), None)
+                .expect("an icon");
+            let mut colours = icon.to_pixels(32).expect("pixels");
+            colours.sort_unstable();
+            colours.dedup();
+            colours.len()
+        };
+        assert!(distinct(32) >= distinct(16));
+    }
+
+    #[test]
+    fn draw_icon_lands_inside_its_square_and_nowhere_else() {
+        use crate::overlay::Canvas;
+        let _guard = serialized();
+        let icon = IconCache::new()
+            .for_file(&notepad(), None)
+            .expect("an icon");
+
+        let mut canvas = Canvas::new((40, 40)).unwrap();
+        canvas.clear(crate::overlay::Color::TRANSPARENT);
+        canvas.draw_icon(&icon, 10, 12, 16);
+
+        let pixels = canvas.pixels_mut().to_vec();
+        let mut inside = 0;
+        for (index, &pixel) in pixels.iter().enumerate() {
+            let (x, y) = ((index % 40) as i32, (index / 40) as i32);
+            if (10..26).contains(&x) && (12..28).contains(&y) {
+                inside += usize::from(pixel != 0);
+            } else {
+                assert_eq!(pixel, 0, "drawn outside the square at {x},{y}");
+            }
+        }
+        assert!(inside > 0, "nothing was drawn");
+
+        // And it matches the icon's own pixels where it is opaque.
+        let own = icon.to_pixels(16).unwrap();
+        let first_opaque = own
+            .iter()
+            .position(|&p| p >> 24 == 255)
+            .expect("opaque pixel");
+        let (x, y) = (first_opaque % 16, first_opaque / 16);
+        assert_eq!(pixels[(12 + y) * 40 + 10 + x], own[first_opaque]);
     }
 }

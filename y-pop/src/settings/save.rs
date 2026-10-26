@@ -5,9 +5,9 @@
 //! and saving an untouched file twice gives the same bytes. Comments and the
 //! empty lines between entries are written where they were read.
 //!
-//! Order inside `<y-pop>`: intro comments, `<variables>`, `<skin>`, then the
-//! tray menus — the order the reader needs them in (a variable only sees the
-//! ones above it, and the menus use them).
+//! Order inside `<y-pop>`: intro comments, `<variables>`, `<skin>`,
+//! `<search>`, then the tray menus — the order the reader needs them in (a
+//! variable only sees the ones above it, and the menus and search use them).
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -16,8 +16,9 @@ use y_core::overlay::Color;
 use y_core::xml::Writer;
 
 use super::{
-    Comment, Entry, Globals, HotkeyEntry, Item, ItemKind, PopupStyle, Renderer, Settings, Skin,
-    Var, VarEntry,
+    Comment, Entry, Globals, HotkeyEntry, Item, ItemKind, MenusMode, PopupStyle, Renderer,
+    ResultsMode, SearchEntry, SearchSection, SearchSettings, SectionKind, Settings, Skin, Var,
+    VarEntry,
 };
 use crate::model::OpenFolder;
 use crate::theme::{EdgeRule, GradientDirection, GradientOverride, Theme};
@@ -34,6 +35,9 @@ impl Settings {
         comments(&mut writer, &self.intro);
         variables(&mut writer, &self.variables);
         skin(&mut writer, &self.skin);
+        if let Some(search) = &self.search {
+            write_search(&mut writer, search);
+        }
         entries(&mut writer, &self.roots);
         writer.close();
 
@@ -281,6 +285,71 @@ fn write_item(writer: &mut Writer, item: &Item) {
     }
     entries(writer, &item.children);
     writer.close();
+}
+
+fn write_search(writer: &mut Writer, search: &SearchSettings) {
+    if search.blank_before {
+        writer.blank_line();
+    }
+    comments(writer, &search.lead);
+
+    writer.open("search");
+    let mut attributes = Attributes::new(writer);
+    attributes.text("hotkey", search.hotkey.as_deref());
+    attributes.flag("override", search.can_override);
+    attributes.bool("collapsed", search.collapsed);
+    attributes.text("results", search.results.map(ResultsMode::name));
+    attributes.bool("row-actions", search.row_actions);
+    attributes.bool("history", search.history);
+    attributes.extras(&search.extra_attrs);
+
+    for child in &search.children {
+        match child {
+            SearchEntry::Comment(comment) => write_comment(writer, comment),
+            SearchEntry::Item(item) => write_item(writer, item),
+            SearchEntry::Section(section) => write_section(writer, section),
+        }
+    }
+    writer.close();
+}
+
+fn write_section(writer: &mut Writer, section: &SearchSection) {
+    if section.blank_before {
+        writer.blank_line();
+    }
+    comments(writer, &section.lead);
+
+    writer.open(section.kind.element());
+    let mut attributes = Attributes::new(writer);
+    match &section.kind {
+        SectionKind::Recent { count } => attributes.number("count", *count),
+        SectionKind::Menus { browse, include } => {
+            attributes.text("browse", browse.map(MenusMode::name));
+            attributes.text("include", include.as_deref());
+        }
+        SectionKind::StartMenu { exclude } => attributes.text("exclude", exclude.as_deref()),
+        SectionKind::Plugin => {}
+    }
+    attributes.extras(&section.extra_attrs);
+    writer.close();
+}
+
+impl ResultsMode {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Sections => "sections",
+            Self::Flat => "flat",
+        }
+    }
+}
+
+impl MenusMode {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Columns => "columns",
+            Self::AZ => "a-z",
+        }
+    }
 }
 
 fn write_hotkey(writer: &mut Writer, hotkey: &HotkeyEntry) {

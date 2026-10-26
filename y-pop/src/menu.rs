@@ -221,7 +221,7 @@ impl Session {
 /// PortAL, which left those bare; `icon=` on the node still overrides, and
 /// `icon="@app"` on a Store app asks for its own logo. A titled `Separator`
 /// gets none.
-fn resolve_icon(icons: &mut IconCache, node: &NodeData) -> Option<Icon> {
+pub(crate) fn resolve_icon(icons: &mut IconCache, node: &NodeData) -> Option<Icon> {
     if let Some(internal) = node
         .icon
         .as_ref()
@@ -263,7 +263,7 @@ fn resolve_icon(icons: &mut IconCache, node: &NodeData) -> Option<Icon> {
 /// practice never gives one node two (PortAL's own config didn't either),
 /// and there is no natural way to show more than one hint in one column
 /// anyway.
-fn shortcut_text(defaults: &Defaults, node: &NodeData) -> Option<String> {
+pub(crate) fn shortcut_text(defaults: &Defaults, node: &NodeData) -> Option<String> {
     if !node.show_shortcut.unwrap_or(defaults.show_shortcuts) {
         return None;
     }

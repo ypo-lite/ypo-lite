@@ -1,0 +1,1508 @@
+<title>y-pop Overlay Modes</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+  /* Layout: same chrome family as y-pop-config's mock. Header with the mode switch, then a
+     desktop "stage" (where the overlay renders) beside a panel of options, keys and XML.
+     The overlay's own look (--o-*) follows the Skin switch, not the page theme. */
+  :root{
+    --paper:#F3F5F9; --surface:#FFFFFF; --surface-2:#EAEDF3; --ink:#191C22; --muted:#5B6270;
+    --line:#DCE0E9; --accent:#4C5FD5; --accent-ink:#FFFFFF; --accent-soft:#E9EBFB; --focus:#4C5FD5;
+    --shadow:0 1px 2px rgba(20,22,30,.06),0 8px 24px -12px rgba(20,22,30,.18);
+    --radius:10px; --radius-sm:6px;
+    --f-display:"Manrope","Segoe UI",system-ui,sans-serif;
+    --f-body:"Inter","Segoe UI",system-ui,sans-serif;
+    --f-mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
+    --f-win:"Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;
+    --x-tag:#8A3FA0; --x-attr:#2F6BB3; --x-val:#2E7D4F; --x-com:#8A909C;
+
+    /* overlay skins: light (y-pop "default"-like) and dark */
+    --ol-bg:#FBFBFD; --ol-fg:#1B1C20; --ol-muted:#666B77; --ol-line:#E2E4EA; --ol-sel:#E6EBFC; --ol-accent:#3552D6;
+    --ol-chip:#EEF0F5; --ol-wall-a:#BFD3F2; --ol-wall-b:#E9D9F2; --ol-wall-c:#F6EFE6; --ol-tb:#EEF1F6E6; --ol-shadow:rgba(30,35,60,.28);
+    --od-bg:#25272D; --od-fg:#F0F1F4; --od-muted:#9CA1AD; --od-line:#393C45; --od-sel:#343A50; --od-accent:#91A3FF;
+    --od-chip:#31343C; --od-wall-a:#1B2A4A; --od-wall-b:#3A2446; --od-wall-c:#12151C; --od-tb:#1C1E24E6; --od-shadow:rgba(0,0,0,.55);
+    --ic-glyph:#FFFFFF;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --paper:#14161B; --surface:#1C1F27; --surface-2:#242833; --ink:#E8EAF0; --muted:#9199AC; --line:#2B2F3A;
+      --accent:#7B87F5; --accent-ink:#12131A; --accent-soft:#262A45; --focus:#7B87F5;
+      --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px -14px rgba(0,0,0,.6);
+      --x-tag:#D08AE0; --x-attr:#7FB1F0; --x-val:#7FD3A0; --x-com:#7A8090; color-scheme:dark;
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#14161B; --surface:#1C1F27; --surface-2:#242833; --ink:#E8EAF0; --muted:#9199AC; --line:#2B2F3A;
+    --accent:#7B87F5; --accent-ink:#12131A; --accent-soft:#262A45; --focus:#7B87F5;
+    --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px -14px rgba(0,0,0,.6);
+    --x-tag:#D08AE0; --x-attr:#7FB1F0; --x-val:#7FD3A0; --x-com:#7A8090; color-scheme:dark;
+  }
+  .skin-light{--o-bg:var(--ol-bg);--o-fg:var(--ol-fg);--o-muted:var(--ol-muted);--o-line:var(--ol-line);--o-sel:var(--ol-sel);--o-accent:var(--ol-accent);--o-chip:var(--ol-chip);--o-wa:var(--ol-wall-a);--o-wb:var(--ol-wall-b);--o-wc:var(--ol-wall-c);--o-tb:var(--ol-tb);--o-shadow:var(--ol-shadow);}
+  .skin-dark{--o-bg:var(--od-bg);--o-fg:var(--od-fg);--o-muted:var(--od-muted);--o-line:var(--od-line);--o-sel:var(--od-sel);--o-accent:var(--od-accent);--o-chip:var(--od-chip);--o-wa:var(--od-wall-a);--o-wb:var(--od-wall-b);--o-wc:var(--od-wall-c);--o-tb:var(--od-tb);--o-shadow:var(--od-shadow);}
+
+  *{box-sizing:border-box;}
+  html,body{min-height:100%;}
+  body{background:var(--paper); color:var(--ink); font-family:var(--f-body); -webkit-font-smoothing:antialiased; margin:0;}
+  h1,h2,h3,button{font-family:var(--f-display);}
+  h1,h2,h3{text-wrap:balance;}
+  code,pre,kbd,.mono{font-family:var(--f-mono);}
+  button{font:inherit; cursor:pointer; color:inherit;}
+  :focus-visible{outline:2px solid var(--focus); outline-offset:1px;}
+
+  .page{max-width:1280px; margin:0 auto; padding-block:22px 40px; padding-left:max(16px,env(safe-area-inset-left,0px)); padding-right:max(16px,env(safe-area-inset-right,0px)); display:flex; flex-direction:column; gap:14px;}
+  .top{display:flex; flex-wrap:wrap; align-items:flex-end; justify-content:space-between; gap:14px;}
+  .top h1{margin:0; font-size:18px; font-weight:800; letter-spacing:-.01em;}
+  .top p{margin:4px 0 0; font-size:13px; color:var(--muted); max-width:72ch; line-height:1.5;}
+  .top p code{font-size:12px; background:var(--surface-2); padding:1px 5px; border-radius:4px;}
+  .controls{display:flex; gap:10px; flex-wrap:wrap; align-items:center;}
+  .seg{display:inline-flex; background:var(--surface-2); border-radius:8px; padding:3px; gap:2px; flex-wrap:wrap;}
+  .seg button{border:0; background:transparent; padding:6px 11px; border-radius:6px; font-size:12.5px; font-weight:600; color:var(--muted);}
+  .seg button[aria-pressed="true"]{background:var(--surface); color:var(--ink); box-shadow:var(--shadow);}
+  .seg.big button{padding:8px 14px; font-size:13.5px;}
+  .seg-l{font-size:11px; text-transform:uppercase; letter-spacing:.07em; color:var(--muted); font-weight:600; font-family:var(--f-display);}
+
+  .work{display:grid; grid-template-columns:minmax(0,1fr) 390px; gap:14px; align-items:start;}
+  @media (max-width:1000px){ .work{grid-template-columns:minmax(0,1fr);} }
+
+  /* ---------- the stage: a fake desktop ---------- */
+  .stage{position:relative; height:600px; border-radius:var(--radius); overflow:hidden; box-shadow:var(--shadow); border:1px solid var(--line); user-select:none; -webkit-user-select:none;}
+  @media (max-width:600px){ .stage{height:560px;} }
+  .desk{position:absolute; inset:0 0 40px 0; background:
+      radial-gradient(60% 70% at 18% 20%, var(--o-wa), transparent 70%),
+      radial-gradient(55% 60% at 85% 75%, var(--o-wb), transparent 70%),
+      var(--o-wc); outline:none; touch-action:none; font-family:var(--f-win); color:var(--o-fg);}
+  .taskbar{position:absolute; left:0; right:0; bottom:0; height:40px; background:var(--o-tb); border-top:1px solid var(--o-line); display:flex; align-items:center; gap:10px; padding:0 10px; font-family:var(--f-win); color:var(--o-fg); font-size:12px;}
+  .tb-start{width:22px; height:22px; display:grid; grid-template-columns:1fr 1fr; gap:2px; flex:none;}
+  .tb-start i{background:var(--o-accent); border-radius:2px; opacity:.85;}
+  .tb-hint{flex:1; min-width:0; color:var(--o-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; text-align:center;}
+  .tb-key{border:1px solid var(--o-line); background:var(--o-bg); color:var(--o-fg); border-radius:6px; padding:4px 9px; font-family:var(--f-win); font-size:12px; font-weight:600; white-space:nowrap;}
+  .tb-key:hover{border-color:var(--o-accent);}
+  .tb-tray{display:flex; align-items:center; gap:8px; color:var(--o-muted); font-variant-numeric:tabular-nums; flex:none;}
+  .tb-pop{width:16px; height:16px; border-radius:4px; background:var(--o-accent);}
+
+  .toast{position:absolute; left:50%; bottom:54px; transform:translate(-50%,8px); opacity:0; transition:opacity .18s,transform .18s; background:var(--o-bg); color:var(--o-fg); border:1px solid var(--o-line); border-radius:8px; padding:8px 12px; font-family:var(--f-win); font-size:12.5px; box-shadow:0 10px 30px -10px var(--o-shadow); max-width:calc(100% - 24px); pointer-events:none; z-index:30;}
+  .toast.show{opacity:1; transform:translate(-50%,0);}
+  .toast code{font-family:var(--f-mono); font-size:11.5px; color:var(--o-muted); word-break:break-all;}
+  .examples{position:absolute; top:10px; left:10px; font-family:var(--f-win); font-size:11px; color:var(--o-muted); background:var(--o-bg); border:1px solid var(--o-line); border-radius:6px; padding:3px 8px; opacity:.9; pointer-events:none;}
+
+  .panel-o{background:var(--o-bg); color:var(--o-fg); border:1px solid var(--o-line); box-shadow:0 18px 50px -18px var(--o-shadow), 0 2px 6px -2px var(--o-shadow);}
+
+  /* icons */
+  .ic{--s:28px; width:var(--s); height:var(--s); border-radius:calc(var(--s) * .24); background:var(--ic); display:inline-grid; place-items:center; flex:none;}
+  .ic svg{width:62%; height:62%;}
+  .glyph{fill:none; stroke:var(--ic-glyph); stroke-width:1.9; stroke-linecap:round; stroke-linejoin:round;}
+  .glyph .gt{fill:var(--ic-glyph); stroke:none; font:600 15px var(--f-win);}
+
+  /* ---------- search ---------- */
+  .search{position:absolute; left:50%; transform:translateX(-50%); width:min(660px, calc(100% - 24px)); border-radius:12px; overflow:hidden; display:flex; flex-direction:column;}
+  .search{top:9%;}
+  .r-input{display:flex; align-items:center; gap:10px; padding:0 14px; height:54px;}
+  .r-input + .r-list:not(:empty){border-top:1px solid var(--o-line);}
+  .r-input svg{width:18px; height:18px; flex:none; fill:none; stroke:var(--o-muted); stroke-width:2; stroke-linecap:round;}
+  .r-input input{flex:1; min-width:0; border:0; outline:0; background:transparent; color:var(--o-fg); font:400 17px var(--f-win); caret-color:var(--o-accent);}
+  .r-input input::placeholder{color:var(--o-muted);}
+  .r-exp{flex:none; width:30px; height:30px; padding:0; border:0; border-radius:6px; background:transparent; display:grid; place-items:center;}
+  .r-exp:hover{background:var(--o-chip);}
+  .r-exp[hidden]{display:none;}
+  .r-hints:empty{display:none;}
+  .chip{background:var(--o-chip); border-radius:6px; padding:3px 8px; font-size:13px; font-weight:600; white-space:nowrap; display:inline-flex; gap:4px; align-items:center;}
+  .r-list{max-height:400px; overflow-y:auto; padding:6px; scrollbar-width:thin; position:relative;}
+  .r-list:empty{display:none;}
+  .r-head{font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--o-muted); font-weight:600; padding:8px 10px 4px;}
+  .r-row{display:flex; align-items:center; gap:11px; padding:6px 10px; border-radius:7px; min-height:46px; cursor:default;}
+  .r-row.sel{background:var(--o-sel);}
+  .r-row.note{opacity:.75;}
+  .r-text{flex:1; min-width:0;}
+  .r-name{font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .r-name b{color:var(--o-accent); font-weight:700;}
+  .r-sub{font-size:12px; color:var(--o-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:1px;}
+  .r-sub em{font-style:normal; color:var(--o-fg);}
+  .r-key{font-size:11.5px; color:var(--o-muted); border:1px solid var(--o-line); border-radius:5px; padding:2px 6px; white-space:nowrap;}
+  .r-name .r-key{color:var(--o-fg); margin-right:6px; font-weight:600;}
+  .r-acts{display:flex; gap:4px;}
+  .r-act{width:28px; height:28px; border:1px solid transparent; background:transparent; border-radius:6px; display:grid; place-items:center; color:var(--o-fg);}
+  .r-act:hover{background:var(--o-bg); border-color:var(--o-line);}
+  .r-act svg{width:15px; height:15px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round;}
+  .r-more{font-size:12px; color:var(--o-muted);}
+  .r-empty{padding:18px 12px; text-align:center; color:var(--o-muted); font-size:13px;}
+  .r-ago{font-size:11.5px; color:var(--o-muted); white-space:nowrap;}
+  .r-badge{font-size:10.5px; font-weight:600; border-radius:4px; padding:1px 5px; margin-left:7px; background:var(--o-chip); color:var(--o-muted); vertical-align:1px;}
+  .r-calc{font-size:19px; font-weight:600;}
+  .r-pfx{font-family:var(--f-mono); font-weight:600; color:var(--o-accent); margin-right:8px;}
+  .s-tips{display:flex; flex-wrap:wrap; align-items:center; gap:4px 12px; margin:6px 4px 2px; padding:8px 6px 2px; border-top:1px solid var(--o-line); font-size:12px; color:var(--o-muted);}
+  .s-tips button{border:0; background:transparent; color:var(--o-muted); font:400 12px var(--f-win); padding:2px 0; cursor:pointer;}
+  .s-tips button:hover{color:var(--o-fg);}
+  .s-tips code{font-family:var(--f-mono); font-weight:600; color:var(--o-accent); margin-right:4px;}
+  .r-hints{display:flex; flex-wrap:wrap; gap:4px 14px; padding:8px 14px; border-top:1px solid var(--o-line); font-size:11.5px; color:var(--o-muted);}
+  .r-hints kbd{font-family:var(--f-win); font-size:11px; border:1px solid var(--o-line); border-bottom-width:2px; border-radius:4px; padding:0 5px; color:var(--o-fg); background:var(--o-bg);}
+
+  .az{display:flex; flex-wrap:wrap; gap:3px; padding:4px 6px 6px; position:sticky; top:-6px; background:var(--o-bg); z-index:1;}
+  .az button{border:0; background:var(--o-chip); color:var(--o-fg); border-radius:4px; min-width:24px; padding:3px 5px; font:600 11px var(--f-win);}
+  .az button:hover{background:var(--o-sel);}
+  .b-crumb{font-size:12px; color:var(--o-muted); padding:4px 8px 6px;}
+  .b-cols{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); height:320px; border-top:1px solid var(--o-line);}
+  .b-pane{overflow-y:auto; padding:5px 4px; border-right:1px solid var(--o-line); min-width:0; scrollbar-width:thin;}
+  .b-pane:last-child{border-right:0;}
+  .b-row{display:flex; align-items:center; gap:8px; padding:5px 7px; border-radius:6px; font-size:13px; cursor:default;}
+  .b-row .ic{--s:20px;}
+  .b-row:hover{background:var(--o-chip);} .b-row.chosen{background:var(--o-chip);} .b-row.sel{background:var(--o-sel);}
+  .b-n{flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .b-k{font-size:10.5px; color:var(--o-muted); white-space:nowrap;}
+  .b-det{display:flex; flex-direction:column; align-items:flex-start; gap:6px; padding:12px;}
+  .b-det .ic{--s:44px;}
+  .b-dn{font-weight:600; font-size:14px;}
+  .b-dp{font-size:12px; color:var(--o-muted);}
+  .b-det code{font-family:var(--f-mono); font-size:11px; color:var(--o-muted); word-break:break-all;}
+  .b-btns{display:flex; gap:6px; flex-wrap:wrap; margin-top:4px;}
+  .b-btns button{border:1px solid var(--o-line); background:var(--o-bg); color:var(--o-fg); border-radius:6px; padding:4px 10px; font:600 12px var(--f-win);}
+  .b-btns button:first-child{background:var(--o-accent); color:var(--o-bg); border-color:var(--o-accent);}
+
+  /* ---------- radial ---------- */
+  .pg{cursor:pointer;}
+  .pg rect{fill:var(--o-bg); stroke:var(--o-line);}
+  .pg text{fill:var(--o-fg); font:600 11px var(--f-win); text-anchor:middle;}
+  .pg.on rect{fill:var(--o-accent); stroke:var(--o-accent);}
+  .pg.on text{fill:var(--o-bg);}
+  .radial-svg{position:absolute; inset:0; width:100%; height:100%; overflow:visible;}
+  .ring{filter:drop-shadow(0 10px 22px var(--o-shadow));}
+  .ring.parent{opacity:.38;}
+  .slice{fill:var(--o-bg); stroke:var(--o-line); stroke-width:1;}
+  .slice.hot{fill:var(--o-sel); stroke:var(--o-accent);}
+  .slice.chosen{fill:var(--o-sel);}
+  .slice.empty{fill:var(--o-bg); fill-opacity:.55; stroke-dasharray:4 4;}
+  .slice.void{fill:var(--o-bg); fill-opacity:.2; stroke-opacity:.35;}
+  .ring.armed .slice:not(.empty):not(.void){stroke:var(--o-accent); stroke-width:1.5; stroke-dasharray:5 3;}
+  .mark{fill:var(--o-accent); opacity:.75;}
+  .mark.browse{opacity:.4;}
+  .hub{fill:var(--o-bg); stroke:var(--o-line);}
+  .hub.hot{stroke:var(--o-accent); stroke-width:2;}
+  .r-lbl{fill:var(--o-fg); font:500 11px var(--f-win); text-anchor:middle;}
+  .r-lbl.muted{fill:var(--o-muted);}
+  .hub-t{fill:var(--o-fg); font:600 12px var(--f-win); text-anchor:middle;}
+  .hub-s{fill:var(--o-muted); font:400 10px var(--f-win); text-anchor:middle;}
+  .dg{fill:var(--o-muted); font:600 10px var(--f-mono); text-anchor:middle;}
+  .dg.l{text-anchor:start;}
+  .trail{fill:none; stroke:var(--o-accent); stroke-width:3; stroke-linecap:round; stroke-linejoin:round; opacity:.7;}
+  .link{stroke:var(--o-accent); stroke-width:1.5; stroke-dasharray:3 4; opacity:.6;}
+  .flyout{position:absolute; width:230px; border-radius:10px; padding:5px; font-size:13px; z-index:8;}
+  .fly-h{font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--o-muted); font-weight:600; padding:6px 8px 4px;}
+  .fly-row{display:flex; align-items:center; gap:9px; padding:5px 8px; border-radius:6px; width:100%; border:0; background:transparent; text-align:left; font:inherit; color:var(--o-fg);}
+  .fly-row:hover,.fly-row.sel{background:var(--o-sel);}
+  .fly-row .ic{--s:20px;}
+  .fly-row .crumb{margin-left:auto; font-size:11px; color:var(--o-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:45%;}
+  .fly-row b{color:var(--o-accent);}
+
+  /* ---------- grid ---------- */
+  .grid-panel{position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); border-radius:12px; padding:12px 14px 14px; max-width:calc(100% - 24px); max-height:calc(100% - 24px); overflow:auto; display:flex; flex-direction:column; gap:6px;}
+  .g-head{display:flex; align-items:center; gap:8px; min-height:30px;}
+  .g-back{border:1px solid var(--o-line); background:var(--o-bg); color:var(--o-fg); border-radius:6px; padding:3px 9px; font:600 12.5px var(--f-win);}
+  .g-title{font-weight:600; font-size:14px;}
+  .g-q{margin-left:auto; font-size:12.5px; color:var(--o-muted); background:var(--o-chip); border-radius:999px; padding:3px 10px; white-space:nowrap;}
+  .g-q.on{color:var(--o-fg);} .g-q.on::after{content:"▌"; color:var(--o-accent); margin-left:1px;}
+  .g-body{display:flex; flex-direction:column; gap:6px; transition:opacity .12s;}
+  .g-body.faded{opacity:.18; pointer-events:none;}
+  .g-sec-h{font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--o-muted); font-weight:600; padding:8px 4px 2px;}
+  .g-sec-h.blank{padding:4px 0 0; border-top:1px solid var(--o-line); margin-top:6px;}
+  .g-tiles{display:grid; grid-template-columns:repeat(var(--cols), var(--tile)); grid-auto-rows:var(--tile); gap:6px; grid-auto-flow:row dense;}
+  .g-results{position:absolute; left:14px; right:14px; top:50px; border-radius:10px; padding:5px; z-index:4;}
+  .tile{position:relative; border:1px solid transparent; background:transparent; border-radius:var(--tr,8px); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; padding:6px 4px; color:var(--o-fg); font:400 12px var(--f-win); transition:opacity .12s;}
+  .tile .ic{--s:38px;}
+  .tile:hover{background:var(--o-sel);} .tile.sel{background:var(--o-sel); border-color:var(--o-accent);}
+  .tile.dim{opacity:.22;}
+  .tile .t-l{max-width:100%; line-height:1.2; text-align:center; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;}
+  .labels-hover .tile:not(.wide):not(.sel) .t-l{visibility:hidden;}
+  .tile.wide{grid-column:span 2; flex-direction:row; justify-content:flex-start; padding:8px 12px; gap:10px; text-align:left;}
+  .tile.wide .t-l{text-align:left;} .tile.wide .t-w{min-width:0;}
+  .tile.wide .t-s{font-size:11px; color:var(--o-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .tile.small .ic{--s:30px;} .tile.small .t-l{display:none;}
+  .folder{width:40px; height:40px; border-radius:10px; background:var(--o-chip); border:1px solid var(--o-line); display:grid; grid-template-columns:1fr 1fr; gap:3px; padding:5px;}
+  .folder .ic{--s:13px; border-radius:3px;}
+  .badge{position:absolute; top:4px; right:5px; background:var(--o-accent); color:var(--o-bg); border-radius:999px; font:700 10px var(--f-win); padding:1px 5px;}
+  .hint{position:absolute; top:4px; left:5px; min-width:17px; height:17px; display:grid; place-items:center; background:var(--o-fg); color:var(--o-bg); border-radius:4px; font:700 11px var(--f-mono); text-transform:uppercase; padding:0 3px;}
+
+  /* ---------- strip ---------- */
+  .strip{position:absolute; left:50%; transform:translateX(-50%); border-radius:16px; padding:7px; display:flex; align-items:flex-end; gap:3px; max-width:calc(100% - 24px);}
+  .strip.anchor-cursor{top:46%;}
+  .strip.anchor-bottom{bottom:10px;}
+  .s-wrap{position:relative;}
+  .s-item{border:1px solid transparent; background:transparent; border-radius:10px; width:54px; padding:6px 0; display:flex; flex-direction:column; align-items:center; gap:3px; color:var(--o-fg); font:400 10.5px var(--f-win);}
+  .s-item .ic{--s:38px;}
+  .s-item:hover,.s-item.sel{background:var(--o-sel);} .s-item.sel{border-color:var(--o-accent);}
+  .s-label{display:none; max-width:52px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .labels-always .s-label{display:block;}
+  .s-tip{position:absolute; bottom:calc(100% + 8px); left:50%; transform:translateX(-50%); background:var(--o-bg); border:1px solid var(--o-line); border-radius:6px; padding:3px 8px; font-size:12px; white-space:nowrap; pointer-events:none; box-shadow:0 6px 16px -8px var(--o-shadow);}
+  .s-div{width:1px; align-self:stretch; background:var(--o-line); margin:6px 4px;}
+  .s-dot{position:absolute; bottom:1px; left:50%; width:4px; height:4px; margin-left:-2px; border-radius:50%; background:var(--o-accent);}
+  .stack{position:absolute; bottom:calc(100% + 10px); left:50%; transform:translateX(-50%); width:220px; border-radius:10px; padding:5px; z-index:6;}
+
+  /* ---------- side panel ---------- */
+  .side{background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); padding:16px; display:flex; flex-direction:column; gap:14px; min-width:0;}
+  .side h2{margin:0; font-size:16px; font-weight:800;}
+  .side .lede{margin:4px 0 0; font-size:13px; line-height:1.55; color:var(--muted);}
+  .side h3{margin:0 0 6px; font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); font-weight:700;}
+  .opts{display:flex; flex-direction:column; gap:8px;}
+  .opt{display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;}
+  .opt-l{font-size:13px; font-weight:500;}
+  .opts .seg button{padding:4px 9px; font-size:12px;}
+  .try{margin:0; padding-left:18px; font-size:13px; line-height:1.55; display:flex; flex-direction:column; gap:3px;}
+  .try code, .side td code{font-size:11.5px; background:var(--surface-2); padding:0 4px; border-radius:3px;}
+  .try kbd{font-size:11px; background:var(--surface-2); border:1px solid var(--line); border-radius:4px; padding:0 4px;}
+  .keys{width:100%; border-collapse:collapse; font-size:12.5px;}
+  .keys td{padding:4px 0; border-top:1px solid var(--line); vertical-align:top;}
+  .keys td:first-child{white-space:nowrap; padding-right:10px; width:1%;}
+  .keys kbd{font-size:11px; background:var(--surface-2); border:1px solid var(--line); border-bottom-width:2px; border-radius:4px; padding:0 5px;}
+  .xml{margin:0; overflow-x:auto; background:var(--surface-2); border-radius:var(--radius-sm); padding:10px 12px; font-size:11.5px; line-height:1.55; white-space:pre;}
+  .xml .t{color:var(--x-tag);} .xml .a{color:var(--x-attr);} .xml .v{color:var(--x-val);} .xml .c{color:var(--x-com); font-style:italic;}
+  .note{font-size:12px; color:var(--muted); line-height:1.5; margin:0;}
+  @media (prefers-reduced-motion: reduce){ .toast,.tile,.g-body{transition:none;} }
+</style>
+
+<div class="page">
+  <header class="top">
+    <div>
+      <h1>y-pop overlay modes</h1>
+      <p>Mockups for the search (revision 4: recent, sections, plugins) and the boards (radial, grid, strip) described in <code>y-pop/docs/overlay-modes.md</code>. Every overlay here works with the mouse and the keyboard, and the radial with the numpad. Its data is the shipped <code>y-pop.xml</code> plus example entries.</p>
+    </div>
+    <div class="controls">
+      <div class="seg big" id="modeSeg" role="group" aria-label="Mode">
+        <button data-mode="search" aria-pressed="true">Search</button>
+        <button data-mode="radial" aria-pressed="false">Radial</button>
+        <button data-mode="grid" aria-pressed="false">Grid</button>
+        <button data-mode="strip" aria-pressed="false">Strip</button>
+      </div>
+      <span class="seg-l">Skin</span>
+      <div class="seg" id="skinSeg" role="group" aria-label="Skin">
+        <button data-skin="light" aria-pressed="false">Light</button>
+        <button data-skin="dark" aria-pressed="false">Dark</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="work">
+    <section class="stage skin-light" id="stage" aria-label="Simulated desktop">
+      <div class="desk" id="desk" tabindex="-1">
+        <div class="examples">Work, Dev, Utilities and Task Manager are example entries</div>
+        <div id="ovSearch" hidden></div>
+        <svg class="radial-svg" id="ovRadial" hidden aria-label="Radial menu"></svg>
+        <div id="ovRadialFly" hidden></div>
+        <div id="ovGrid" hidden></div>
+        <div id="ovStrip" hidden></div>
+      </div>
+      <div class="taskbar">
+        <span class="tb-start" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        <span class="tb-hint" id="tbHint"></span>
+        <button class="tb-key" id="tbKey" title="Simulates the hotkey"></button>
+        <span class="tb-tray"><span class="tb-pop" title="y-pop tray icon"></span><span id="clock">14:32</span></span>
+      </div>
+      <div class="toast" id="toast" role="status"></div>
+    </section>
+    <aside class="side" id="side"></aside>
+  </div>
+</div>
+
+<script>
+(() => {
+'use strict';
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+/* ---------------- icons ---------------- */
+const FOLDER_G = '<path d="M3 7.5A1.5 1.5 0 014.5 6H9l2 2h8.5A1.5 1.5 0 0121 9.5v8a1.5 1.5 0 01-1.5 1.5h-15A1.5 1.5 0 013 17.5z"/>';
+const FILE_G = '<path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4"/>';
+const COPY_G = '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 00-1-1H5a1 1 0 00-1 1v10a1 1 0 001 1h3"/>';
+const SHIELD_G = '<path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/>';
+const PENCIL_G = '<path d="M4 20l1-4L16 5l3 3L8 19z"/>';
+const TREE_G = '<path d="M5 4v14h5M5 9h5M14 9h6M14 18h6"/>';
+const ICONS = {
+  term:{c:'#30343F', g:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 10l3 2-3 2M12.5 15H17"/>'},
+  note:{c:'#3B78D8', g:FILE_G+'<path d="M9.5 12h6M9.5 15h6M9.5 18h4"/>'},
+  folder:{c:'#D49A2A', g:FOLDER_G},
+  explorer:{c:'#E0A126', g:FOLDER_G+'<path d="M3 11h18"/>'},
+  bin:{c:'#4F86B8', g:'<path d="M5 7h14M9.5 7V5h5v2M7 7l1 13h8l1-13M10.5 11v5M13.5 11v5"/>'},
+  docs:{c:'#6A5ED0', g:'<path d="M9 3h7l3 3v11H9z"/><path d="M6 7v14h10"/>'},
+  code:{c:'#2477E0', g:'<path d="M9 8l-4 4 4 4M15 8l4 4-4 4"/>'},
+  wt:{c:'#23293A', g:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9.5l3 2.5-3 2.5M12 15h5"/>'},
+  git:{c:'#DD5531', g:'<circle cx="7" cy="6" r="2"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="9" r="2"/><path d="M7 8v8M17 11c0 3.5-5 3-8.5 5.6"/>'},
+  proj:{c:'#3A9A6A', g:FOLDER_G},
+  chart:{c:'#23998A', g:'<path d="M4 20V4M4 20h16M8.5 16v-4M12.5 16V8M16.5 16v-6"/>'},
+  calc:{c:'#4B5563', g:'<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 7h8M8.5 11h0M12 11h0M15.5 11h0M8.5 14.5h0M12 14.5h0M15.5 14.5h0M8.5 18h0M12 18h0M15.5 18h0"/>'},
+  snip:{c:'#C23F78', g:'<circle cx="6.5" cy="17" r="2.6"/><circle cx="17.5" cy="17" r="2.6"/><path d="M8.5 15.3L18 4M15.5 15.3L6 4"/>'},
+  paint:{c:'#D7623A', g:'<path d="M14 4.5l5.5 5.5-7.5 7.5H6.5V12z"/><path d="M6.5 17.5L4 20"/>'},
+  charmap:{c:'#7652C4', g:'<text class="gt" x="12" y="17.5" text-anchor="middle">Ω</text>'},
+  gear:{c:'#5A616F', g:'<circle cx="12" cy="12" r="3"/><path d="M12 3.5v3M12 17.5v3M3.5 12h3M17.5 12h3M6 6l2.1 2.1M15.9 15.9L18 18M6 18l2.1-2.1M15.9 8.1L18 6"/>'},
+  info:{c:'#5A616F', g:'<circle cx="12" cy="12" r="8"/><path d="M12 11v5M12 8h0"/>'},
+  power:{c:'#B4433B', g:'<path d="M12 4v7"/><path d="M7.5 7.3a6.5 6.5 0 109 0"/>'},
+  file:{c:'#7D8698', g:FILE_G},
+  sheet:{c:'#228A52', g:FILE_G+'<path d="M9.5 12h6M9.5 15h6M12.5 11v7"/>'},
+  pdf:{c:'#C83B32', g:FILE_G+'<path d="M9.5 15h6"/>'},
+  more:{c:'#5A616F', g:'<path d="M6 12h0M12 12h0M18 12h0"/>'},
+  mail:{c:'#2F6FD0', g:'<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3.5 7l8.5 6 8.5-6"/>'},
+  chat:{c:'#5B5FC7', g:'<path d="M4 6h16v10H9l-5 4z"/>'},
+  rdp:{c:'#2A8FBF', g:'<rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M8 20h8M12 16v4"/>'},
+  share:{c:'#6B7385', g:FOLDER_G+'<circle cx="12" cy="13.5" r="2.3"/>'},
+  bolt:{c:'#5A616F', g:'<path d="M13 3L6 13h5l-1 8 7-10h-5z"/>'},
+  key:{c:'#9A7420', g:'<circle cx="8" cy="12" r="3.5"/><path d="M11.5 12H20M17 12v3M20 12v2"/>'},
+  var:{c:'#4B5563', g:'<text class="gt" x="12" y="17" text-anchor="middle">%</text>'},
+  shield:{c:'#4F6BD0', g:SHIELD_G},
+  copy:{c:'#5A616F', g:COPY_G},
+  pencil:{c:'#8A5BC4', g:PENCIL_G},
+  start:{c:'#2F6FD0', g:'<rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/>'},
+  windows:{c:'#3A6EA5', g:'<rect x="3" y="8" width="13" height="11" rx="1.5"/><path d="M8 8V5.5A1.5 1.5 0 019.5 4h10A1.5 1.5 0 0121 5.5v8a1.5 1.5 0 01-1.5 1.5H16"/>'},
+  list:{c:'#3A9A6A', g:'<path d="M9 7h11M9 12h11M9 17h11M4.5 7h0M4.5 12h0M4.5 17h0"/>'},
+};
+const icon = (k, s) => { const d = ICONS[k] || ICONS.file; return `<span class="ic" style="--ic:${d.c}${s ? ';--s:' + s + 'px' : ''}"><svg viewBox="0 0 24 24" class="glyph" aria-hidden="true">${d.g}</svg></span>`; };
+const iconSvg = (k, x, y, s) => { const d = ICONS[k] || ICONS.file; return `<g transform="translate(${x - s / 2} ${y - s / 2})"><rect width="${s}" height="${s}" rx="${s * .24}" fill="${d.c}"/><svg x="${s * .19}" y="${s * .19}" width="${s * .62}" height="${s * .62}" viewBox="0 0 24 24" class="glyph">${d.g}</svg></g>`; };
+const extIcon = f => !f.includes('.') ? 'folder' : /\.xlsx?$/i.test(f) ? 'sheet' : /\.pdf$/i.test(f) ? 'pdf' : /\.(txt|md)$/i.test(f) ? 'note' : 'file';
+
+/* ---------------- the configuration: two tray menus ---------------- */
+let uid = 0;
+const A = (name, ic, o = {}) => ({ id: ++uid, kind: 'app', name, icon: ic, ...o });
+const G = (name, ic, children, o = {}) => ({ id: ++uid, kind: 'group', name, icon: ic, children, ...o });
+const S = (name = '') => ({ id: ++uid, kind: 'sep', name });
+const K = (kind, name, ic, o = {}) => ({ id: ++uid, kind, name, icon: ic, ...o });
+
+const TREE = G('y-pop', 'folder', [
+  S('Tools'),
+  A('Command line', 'term', { exe: '%system%\\cmd.exe', tip: 'Starts in C:\\', tile: 'wide' }),
+  A('Notepad', 'note', { exe: '%win%\\notepad.exe', key: 'Win+N' }),
+  G('Explorers', 'explorer', [
+    A('File Explorer', 'explorer', { exe: '%win%\\explorer.exe' }),
+    A('Recycle Bin', 'bin', { exe: '%win%\\explorer.exe', tip: 'Custom icon: explorer.exe,-41' }),
+  ]),
+  A('Recent documents', 'docs', { exe: '%docs%', browse: true, files: ['Budget 2026.xlsx', 'Notes.txt', 'Trip itinerary.pdf', 'y-pop ideas.md'] }),
+  S('Workbench'),
+  G('Dev', 'code', [
+    A('VS Code', 'code', { exe: '%programfiles%\\Microsoft VS Code\\Code.exe', keywords: 'editor ide', key: 'Win+Alt+C', tile: 'wide', tip: 'Opens the last workspace', def: true }),
+    A('Windows Terminal', 'wt', { exe: 'shell:AppsFolder\\Microsoft.WindowsTerminal', keywords: 'shell console wt', key: 'Win+Alt+T', tip: 'Store app (app-id)' }),
+    A('Git Bash', 'git', { exe: '%programfiles%\\Git\\git-bash.exe', keywords: 'shell' }),
+    A('Projects', 'proj', { exe: '%mydocs%\\Github', browse: true, files: ['ypo-lite', 'guipro-git', 'dotfiles', 'advent-2025'] }),
+  ], { key: 'Win+D' }),
+  G('Utilities', 'calc', [
+    A('Calculator', 'calc', { exe: 'calc.exe' }),
+    A('Snipping Tool', 'snip', { exe: 'SnippingTool.exe', keywords: 'screenshot capture' }),
+    A('Paint', 'paint', { exe: 'mspaint.exe', keywords: 'draw image' }),
+    A('Character Map', 'charmap', { exe: '%system%\\charmap.exe', keywords: 'symbols unicode' }),
+  ]),
+  A('Task Manager', 'chart', { exe: '%system%\\Taskmgr.exe', key: 'Ctrl+Shift+Esc', tile: 'wide', tip: 'Processes and performance', keywords: 'processes' }),
+  S(),
+  K('settings', 'Settings…', 'gear', { exe: '%pop%\\y-pop-config.exe', tile: 'small' }),
+  K('about', 'About', 'info', { tile: 'small' }),
+  K('quit', 'Quit', 'power', { tile: 'small' }),
+], { key: 'Win+Y' });
+const WORK = G('Work', 'mail', [
+  A('Outlook', 'mail', { exe: 'shell:AppsFolder\\Microsoft.OutlookForWindows', keywords: 'mail email calendar', key: 'Win+O' }),
+  A('Teams', 'chat', { exe: 'shell:AppsFolder\\MSTeams', keywords: 'chat meeting call' }),
+  A('Remote Desktop', 'rdp', { exe: '%system%\\mstsc.exe', keywords: 'rdp mstsc', param: '/v:build-01' }),
+  A('Team share', 'share', { exe: '\\\\nas\\team', browse: true, network: true, files: ['Specs', 'Releases', 'Onboarding.pdf'] }),
+], { key: 'Win+W' });
+const ROOTS = [TREE, WORK];
+for (const r of ROOTS) { r.crumbs = []; (function link(n, crumbs) { for (const c of n.children || []) { c.parent = n; c.crumbs = crumbs; if (c.kind === 'group') link(c, [...crumbs, c.name]); } })(r, [r.name]); }
+const byName = name => { let hit = null; for (const r of ROOTS) (function f(n) { for (const c of n.children || []) { if (!hit && c.name === name) hit = c; f(c); } })(r); return hit; };
+const items = n => (n.children || []).filter(c => c.kind !== 'sep');
+const fileNode = (b, f) => ({ id: 'f:' + b.id + ':' + f, kind: 'file', name: f, icon: extIcon(f), exe: b.exe + '\\' + f, parent: b, crumbs: [...b.crumbs, b.name], dir: !f.includes('.') });
+const isScope = n => n.kind === 'group' || n.kind === 'section' || !!n.browse;
+const leafCount = n => n.browse ? n.files.length : items(n).length;
+const pathOf = n => [...(n.crumbs || []), n.name].join(' › ');
+
+const COMMANDS = [
+  ['Reload configuration', 'Re-reads y-pop.xml; a file that fails to load keeps the old one', 'Would reload y-pop.xml'],
+  ['Open settings', 'y-pop-config', 'Would open y-pop-config'],
+  ['Edit y-pop.xml', 'In the default text editor', 'Would open y-pop.xml in Notepad'],
+  ['Open configuration folder', '%appdata-r%\\Ypo-Lite', 'Would open the folder that holds y-pop.xml'],
+  ['Clear search history', 'Deletes y-pop.history', 'Would clear the search history'],
+  ['Refresh the Start menu', 'Re-reads the Programs folders and the installed Store apps', 'Would rebuild the Start menu section'],
+  ['Reload plugins', 'Re-instantiates every <plugin> module', 'Would reload the plugins'],
+  ['Start with Windows', 'Currently on', 'Would turn off starting with Windows'],
+  ['About y-pop', 'Version and paths', 'Would show the About box'],
+  ['Quit y-pop', 'Removes every y-pop tray icon', 'Would quit y-pop'],
+].map(([name, tip, say]) => ({ id: 'c:' + name, kind: 'cmd', name, icon: 'bolt', tip, say }));
+const SEARCH_BIND = { id: 'sb', kind: 'cmd', name: 'Open search', icon: 'bolt', key: 'Alt+Space', tip: 'The <search> hotkey', say: 'Search is already open', crumbs: [] };
+const OS_TAKEN = { 'win+e': 'File Explorer (Windows)', 'win+l': 'Lock screen (Windows)', 'win+r': 'Run (Windows)', 'win+s': 'Windows Search', 'win+v': 'Clipboard history (Windows)' };
+
+/* Search-only apps (spec §2.5): a <group> inside <search>. No tray icon, no hotkey; only search reaches it. */
+const ADMIN = G('Admin tools', 'shield', [
+  A('Registry Editor', 'key', { exe: '%win%\\regedit.exe', keywords: 'regedit registry' }),
+  A('Services', 'gear', { exe: 'services.msc' }),
+  A('Event Viewer', 'docs', { exe: 'eventvwr.msc', keywords: 'logs events' }),
+  A('Device Manager', 'gear', { exe: 'devmgmt.msc', keywords: 'drivers hardware' }),
+  A('Environment variables', 'var', { exe: 'rundll32.exe sysdm.cpl,EditEnvironmentVariables', keywords: 'env path' }),
+  A('Disk Management', 'folder', { exe: 'diskmgmt.msc', keywords: 'partition drive' }),
+]);
+ADMIN.crumbs = []; for (const c of ADMIN.children) { c.parent = ADMIN; c.crumbs = [ADMIN.name]; c.so = true; }
+/* A search-only folder (spec §2.5.3): a browsed folder inside <search>, in no tray menu. */
+const SCRIPTS = A('Scripts', 'folder', { exe: '%mydocs%\\Scripts', browse: true, so: true, crumbs: ['Search only'], files: ['backup-photos.ps1', 'clean-temp.cmd', 'mount-nas.ps1', 'sync-dotfiles.sh', 'README.md'] });
+
+/* The Start menu section (spec §2.5): Programs folders + installed Store apps, read by y-pop at run time. */
+const letter = (ch, c) => { const k = 'L' + ch + c; ICONS[k] = { c, g: `<text class="gt" x="12" y="17.5" text-anchor="middle">${ch}</text>` }; return k; };
+const SM = (name, ic, c, exe, folder, o = {}) => ({ id: ++uid, kind: 'app', src: 'start', name, icon: ICONS[ic] ? ic : letter(ic, c), exe, crumbs: folder ? ['Start menu', folder] : ['Start menu'], ...o });
+const PF = '%programfiles%\\', OFF = PF + 'Microsoft Office\\root\\Office16\\';
+const START = [
+  SM('7-Zip File Manager', '7', '#2F2F2F', PF + '7-Zip\\7zFM.exe', '7-Zip', { keywords: 'zip archive' }),
+  SM('Audacity', 'A', '#1F5FBF', PF + 'Audacity\\Audacity.exe', null, { keywords: 'audio' }),
+  SM('Blender', 'B', '#E5770B', PF + 'Blender Foundation\\Blender 4.2\\blender-launcher.exe', 'Blender'),
+  SM('Calculator', 'calc', '', 'calc.exe'),
+  SM('Discord', 'D', '#5865F2', '%localappdata%\\Discord\\Update.exe', 'Discord Inc', { keywords: 'chat' }),
+  SM('Excel', 'X', '#1D7044', OFF + 'EXCEL.EXE', null, { keywords: 'spreadsheet' }),
+  SM('Firefox', 'F', '#E25920', PF + 'Mozilla Firefox\\firefox.exe', null, { keywords: 'browser web' }),
+  SM('GIMP 2.10', 'G', '#5C5543', PF + 'GIMP 2\\bin\\gimp-2.10.exe', null, { keywords: 'image photo' }),
+  SM('KeePassXC', 'K', '#3D8B3D', PF + 'KeePassXC\\KeePassXC.exe', null, { keywords: 'password' }),
+  SM('Microsoft Store', 'M', '#2A62C9', 'shell:AppsFolder\\Microsoft.WindowsStore_8wekyb3d8bbwe!App'),
+  SM('Notepad++', 'N', '#6E9F2F', PF + 'Notepad++\\notepad++.exe', null, { keywords: 'editor' }),
+  SM('OBS Studio', 'O', '#302E31', PF + 'obs-studio\\bin\\64bit\\obs64.exe', 'OBS Studio', { keywords: 'record stream' }),
+  SM('Paint', 'paint', '', 'mspaint.exe'),
+  SM('PowerPoint', 'P', '#C43E1C', OFF + 'POWERPNT.EXE', null, { keywords: 'slides' }),
+  SM('PowerShell 7', '❯', '#2B4F8C', PF + 'PowerShell\\7\\pwsh.exe', 'PowerShell', { keywords: 'shell pwsh' }),
+  SM('Settings', 'gear', '', 'ms-settings:'),
+  SM('Slack', 'S', '#4A154B', 'shell:AppsFolder\\com.squirrel.slack.slack', null, { keywords: 'chat' }),
+  SM('Snipping Tool', 'snip', '', 'SnippingTool.exe'),
+  SM('Spotify', 'S', '#1DB954', 'shell:AppsFolder\\SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify', null, { keywords: 'music' }),
+  SM('Steam', 'S', '#1B2838', '%programfiles(x86)%\\Steam\\steam.exe', 'Steam', { keywords: 'games' }),
+  SM('Visual Studio 2022', 'V', '#68217A', PF + 'Microsoft Visual Studio\\2022\\Community\\Common7\\IDE\\devenv.exe', null, { keywords: 'ide' }),
+  SM('Word', 'W', '#2B579A', OFF + 'WINWORD.EXE', null, { keywords: 'document' }),
+  SM('Zoom Workplace', 'Z', '#2D8CFF', '%appdata%\\Zoom\\bin\\Zoom.exe', 'Zoom', { keywords: 'meeting call' }),
+];
+/* An app that is both in a tray menu and in the Start menu shows once in results: the menu entry wins. */
+const exeBase = e => (e || '').split('\\').pop().toLowerCase();
+{ const inMenus = new Set(); for (const r of ROOTS) (function f(n) { for (const c of n.children || []) { if (c.kind === 'app' && !c.browse) inMenus.add(exeBase(c.exe)); f(c); } })(r);
+  for (const s of START) s.dup = inMenus.has(exeBase(s.exe)); }
+
+/* Plugins (spec §2.11): two example WebAssembly modules, Calculator and Windows. */
+const WINDOWS = [
+  ['ypo-lite — Visual Studio Code', 'Code.exe', 'code'],
+  ['Inbox — Outlook', 'olk.exe', 'mail'],
+  ['y-pop.xml — Notepad', 'notepad.exe', 'note'],
+  ['Downloads — File Explorer', 'explorer.exe', 'explorer'],
+  ['cargo test — Windows Terminal', 'WindowsTerminal.exe', 'wt'],
+  ['Mozilla Firefox', 'firefox.exe', START.find(s => s.name === 'Firefox').icon],
+].map(([name, proc, ic], i) => ({ id: 'w:' + i, kind: 'win', name, icon: ic, exe: proc, crumbs: ['Windows plugin'] }));
+function calc(expr) {
+  const e = expr.replace(/\s+/g, '').replace(/,/g, '.');
+  if (!/^[\d.+\-*/%^()]+$/.test(e) || !/\d/.test(e)) return null;
+  try { const v = Function('"use strict";return (' + e.replace(/\^/g, '**') + ')')(); return Number.isFinite(v) ? +v.toPrecision(12) : null; } catch (_) { return null; }
+}
+const isExpr = t => /\d\s*[-+*/^%]\s*[\d(]/.test(t) && calc(t) !== null;
+
+/* ---------------- shared bits ---------------- */
+let toastTimer = 0;
+function toast(html) { const t = $('#toast'); t.innerHTML = html; t.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 3000); }
+function launchText(n, how) {
+  if (n.kind === 'quit') return 'Would quit y-pop';
+  if (n.kind === 'about') return 'Would show the About box';
+  if (n.kind === 'settings') return 'Would open y-pop-config <code>' + esc(n.exe) + '</code>';
+  if (how === 'admin') return 'Would launch <b>' + esc(n.name) + '</b> as administrator';
+  if (how === 'folder') return 'Would open the folder containing <b>' + esc(n.name) + '</b>';
+  if (how === 'copy') return 'Copied <code>' + esc(n.exe || '') + '</code>';
+  if (how === 'add') return 'Would open y-pop-config with a new entry for <b>' + esc(n.name) + '</b>, ready to drop into a tray menu';
+  if (how === 'edit') return 'Would open y-pop-config on <b>' + esc(pathOf(n)) + '</b>';
+  if (how === 'list') return 'Would open <b>' + esc(n.name) + '</b> as a list popup';
+  if (how === 'reveal') return 'Would open the <b>' + esc((n.crumbs && n.crumbs[0]) || n.name) + '</b> menu with <b>' + esc(pathOf(n).split(' › ').slice(1).join(' › ') || n.name) + '</b> highlighted';
+  if (n.kind === 'file' && n.dir) return 'Would open the folder <code>' + esc(n.exe) + '</code>';
+  return 'Would launch <b>' + esc(n.name) + '</b> <code>' + esc(n.exe || '') + '</code>';
+}
+const norm = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+/* The shared matcher (spec §2.12): fuzzy subsequence preferring word starts and runs. */
+function fuzzy(q, s) {
+  q = norm(q).replace(/\s+/g, ''); if (!q || !s) return null;
+  const t = norm(s);
+  const start = k => k === 0 || /[^a-z0-9]/.test(t[k - 1]) || (/[A-Z]/.test(s[k] || '') && /[a-z]/.test(s[k - 1] || ''));
+  const pos = []; let k = 0;
+  for (const ch of q) {
+    let pick = -1;
+    if (pos.length && t[k] === ch) pick = k;
+    else { let any = -1; for (let j = k; j < t.length; j++) { if (t[j] === ch) { if (any < 0) any = j; if (start(j)) { pick = j; break; } } } if (pick < 0) pick = any; }
+    if (pick < 0) return null;
+    pos.push(pick); k = pick + 1;
+  }
+  let sc = 0;
+  pos.forEach((p, i) => { sc += 1; if (start(p)) sc += 5; if (i && p === pos[i - 1] + 1) sc += 3; });
+  if (pos[0] === 0) sc += 6;
+  const sub = t.indexOf(q); if (sub === 0) sc += 8; else if (sub > 0) sc += start(sub) ? 5 : 2;
+  sc -= (pos[pos.length - 1] - pos[0] + 1 - pos.length) * 0.3;
+  return { sc, pos };
+}
+const keyParts = s => s.toLowerCase().replace(/\s+/g, '').split('+').filter(Boolean);
+const sameKey = (a, b) => keyParts(a).sort().join('+') === keyParts(b).sort().join('+');
+function keyMatch(q, key) {
+  const ql = q.toLowerCase().replace(/\s+/g, ''); if (!key || !/^(win|ctrl|alt|shift)/.test(ql)) return null;
+  if (sameKey(ql, key)) return 40;
+  const kl = key.toLowerCase(); if (kl.startsWith(ql)) return 18;
+  const qp = keyParts(ql), kp = keyParts(kl); if (qp.every(p => kp.some(x => x.startsWith(p)))) return 12;
+  return null;
+}
+const prettyKey = s => keyParts(s).map(p => p.length <= 1 ? p.toUpperCase() : p[0].toUpperCase() + p.slice(1)).join('+');
+const HIST = { [byName('Notepad').id]: 4, [byName('VS Code').id]: 3, [byName('Outlook').id]: 2, [byName('Command line').id]: 1.5, [START.find(s => s.name === 'Firefox').id]: 2.5 };
+function score(n, q) {
+  let best = null;
+  const consider = (r, w, via, isName) => { if (!r) return; const s = r.sc * w; if (!best || s > best.s) best = { s, pos: isName ? r.pos : [], via }; };
+  consider(fuzzy(q, n.name), 1, null, true);
+  if (n.keywords) for (const kw of n.keywords.split(' ')) consider(fuzzy(q, kw), .8, 'kw:' + kw);
+  if (n.exe && n.kind !== 'file') consider(fuzzy(q, n.exe.split('\\').pop()), .6, 'file');
+  if (n.tip && n.kind !== 'cmd') consider(fuzzy(q, n.tip), .4, 'tip');
+  if (n.crumbs && n.crumbs.length) consider(fuzzy(q, n.crumbs.join(' ')), .45, 'path');
+  const k = keyMatch(q, n.key); if (k !== null && (!best || k > best.s)) best = { s: k, pos: [], via: 'key' };
+  if (best && n.kind === 'cmd') best.s *= .9;
+  if (best) best.s += HIST[n.id] || 0;
+  return best;
+}
+function hl(name, pos) { const set = new Set(pos); return [...name].map((c, i) => set.has(i) ? '<b>' + esc(c) + '</b>' : esc(c)).join(''); }
+const deskSize = () => { const d = $('#desk'); return { w: d.clientWidth, h: d.clientHeight }; };
+const localPt = e => { const r = $('#desk').getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+const focusDesk = () => $('#desk').focus({ preventScroll: true });
+const svgI = p => `<svg viewBox="0 0 24 24" aria-hidden="true">${p}</svg>`;
+const ACT = {
+  reveal: [svgI(TREE_G), 'Reveal in its menu (Ctrl+R)'],
+  edit: [svgI(PENCIL_G), 'Edit in y-pop-config (Ctrl+E)'],
+  copy: [svgI(COPY_G), 'Copy path (Ctrl+C)'],
+  admin: [svgI(SHIELD_G), 'Run as administrator (Ctrl+Enter)'],
+  add: [svgI('<path d="M12 5v14M5 12h14"/>'), 'Add to a tray menu (Ctrl+P)'],
+  forget: [svgI('<path d="M6 6l12 12M18 6L6 18"/>'), 'Remove from recent (Ctrl+Del)'],
+};
+
+/* ---------------- search ---------------- */
+const SR = { open: true, q: '', scope: [], sel: -1, rows: [], selectable: [], bsel: [0], bcol: 0, expanded: false, opt: { collapsed: 'off', recent: 'on', start: 'on', admin: 'on', plugins: 'on', bview: 'columns', layout: 'sections', actions: 'on' } };
+const on = k => SR.opt[k] === 'on';
+/* collapsed="true" (spec §2.4): the box opens as its input row alone; ↓ unfolds Recent and the sections. */
+const collapsedNow = () => on('collapsed') && !SR.expanded && !SR.q.trim() && !SR.scope.length;
+/* Sections (spec §2.4, §2.5): the empty box lists them under Recent; → or Enter opens one, typing searches inside it. */
+const SECTIONS = [
+  { sec: 'menus', name: 'Tray menus', icon: 'list', show: () => true },
+  { sec: 'start', name: 'Start menu', icon: 'start', show: () => on('start') },
+  { sec: 'admin', name: 'Admin tools', icon: 'shield', show: () => on('admin') },
+  { sec: 'scripts', name: 'Scripts', icon: 'folder', show: () => on('admin') },
+  { sec: 'win', name: 'Open windows', icon: 'windows', show: () => on('plugins'), plugin: true },
+].map(s => ({ id: 's:' + s.sec, kind: 'section', crumbs: [], ...s }));
+function secSub(s) {
+  if (s.sec === 'menus') return `${ROOTS.length} tray menus · ${allNodes().filter(n => n.kind === 'app' && !n.browse).length} apps · ${SR.opt.bview === 'az' ? 'A–Z' : 'by menu'}`;
+  if (s.sec === 'start') return `${START.length} apps from the Windows Start menu, Store apps included`;
+  if (s.sec === 'admin') return `${items(ADMIN).length} apps you only reach from search · &lt;group&gt; inside &lt;search&gt;`;
+  if (s.sec === 'scripts') return `${SCRIPTS.files.length} files in ${esc(SCRIPTS.exe)} · a folder only search shows · <em>/</em> searches its files`;
+  return `${WINDOWS.length} windows · from the Windows plugin, <em>!</em> to search them`;
+}
+let RECENT = [[byName('Notepad'), '2 min ago'], [START.find(s => s.name === 'Firefox'), '25 min ago'], [fileNode(byName('Projects'), 'ypo-lite'), '1 h ago'], [byName('Outlook'), 'yesterday'], [ADMIN.children[0], '3 days ago'], [byName('VS Code'), 'last week']];
+const recentList = () => RECENT.filter(([n]) => (n.src !== 'start' || on('start')) && (!n.so || on('admin'))).slice(0, 5);
+const pfxHelp = () => [['>', 'Commands', 'y-pop\'s own commands', 'bolt'], ['#', 'Hotkeys', 'Every binding, and a check for a free one', 'key'], ['/', 'Files', 'Inside browsed folders', 'folder'],
+  ...(on('plugins') ? [['=', 'Calculator', 'Plugin. An expression works without the prefix too', 'calc'], ['!', 'Windows', 'Plugin. Switch to an open window', 'windows']] : []), ['?', 'Prefixes', 'This list', 'info']];
+const pfxChars = () => pfxHelp().map(p => p[0]).join('');
+
+/* Browsing a section with an empty query. Tray menus: Miller columns (or A–Z); Start menu: A–Z. */
+const colsMode = () => !SR.q.trim() && SR.scope.length === 1 && srScope().sec === 'menus' && SR.opt.bview === 'columns';
+const bList = n => n.browse ? n.files.map(f => fileNode(n, f)) : items(n);
+function bCols() {
+  const panes = []; let list = roots(), k = 0;
+  for (;;) {
+    panes.push({ k, list });
+    const sel = list[SR.bsel[k] ?? 0];
+    if (!sel || k > SR.bcol) break;
+    if (isScope(sel)) { list = bList(sel); k++; }
+    else { panes.push({ k: k + 1, details: sel }); break; }
+  }
+  return panes;
+}
+function paneHtml(p) {
+  if (p.details) {
+    const n = p.details;
+    return `<div class="b-pane b-det">${icon(n.icon, 44)}<div class="b-dn">${esc(n.name)}</div><div class="b-dp">${esc(pathOf(n))}</div>${n.exe ? `<code>${esc(n.exe)}</code>` : ''}${n.key ? `<span class="r-key">${esc(n.key)}</span>` : ''}${n.tip ? `<div class="b-dp">${esc(n.tip)}</div>` : ''}<div class="b-btns"><button data-bact="open">Open</button>${n.kind !== 'file' ? '<button data-bact="reveal">Reveal</button><button data-bact="edit">Edit</button>' : ''}</div></div>`;
+  }
+  const focused = p.k === SR.bcol, si = p.k <= SR.bcol ? (SR.bsel[p.k] ?? 0) : -1;
+  return `<div class="b-pane">${p.list.length ? p.list.map((n, i) => `<div class="b-row${i === si ? (focused ? ' sel' : ' chosen') : ''}" data-k="${p.k}" data-bi="${i}">${icon(n.icon, 20)}<span class="b-n">${esc(n.name)}</span>${isScope(n) ? '<span class="r-more">›</span>' : n.key ? `<span class="b-k">${esc(n.key)}</span>` : ''}</div>`).join('') : '<div class="r-empty">Empty</div>'}</div>`;
+}
+function bColsHtml() {
+  const panes = bCols(), crumbs = ['Tray menus'];
+  for (let k = 0; k < SR.bcol; k++) { const p = panes.find(x => x.k === k && x.list); if (p && p.list[SR.bsel[k] ?? 0]) crumbs.push(p.list[SR.bsel[k] ?? 0].name); }
+  return `<div class="b-crumb">${crumbs.map(esc).join(' › ')}</div><div class="b-cols">${panes.slice(-3).map(paneHtml).join('')}</div>`;
+}
+function azRows(rows, list) {
+  const apps = [...list].sort((a, b) => a.name.localeCompare(b.name));
+  rows.push({ letters: [...new Set(apps.map(a => a.name[0].toUpperCase()))] });
+  let L = '';
+  apps.forEach(n => { const l = n.name[0].toUpperCase(); if (l !== L) { rows.push({ head: l, anchor: l }); L = l; } rows.push({ n, pos: [] }); });
+}
+function secBrowse(sc, rows) {
+  if (sc.sec === 'menus') { if (SR.opt.bview === 'columns') rows.push({ columns: true }); else azRows(rows, allNodes().filter(n => n.kind === 'app' && !n.browse)); }
+  else if (sc.sec === 'start') azRows(rows, START);
+  else if (sc.sec === 'admin') { rows.push({ head: 'Admin tools · only in search' }); items(ADMIN).forEach(n => rows.push({ n, pos: [] })); }
+  else if (sc.sec === 'scripts') { rows.push({ head: 'Folder · ' + SCRIPTS.exe + ' · only in search' }); SCRIPTS.files.forEach(f => rows.push({ n: fileNode(SCRIPTS, f), pos: [] })); }
+  else { rows.push({ head: 'Windows plugin · open windows' }); WINDOWS.forEach(n => rows.push({ n, pos: [] })); }
+}
+function footHtml() {
+  const k = (key, label) => `<span><kbd>${key}</kbd> ${label}</span>`;
+  if (collapsedNow()) return '';
+  if (colsMode()) return k('↑ ↓', 'Move') + k('← →', 'Columns') + k('↵', 'Open') + k('Ctrl+R', 'Reveal') + k('Ctrl+E', 'Edit') + k('Esc', 'Back');
+  if (!SR.q.trim() && SR.scope.length) return k('↑ ↓', 'Move') + k('↵', 'Open') + k('Type', 'Search in it') + k('Backspace', 'Back');
+  if (!SR.q.trim()) return k('↑ ↓', 'Move') + k('↵', 'Open') + k('→', 'Open a section') + (on('recent') ? k('Ctrl+Del', 'Forget') : '') + k('?', 'Prefixes') + k('Esc', 'Close');
+  return k('↵', 'Open') + k('Ctrl+R', 'Reveal') + k('Ctrl+E', 'Edit') + k('Tab', 'Search inside') + k('Esc', 'Clear');
+}
+function bKey(e) {
+  const panes = bCols(), cur = panes.find(p => p.k === SR.bcol && p.list), list = cur ? cur.list : [], i = SR.bsel[SR.bcol] ?? 0, n = list[i];
+  if (e.key === 'Escape' || (e.key === 'ArrowLeft' && SR.bcol === 0)) { e.preventDefault(); srUp(); return true; }
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { if (list.length) { SR.bsel[SR.bcol] = Math.max(0, Math.min(list.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1))); SR.bsel.length = SR.bcol + 1; } }
+  else if (e.key === 'ArrowRight' || (e.key === 'Enter' && n && isScope(n))) { if (n && isScope(n) && leafCount(n)) { SR.bcol++; SR.bsel[SR.bcol] = 0; } }
+  else if (e.key === 'ArrowLeft') { SR.bsel.length = SR.bcol; SR.bcol--; }
+  else if (e.key === 'Enter') { e.preventDefault(); if (n) srActivate({ n }, e.ctrlKey ? 'admin' : e.shiftKey ? 'folder' : null); return true; }
+  else if (e.ctrlKey && (e.key === 'r' || e.key === 'e')) { e.preventDefault(); if (n && n.kind !== 'file') srActivate({ n }, e.key === 'r' ? 'reveal' : 'edit'); return true; }
+  else return false;
+  e.preventDefault(); srRenderList(); return true;
+}
+const roots = () => ROOTS;
+function allNodes() {
+  const out = [];
+  for (const r of roots()) { out.push(r); (function walk(n) { for (const c of n.children || []) { if (c.kind === 'sep') continue; out.push(c); if (c.kind === 'group') walk(c); } })(r); }
+  return out;
+}
+const srScope = () => SR.scope[SR.scope.length - 1];
+function scopeEntries(scope) {
+  if (scope.kind === 'section') return scope.sec === 'menus' ? allNodes() : scope.sec === 'start' ? START : scope.sec === 'admin' ? scopeEntries(ADMIN) : scope.sec === 'scripts' ? scopeEntries(SCRIPTS) : WINDOWS;
+  if (scope.browse) return scope.files.map(f => fileNode(scope, f));
+  const out = []; (function walk(n) { for (const c of n.children || []) { if (c.kind === 'sep') continue; out.push(c); if (c.kind === 'group') walk(c); } })(scope); return out;
+}
+/* What a plain query searches: the tray menus, then each section that is on. Start-menu duplicates of menu apps are left out. */
+const globalEntries = () => [...allNodes(), ...(on('admin') ? [...scopeEntries(ADMIN), SCRIPTS] : []), ...(on('start') ? START.filter(s => !s.dup) : []), ...COMMANDS];
+const kindOf = n => n.kind === 'cmd' ? 'Commands' : n.kind === 'group' ? 'Menus and groups' : n.browse ? 'Folders' : n.src === 'start' ? 'Start menu' : 'Apps';
+function ranked(list, q) {
+  const hits = [];
+  list.forEach((n, i) => { const m = score(n, q); if (m) hits.push({ n, pos: m.pos, via: m.via, s: m.s, i }); });
+  return hits.sort((a, b) => b.s - a.s || a.i - b.i);
+}
+function srBuild() {
+  const t = SR.q.trim(), rows = [];
+  const pfx = !SR.scope.length && t && pfxChars().includes(t[0]) ? t[0] : null;
+  const rest = pfx ? t.slice(1).trim() : t;
+  if (SR.scope.length) {
+    const sc = srScope();
+    if (!t && sc.kind === 'section') secBrowse(sc, rows);
+    else if (!t) { rows.push({ head: sc.browse ? 'Folder · ' + sc.exe : pathOf(sc) }); scopeEntries(sc).filter(n => sc.browse || n.parent === sc).forEach(n => rows.push({ n, pos: [] })); }
+    else ranked(scopeEntries(sc), t).slice(0, 30).forEach(h => rows.push(h));
+  } else if (pfx === '>') {
+    rows.push({ head: 'y-pop commands' });
+    (rest ? ranked(COMMANDS, rest) : COMMANDS.map(n => ({ n, pos: [] }))).forEach(h => rows.push(h));
+  } else if (pfx === '#') {
+    const binds = [...allNodes().filter(n => n.key), SEARCH_BIND];
+    let list = binds;
+    if (rest) list = binds.map(n => ({ n, s: sameKey(rest, n.key) ? 50 : (keyMatch(rest, n.key) ?? (fuzzy(rest, n.name)?.sc ?? -1)) })).filter(x => x.s >= 0).sort((a, b) => b.s - a.s).map(x => x.n);
+    if (rest.includes('+') && keyParts(rest).length >= 2 && !binds.some(n => sameKey(rest, n.key))) {
+      const os = Object.entries(OS_TAKEN).find(([k]) => sameKey(k, rest));
+      rows.push({ head: 'Check a hotkey' }); rows.push({ special: 'free', combo: prettyKey(rest), os: os ? os[1] : null });
+    }
+    rows.push({ head: rest ? 'Hotkeys matching' : 'Every hotkey in y-pop.xml' });
+    list.forEach(n => rows.push({ special: 'bind', n, pos: [] }));
+  } else if (pfx === '/') {
+    rows.push({ head: 'Inside browsed folders' });
+    for (const b of [...allNodes().filter(n => n.browse), ...(on('admin') ? [SCRIPTS] : [])]) {
+      if (b.network) { rows.push({ special: 'note', n: b }); continue; }
+      const files = b.files.map(f => fileNode(b, f));
+      (rest ? ranked(files, rest) : files.map(n => ({ n, pos: [] }))).forEach(h => rows.push(h));
+    }
+  } else if (pfx === '=') {
+    rows.push({ head: 'Calculator · plugin' });
+    const v = rest ? calc(rest) : null;
+    rows.push(v !== null ? { special: 'calc', expr: rest, v } : { special: 'msg', text: rest ? 'Not a complete expression yet' : 'Type an expression: 2*(3+4), 2^10, 17%5' });
+  } else if (pfx === '!') {
+    rows.push({ head: 'Windows · plugin' });
+    (rest ? ranked(WINDOWS, rest) : WINDOWS.map(n => ({ n, pos: [] }))).forEach(h => rows.push(h));
+  } else if (pfx === '?') {
+    rows.push({ head: 'Prefixes · a first character picks what to search' });
+    pfxHelp().filter(p => p[0] !== '?').forEach(p => rows.push({ special: 'pfx', p }));
+  } else if (!t && collapsedNow()) {
+    // folded: the input row alone until ↓
+  } else if (!t) {
+    const rec = on('recent') ? recentList() : [];
+    if (rec.length) { rows.push({ head: 'Recent' }); rec.forEach(([n, ago]) => rows.push({ n, pos: [], ago, recent: true })); }
+    rows.push({ head: 'Browse' });
+    SECTIONS.filter(s => s.show()).forEach(n => rows.push({ n, pos: [] }));
+    rows.push({ tips: true });
+  } else {
+    const hits = ranked(globalEntries(), t);
+    const v = on('plugins') && isExpr(t) ? calc(t) : null;
+    const calcRow = v !== null ? [{ special: 'calc', expr: t, v }] : [];
+    if (SR.opt.layout === 'flat') [...calcRow, ...hits.slice(0, 30)].forEach(h => rows.push(h));
+    else if (hits.length || calcRow.length) {
+      rows.push({ head: 'Top hit' }); rows.push(calcRow[0] || hits[0]);
+      const groups = { 'Apps': [], 'Start menu': [], 'Menus and groups': [], 'Folders': [], 'Commands': [] };
+      (calcRow.length ? hits : hits.slice(1)).forEach(h => groups[kindOf(h.n)].push(h));
+      for (const [k, v] of Object.entries(groups)) if (v.length) { rows.push({ head: k + (v.length > 5 ? ' · ' + v.length : '') }); v.slice(0, 5).forEach(x => rows.push(x)); }
+    }
+  }
+  SR.rows = rows;
+  SR.selectable = rows.map((r, i) => (r.head !== undefined || r.tips || r.letters || r.columns || r.special === 'note' || r.special === 'msg') ? -1 : i).filter(i => i >= 0);
+  if (!SR.selectable.includes(SR.sel)) SR.sel = SR.selectable[0] ?? -1;
+}
+function actsFor(r) {
+  if (r.special === 'calc') return ['copy'];
+  if (r.special === 'free' || r.special === 'pfx' || !r.n) return [];
+  const n = r.n; let a;
+  if (n.kind === 'cmd' || n.kind === 'section' || n.kind === 'win') a = [];
+  else if (ROOTS.includes(n)) a = ['edit'];
+  else if (r.special === 'bind' || n.kind === 'group') a = ['reveal', 'edit'];
+  else if (n.kind === 'file') a = ['admin', 'copy'];
+  else if (n.kind === 'about' || n.kind === 'quit') a = ['reveal'];
+  else if (n.src === 'start') a = ['add', 'admin', 'copy'];
+  else if (n.so) a = ['edit', 'admin', 'copy'];
+  else a = ['reveal', 'edit', 'copy'];
+  return r.recent ? [...a, 'forget'] : a;
+}
+function nodeSub(r) {
+  const n = r.n;
+  if (n.kind === 'section') return secSub(n);
+  if (ROOTS.includes(n)) return `Tray menu · ${esc(n.key)} · ${leafCount(n)} items · <em>Tab</em> to search inside`;
+  const where = esc((n.crumbs || []).join(' › '));
+  if (n.kind === 'cmd') return esc(n.tip);
+  if (n.kind === 'win') return `${esc(n.exe)} · Windows plugin · <em>↵</em> switches to it`;
+  if (n.kind === 'group') return `${where} · group · ${leafCount(n)} items · <em>Tab</em> to search inside`;
+  if (n.browse) return `${where} · folder <em>${esc(n.exe)}</em>${n.network ? ' · network, not indexed' : ''} · <em>Tab</em> to list`;
+  const tag = n.so ? ' · only in search' : '';
+  if (r.via && r.via.startsWith('kw:')) return `${where}${tag} · matched keyword “<em>${esc(r.via.slice(3))}</em>”`;
+  if (r.via === 'file') return `${where}${tag} · matched file name <em>${esc(exeBase(n.exe))}</em>`;
+  if (r.via === 'tip') return `${where} · matched tooltip “<em>${esc(n.tip)}</em>”`;
+  if (r.via === 'key') return `${where} · hotkey <em>${esc(n.key)}</em>`;
+  if (n.kind === 'settings') return where + ' · opens y-pop-config';
+  if (n.kind === 'about' || n.kind === 'quit') return where;
+  if (n.kind === 'file') return where + (n.dir ? ' · folder' : '');
+  return where + tag + ' · ' + esc(n.tip || n.exe || '');
+}
+function srRowHtml(r, i, alt) {
+  const sel = i === SR.sel;
+  const acts = sel && SR.opt.actions === 'on' ? actsFor(r) : [];
+  const actHtml = acts.length ? `<div class="r-acts">${acts.map(a => `<button class="r-act" data-act="${a}" title="${ACT[a][1]}">${ACT[a][0]}</button>`).join('')}</div>` : '';
+  const wrap = (ic, name, sub, right, extra = '') => `<div class="r-row${sel ? ' sel' : ''}${extra}" data-i="${i}" role="option" aria-selected="${sel}">${ic}<div class="r-text"><div class="r-name">${name}</div><div class="r-sub">${sub}</div></div>${right}</div>`;
+  if (r.special === 'free') return wrap(icon('key', 30), r.os ? `${esc(r.combo)} is taken by ${esc(r.os)}` : `${esc(r.combo)} is free`, r.os ? 'y-pop could still claim it with override="true"' : 'Not in y-pop.xml, and no other app holds it (RegisterHotKey probe) · <em>↵</em> assign it in y-pop-config', '');
+  if (r.special === 'calc') return wrap(icon('calc', 30), `<span class="r-calc">= ${esc(r.v.toLocaleString('en-US', { maximumFractionDigits: 10 }))}</span>`, `${esc(r.expr)} · Calculator plugin · <em>↵</em> copies the result`, actHtml);
+  if (r.special === 'pfx') return wrap(icon(r.p[3], 30), `<code class="r-pfx">${esc(r.p[0])}</code>${esc(r.p[1])}`, esc(r.p[2]), '');
+  if (r.special === 'note') return wrap(icon(r.n.icon, 30), esc(r.n.name), `${esc(r.n.exe)} is a network folder and is not searched. <em>Tab</em> on it in a normal search lists it.`, '', ' note');
+  const n = r.n;
+  if (r.special === 'bind') return wrap(icon(n.icon, 30), `<span class="r-key">${esc(n.key)}</span>${esc(n.name)}`, ROOTS.includes(n) ? 'Opens the tray menu' : (n.crumbs && n.crumbs.length ? esc(n.crumbs.join(' › ')) : esc(n.tip || '')), actHtml);
+  let right = actHtml;
+  if (!right) { if (isScope(n)) right = '<span class="r-more">›</span>'; else if (r.ago) right = `<span class="r-ago">${esc(r.ago)}</span>`; else if (n.key) right = `<span class="r-key">${esc(n.key)}</span>`; else if (SR.q && alt <= 9) right = `<span class="r-key">Alt+${alt}</span>`; }
+  const badge = n.plugin ? '<span class="r-badge">plugin</span>' : '';
+  return wrap(icon(n.icon, 30), hl(n.name, r.pos || []) + badge, nodeSub(r), right);
+}
+function srRenderList() {
+  const list = $('#rlist'); if (!list) return;
+  const ex = $('#rexp'); if (ex) ex.hidden = !collapsedNow();
+  const t = SR.q.trim();
+  if (!SR.rows.length) { list.innerHTML = t ? `<div class="r-empty">Nothing matches “${esc(t)}”${on('start') ? '' : '. The Start menu section is off'}.</div>` : ''; $('#rfoot').innerHTML = footHtml(); return; }
+  let alt = 0;
+  list.innerHTML = SR.rows.map((r, i) => {
+    if (r.columns) return bColsHtml();
+    if (r.letters) return `<div class="az">${r.letters.map(l => `<button data-az="${l}">${l}</button>`).join('')}</div>`;
+    if (r.head !== undefined) return `<div class="r-head"${r.anchor ? ` data-anchor="${r.anchor}"` : ''}>${esc(r.head)}</div>`;
+    if (r.tips) return `<div class="s-tips"><span>Prefixes:</span>${pfxHelp().filter(p => p[0] !== '?').map(p => `<button data-pfx="${esc(p[0])}"><code>${esc(p[0])}</code>${esc(p[1])}</button>`).join('')}<button data-pfx="?"><code>?</code>Help</button></div>`;
+    if (r.special === 'msg') return `<div class="r-empty">${esc(r.text)}</div>`;
+    if (r.special !== 'note' && r.special !== 'pfx') alt++;
+    return srRowHtml(r, i, alt);
+  }).join('');
+  const s = list.querySelector('.r-row.sel, .b-row.sel'); if (s) s.scrollIntoView({ block: 'nearest' });
+  const f = $('#rfoot'); if (f) f.innerHTML = footHtml();
+}
+function srRenderChip() {
+  const c = $('#rchip'); if (!c) return;
+  c.innerHTML = SR.scope.map(s => `<span class="chip">${esc(s.name)} ›</span>`).join('');
+  const sc = srScope();
+  $('#rq').placeholder = !sc ? 'Search apps, menus, hotkeys…' : sc.browse ? 'Filter this folder' : sc.sec === 'win' ? 'Filter open windows' : 'Search in ' + sc.name;
+}
+function srSet(q) { SR.q = q; const inp = $('#rq'); if (inp) inp.value = q; SR.sel = -1; srBuild(); srRenderList(); }
+function srRender() {
+  const host = $('#ovSearch');
+  if (!SR.open) { host.innerHTML = ''; return; }
+  if (!host.firstChild) {
+    host.innerHTML = `<div class="search panel-o" id="search">
+      <div class="r-input"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+        <span id="rchip" style="display:flex;gap:4px"></span>
+        <input id="rq" autocomplete="off" spellcheck="false" aria-label="Search" role="combobox" aria-controls="rlist" aria-expanded="true"><button class="r-exp" id="rexp" type="button" title="Recent and sections (↓)" aria-label="Show recent apps and sections"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button></div>
+      <div class="r-list" id="rlist" role="listbox"></div>
+      <div class="r-hints" id="rfoot"></div></div>`;
+    const inp = $('#rq');
+    inp.addEventListener('input', () => { SR.q = inp.value; if (!SR.q.trim()) SR.expanded = false; SR.sel = -1; srBuild(); srRenderList(); });
+    inp.addEventListener('keydown', srKey);
+    $('#rexp').addEventListener('click', () => { SR.expanded = true; SR.sel = -1; srBuild(); srRenderList(); inp.focus({ preventScroll: true }); });
+    const list = $('#rlist');
+    list.addEventListener('dblclick', e => { const br = e.target.closest('.b-row'); if (!br) return; const p = bCols().find(x => x.k === +br.dataset.k && x.list); const n = p && p.list[+br.dataset.bi]; if (n && !isScope(n)) srActivate({ n }, null); });
+    list.addEventListener('pointermove', e => { const row = e.target.closest('.r-row'); if (!row) return; const i = +row.dataset.i; if (i !== SR.sel && SR.selectable.includes(i)) { SR.sel = i; srRenderList(); } });
+    list.addEventListener('click', e => {
+      const refocus = () => $('#rq') && $('#rq').focus({ preventScroll: true });
+      const pb = e.target.closest('[data-pfx]'); if (pb) { srSet(pb.dataset.pfx); refocus(); return; }
+      const az = e.target.closest('[data-az]');
+      if (az) {
+        const h0 = list.querySelector(`[data-anchor="${az.dataset.az}"]`), nx = h0 && h0.nextElementSibling;
+        if (nx && nx.dataset.i) SR.sel = +nx.dataset.i;
+        srRenderList(); const h = list.querySelector(`[data-anchor="${az.dataset.az}"]`); if (h) list.scrollTop = h.offsetTop - 40;
+        refocus(); return;
+      }
+      const ba = e.target.closest('[data-bact]'); if (ba) { const p = bCols().find(x => x.details); if (p) srActivate({ n: p.details }, ba.dataset.bact === 'open' ? null : ba.dataset.bact); refocus(); return; }
+      const br = e.target.closest('.b-row'); if (br) { const k = +br.dataset.k; SR.bcol = k; SR.bsel[k] = +br.dataset.bi; SR.bsel.length = k + 1; srRenderList(); refocus(); return; }
+      const row = e.target.closest('.r-row'); if (!row) return; const act = e.target.closest('.r-act');
+      srActivate(SR.rows[+row.dataset.i], act ? act.dataset.act : null); refocus();
+    });
+  }
+  $('#rq').value = SR.q;
+  srRenderChip(); srBuild(); srRenderList();
+}
+function srClose() { SR.open = false; SR.q = ''; SR.scope = []; srRender(); updateTaskbar(); }
+function srOpen() { SR.open = true; SR.q = ''; SR.scope = []; SR.sel = -1; SR.expanded = false; SR.bsel = [0]; SR.bcol = 0; $('#ovSearch').innerHTML = ''; srRender(); updateTaskbar(); $('#rq').focus({ preventScroll: true }); }
+function srEnter(n) { SR.scope.push(n); SR.bsel = [0]; SR.bcol = 0; srRenderChip(); srSet(''); }
+function srUp() { if (!SR.scope.length) return false; SR.scope.pop(); srRenderChip(); srSet(''); return true; }
+function srActivate(r, how) {
+  if (!r || r.special === 'note' || r.special === 'msg') return;
+  if (r.special === 'pfx') { srSet(r.p[0]); return; }
+  if (r.special === 'calc') { toast('Copied <code>' + esc(String(r.v)) + '</code>'); return; }
+  if (r.special === 'free') { toast(r.os ? `${esc(r.combo)} is taken by ${esc(r.os)}` : `Would open y-pop-config with <b>${esc(r.combo)}</b> ready to assign`); if (!r.os) srClose(); return; }
+  const n = r.n;
+  if (n.kind === 'cmd') { toast(esc(n.say)); srClose(); return; }
+  if (n.kind === 'section') { if (!how) srEnter(n); return; }
+  if (n.kind === 'win') { toast('Would switch to <b>' + esc(n.name) + '</b>'); srClose(); return; }
+  if (['reveal', 'edit', 'copy', 'add', 'forget'].includes(how) && !actsFor(r).includes(how)) return;
+  if (how === 'forget') { RECENT = RECENT.filter(x => x[0] !== n); toast('Removed <b>' + esc(n.name) + '</b> from recent'); srBuild(); srRenderList(); return; }
+  if (isScope(n) && !how && r.special !== 'bind') { srEnter(n); return; }
+  if ((ROOTS.includes(n) || n.kind === 'group') && !how) { toast('Would open the <b>' + esc(n.name) + '</b> tray menu'); srClose(); return; }
+  toast(launchText(n, how));
+  if (how !== 'copy') srClose();
+}
+function srKey(e) {
+  const sel = SR.selectable, at = sel.indexOf(SR.sel), row = SR.rows[SR.sel];
+  const move = d => { if (!sel.length) return; SR.sel = sel[Math.max(0, Math.min(sel.length - 1, (at < 0 ? 0 : at + d)))]; srRenderList(); };
+  if (colsMode() && bKey(e)) return;
+  if (e.key === 'ArrowDown' && collapsedNow()) { e.preventDefault(); SR.expanded = true; SR.sel = -1; srBuild(); srRenderList(); return; }
+  if (e.key === 'ArrowUp' && on('collapsed') && SR.expanded && !SR.q && !SR.scope.length && at <= 0) { e.preventDefault(); SR.expanded = false; srBuild(); srRenderList(); return; }
+  if (e.key === 'ArrowDown') { e.preventDefault(); move(1); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); }
+  else if (e.key === 'PageDown') { e.preventDefault(); move(6); }
+  else if (e.key === 'PageUp') { e.preventDefault(); move(-6); }
+  else if (e.key === 'ArrowRight' && !SR.q && row && row.n && isScope(row.n) && !row.special) { e.preventDefault(); srEnter(row.n); }
+  else if (e.key === 'ArrowLeft' && !SR.q && SR.scope.length) { e.preventDefault(); srUp(); }
+  else if (e.key === 'Enter') { e.preventDefault(); srActivate(row, e.ctrlKey ? 'admin' : e.shiftKey ? 'folder' : null); }
+  else if (e.key === 'Tab') { e.preventDefault(); if (e.shiftKey) { srUp(); return; } if (row && row.n && isScope(row.n) && !row.special) srEnter(row.n); }
+  else if (e.key === 'Backspace' && !e.target.value) { e.preventDefault(); srUp(); }
+  else if (e.key === 'Delete' && e.ctrlKey) { e.preventDefault(); if (row && row.recent) srActivate(row, 'forget'); }
+  else if (e.key === 'Escape') {
+    e.preventDefault();
+    if (SR.q) { if (on('collapsed')) SR.expanded = false; srSet(''); }
+    else if (srUp()) { /* left an opened section */ }
+    else if (on('collapsed') && SR.expanded) { SR.expanded = false; srBuild(); srRenderList(); }
+    else srClose();
+  }
+  else if (e.altKey && /^[1-9]$/.test(e.key)) { e.preventDefault(); const i = sel.filter(k => !SR.rows[k].special || SR.rows[k].special === 'bind')[+e.key - 1]; if (i !== undefined) srActivate(SR.rows[i], null); }
+  else if (e.ctrlKey && (e.key === 'r' || e.key === 'e' || e.key === 'p')) { e.preventDefault(); srActivate(row, { r: 'reveal', e: 'edit', p: 'add' }[e.key]); }
+  else if ((e.key === 'c' || e.key === 'C') && e.ctrlKey && e.target.selectionStart === e.target.selectionEnd) { if (row && actsFor(row).includes('copy')) { e.preventDefault(); srActivate(row, 'copy'); } }
+}
+
+/* ---------------- radial ---------------- */
+/* Numpad ↔ slot. An 8-slice ring's slots run clockwise from north (n ne e se s sw w nw). */
+const D2I = { 8: { 8: 0, 9: 1, 6: 2, 3: 3, 2: 4, 1: 5, 4: 6, 7: 7 }, 4: { 8: 0, 6: 1, 2: 2, 4: 3 } };
+const I2D = { 8: [8, 9, 6, 3, 2, 1, 4, 7], 4: [8, 6, 2, 4] };
+const KP = { 8: [[1, 0], [2, 0], [2, 1], [2, 2], [1, 2], [0, 2], [0, 1], [0, 0]], 4: [[1, 0], [2, 1], [1, 2], [0, 1]] };
+const QUICK = {
+  name: 'Quick', node: { name: 'Quick', kind: 'group', crumbs: [] },
+  pages: [
+    [byName('Notepad'), byName('Command line'), byName('Dev'), byName('Explorers'), byName('Recent documents'), byName('Task Manager'), byName('Utilities'), null],
+    [byName('Calculator'), byName('Snipping Tool'), byName('Paint'), byName('Character Map'), byName('Outlook'), byName('Teams'), byName('Remote Desktop'), byName('Settings…')],
+  ],
+  center: byName('File Explorer'),
+};
+/* The alternative to pages: page 2 folded into a plain group in the empty slot (7). */
+const MORE = { id: 'more-q', kind: 'group', name: 'More', icon: 'more', children: QUICK.pages[1], crumbs: ['Quick'] };
+const quickPages = () => RD.opt.pages === 'pages' ? QUICK.pages : [QUICK.pages[0].map((x, i) => i === 7 ? MORE : x)];
+const RD = { open: true, stack: [], hover: -1, pressed: false, trail: [], fly: null, flySel: 0, armed: false, last: null, opt: { shape: 'ring', five: 'center', zero: 'actions', pages: 'pages', nest: 'recenter' } };
+const top = () => RD.stack[RD.stack.length - 1];
+const curSlots = ring => ring.pages[ring.pi];
+function slotsFor(g) {
+  const it = items(g); const n = it.length <= 4 ? 4 : 8;
+  if (it.length > 8) return [...it.slice(0, 7), { id: 'more', kind: 'group', name: 'More', icon: 'more', children: it.slice(7), crumbs: [] }];
+  return Array.from({ length: n }, (_, i) => it[i] || null);
+}
+const act = (name, ic, how) => ({ id: 'a:' + how, kind: 'action', name, icon: ic, how });
+function actionSlots(t) {
+  if (t.kind === 'group') return [act('Open as list', 'list', 'list'), act('Edit in y-pop-config', 'pencil', 'edit'), null, null];
+  if (t.kind === 'file' || !t.exe) return [act('Reveal in menu', 'list', 'reveal'), null, null, null];
+  return [act('Run as administrator', 'shield', 'admin'), act('Open containing folder', 'folder', 'folder'), act('Copy path', 'copy', 'copy'), act('Edit in y-pop-config', 'pencil', 'edit')];
+}
+function geo() {
+  const { w, h } = deskSize();
+  if (RD.opt.shape === 'keypad') { const g = 6, c = Math.max(62, Math.min(92, (Math.min(w, h) - 40) / 3 - g)); return { c, g, r0: c / 2, r1: 1.5 * c + g }; }
+  const r1 = Math.max(96, Math.min(150, (Math.min(w, h) - 30) / 2)); return { r1, r0: Math.round(r1 * .29) };
+}
+function clampC(p) { const { w, h } = deskSize(); const { r1 } = geo(); const m = r1 + 12; return { x: Math.max(m, Math.min(w - m, p.x)), y: Math.max(m, Math.min(h - m - 26, p.y)) }; }
+function polar(cx, cy, r, a) { const t = a * Math.PI / 180; return [cx + r * Math.sin(t), cy - r * Math.cos(t)]; }
+function sector(cx, cy, r0, r1, a0, a1) {
+  const [x0, y0] = polar(cx, cy, r1, a0), [x1, y1] = polar(cx, cy, r1, a1), [x2, y2] = polar(cx, cy, r0, a1), [x3, y3] = polar(cx, cy, r0, a0);
+  const lg = a1 - a0 > 180 ? 1 : 0;
+  return `M${x0.toFixed(1)} ${y0.toFixed(1)}A${r1} ${r1} 0 ${lg} 1 ${x1.toFixed(1)} ${y1.toFixed(1)}L${x2.toFixed(1)} ${y2.toFixed(1)}A${r0} ${r0} 0 ${lg} 0 ${x3.toFixed(1)} ${y3.toFixed(1)}Z`;
+}
+function slotPos(ring, i) {
+  const n = curSlots(ring).length, G = geo();
+  if (RD.opt.shape === 'keypad') { const [col, row] = KP[n][i]; return [ring.cx + (col - 1) * (G.c + G.g), ring.cy + (row - 1) * (G.c + G.g)]; }
+  return polar(ring.cx, ring.cy, (G.r0 + G.r1) / 2 + 2, i * 360 / n);
+}
+function mkRing(o) { return { chosen: -1, pi: 0, center: null, kind: 'normal', ...o }; }
+function rdOpenAt(p) { const c = clampC(p); RD.open = true; RD.armed = false; RD.stack = [mkRing({ name: QUICK.name, node: QUICK.node, pages: quickPages(), center: QUICK.center, cx: c.x, cy: c.y })]; RD.hover = -1; RD.fly = null; rdRender(); updateTaskbar(); focusDesk(); }
+function rdClose() { RD.open = false; RD.stack = []; RD.fly = null; RD.trail = []; RD.armed = false; rdRender(); updateTaskbar(); }
+function rdBack() {
+  if (RD.armed) { RD.armed = false; rdRender(); return; }
+  if (RD.fly) { RD.fly = null; top().chosen = -1; rdRender(); return; }
+  if (RD.stack.length > 1) { RD.stack.pop(); top().chosen = -1; RD.hover = -1; rdRender(); } else rdClose();
+}
+function rdLaunch(n, how) { toast(launchText(n, how)); if (n.kind !== 'cmd') RD.last = n; rdClose(); }
+function rdHit(p) {
+  const ring = top(); if (!ring) return -2;
+  const { r0, r1 } = geo(); const dx = p.x - ring.cx, dy = p.y - ring.cy, d = Math.hypot(dx, dy);
+  if (d < r0) return -1; if (d > r1 * 2) return -3;
+  let a = Math.atan2(dx, -dy) * 180 / Math.PI; if (a < 0) a += 360;
+  const n = curSlots(ring).length; return Math.round(a / (360 / n)) % n;
+}
+function pushRing(o, p, i) {
+  const ring = top();
+  const outer = RD.opt.nest === 'outer' && RD.opt.shape === 'ring';
+  let c;
+  if (outer) c = { x: ring.cx, y: ring.cy };
+  else { const [ix, iy] = i >= 0 ? slotPos(ring, i) : [ring.cx, ring.cy]; c = clampC(p || { x: ix, y: iy }); }
+  RD.stack.push(mkRing({ ...o, cx: c.x, cy: c.y, outer }));
+  RD.hover = -1; RD.fly = null; rdRender();
+}
+function openActions(target, p, i) {
+  const ring = top(); if (i >= 0) ring.chosen = i;
+  pushRing({ name: target.name, node: target, pages: [actionSlots(target)], kind: 'actions', target }, p, i);
+}
+function chooseNode(n, i, p) {
+  const ring = top();
+  if (n.kind === 'action') { rdLaunch(ring.target, n.how); return; }
+  if (n.kind === 'group') { if (i >= 0) ring.chosen = i; pushRing({ name: n.name, node: n, pages: [slotsFor(n)], center: items(n).find(x => x.def) || null }, p, i); return; }
+  if (n.browse) { if (i >= 0) ring.chosen = i; const [ix, iy] = i >= 0 ? slotPos(ring, i) : [ring.cx, ring.cy]; RD.fly = { n, x: ix, y: iy }; RD.flySel = 0; rdRender(); return; }
+  rdLaunch(n);
+}
+function rdChoose(i, p) {
+  const n = curSlots(top())[i]; if (!n) return;
+  if (RD.armed) { RD.armed = false; openActions(n, p, i); return; }
+  chooseNode(n, i, p);
+}
+/* The center button: numpad 5, or a release in the hub. */
+function rdFive(p) {
+  const ring = top();
+  if (RD.armed) { RD.armed = false; openActions(ring.node, p, -1); return; }
+  if (ring.kind === 'actions') { if (ring.target.kind === 'group') rdBack(); else rdLaunch(ring.target); return; }
+  const f = RD.opt.five;
+  if (f === 'center' && ring.center) { chooseNode(ring.center, -1, p); return; }
+  if (f === 'repeat') { if (RD.last) rdLaunch(RD.last); else toast('Nothing launched yet: 5 repeats the last launch'); return; }
+  rdBack();
+}
+function rdPage(d, quiet) { const ring = top(); if (ring.pages.length < 2) { if (!quiet) toast(esc(ring.name) + ' has a single page'); return; } ring.pi = (ring.pi + d + ring.pages.length) % ring.pages.length; RD.hover = -1; rdRender(); }
+function rdZero() {
+  const ring = top(), z = RD.opt.zero;
+  if (z === 'actions') { if (ring.kind === 'actions') { rdBack(); return; } RD.armed = !RD.armed; rdRender(); return; }
+  toast('Would open the search layer over <b>' + esc(ring.name) + '</b>: type to find anything inside this ring');
+}
+function wrapWords(t, max) { const w = t.split(' '); if (t.length <= max || w.length < 2) return [t]; const mid = Math.ceil(w.length / 2); return [w.slice(0, mid).join(' '), w.slice(mid).join(' ')]; }
+function tileSvg(node, px, py) {
+  let s = iconSvg(node.icon, px, py - 11, 30);
+  wrapWords(node.name, 11).forEach((l, k) => { s += `<text class="r-lbl" x="${px}" y="${py + 16 + k * 12}">${esc(l)}</text>`; });
+  return s;
+}
+function hubSvg(ring, active, depth, cx, cy, shape, size) {
+  const hubHot = active && RD.hover === -1 && RD.pressed;
+  let s = shape === 'circle' ? `<circle class="hub${hubHot ? ' hot' : ''}" cx="${cx}" cy="${cy}" r="${size - 3}"/>` : `<rect class="hub${hubHot ? ' hot' : ''}" x="${cx - size / 2}" y="${cy - size / 2}" width="${size}" height="${size}" rx="12"/>`;
+  if (!active) return s + `<text class="hub-t" x="${cx}" y="${cy + 4}">${esc(ring.name)}</text>`;
+  s += shape === 'circle' ? `<text class="dg" x="${cx}" y="${cy - size + 16}">5</text>` : `<text class="dg l" x="${cx - size / 2 + 8}" y="${cy - size / 2 + 15}">5</text>`;
+  const slots = curSlots(ring), hn = RD.hover >= 0 ? slots[RD.hover] : null;
+  const lines = (title, sub) => {
+    const t = wrapWords(title, 10);
+    let o = t.map((l, k) => `<text class="hub-t" x="${cx}" y="${cy + (t.length > 1 ? -4 + k * 13 : 2) - (sub ? 4 : 0)}">${esc(l)}</text>`).join('');
+    if (sub) o += `<text class="hub-s" x="${cx}" y="${cy + (t.length > 1 ? 22 : 14)}">${esc(sub)}</text>`;
+    return o;
+  };
+  const pageInfo = ring.pages.length > 1 ? ` · ${ring.pi + 1}/${ring.pages.length}` : '';
+  if (RD.armed) return s + lines('0 › pick', 'actions for…');
+  if (hn) return s + lines(hn.name, '');
+  if (ring.kind === 'actions') return s + lines(ring.name, ring.target.kind === 'group' ? '5 · back' : '5 · launch');
+  if (RD.opt.five === 'center' && ring.center) return s + iconSvg(ring.center.icon, cx, cy - 9, 24) + `<text class="hub-s" x="${cx}" y="${cy + 16}">${esc(wrapWords(ring.center.name, 12)[0])}</text>`;
+  if (RD.opt.five === 'repeat') return s + lines(ring.name + pageInfo, RD.last ? '5 · ' + RD.last.name : '5 · repeat last');
+  return s + lines(ring.name + pageInfo, depth ? '5 · back' : '5 · close');
+}
+function rdRingSvg(ring, active, depth) {
+  const G = geo(); const outer = ring.outer && active;
+  const r0 = outer ? G.r1 + 8 : G.r0, r1 = outer ? G.r1 + 8 + (G.r1 - G.r0) * .72 : G.r1;
+  const slots = curSlots(ring), n = slots.length, span = 360 / n, gap = 1.4;
+  let s = `<g class="ring${active ? '' : ' parent'}${RD.armed && active ? ' armed' : ''}">`;
+  slots.forEach((node, i) => {
+    const a0 = i * span - span / 2 + gap, a1 = i * span + span / 2 - gap;
+    const hot = active && i === RD.hover && node;
+    const cls = !node ? 'empty' : hot ? 'hot' : (i === ring.chosen ? 'chosen' : '');
+    s += `<path class="slice ${cls}" d="${sector(ring.cx, ring.cy, r0, r1, a0, a1)}"/>`;
+    if (active) { const [dx, dy] = polar(ring.cx, ring.cy, r1 - 11, i * span); s += `<text class="dg" x="${dx.toFixed(1)}" y="${(dy + 3.5).toFixed(1)}">${I2D[n][i]}</text>`; }
+    if (!node) { if (active) { const [lx, ly] = polar(ring.cx, ring.cy, (r0 + r1) / 2, i * span); s += `<text class="r-lbl muted" x="${lx}" y="${ly + 4}">empty</text>`; } return; }
+    if (isScope(node)) s += `<path class="mark${node.browse ? ' browse' : ''}" d="${sector(ring.cx, ring.cy, r1 - 4, r1, a0 + 8, a1 - 8)}"/>`;
+    const [px, py] = polar(ring.cx, ring.cy, (r0 + r1) / 2 + (outer ? 0 : 2), i * span);
+    s += tileSvg(node, px, py);
+  });
+  if (!outer) s += hubSvg(ring, active, depth, ring.cx, ring.cy, 'circle', r0);
+  return s + '</g>';
+}
+function rdKeypadSvg(ring, active, depth) {
+  const G = geo(), c = G.c, g = G.g, slots = curSlots(ring), n = slots.length;
+  let s = `<g class="ring${active ? '' : ' parent'}${RD.armed && active ? ' armed' : ''}">`;
+  const DIG = [[7, 8, 9], [4, 5, 6], [1, 2, 3]];
+  for (let row = 0; row < 3; row++) for (let col = 0; col < 3; col++) {
+    if (row === 1 && col === 1) continue;
+    const i = KP[n].findIndex(([a, b]) => a === col && b === row);
+    const node = i >= 0 ? slots[i] : null;
+    const x = ring.cx + (col - 1) * (c + g) - c / 2, y = ring.cy + (row - 1) * (c + g) - c / 2;
+    const hot = active && i >= 0 && i === RD.hover && node;
+    const cls = i < 0 ? 'void' : !node ? 'empty' : hot ? 'hot' : (i === ring.chosen ? 'chosen' : '');
+    s += `<rect class="slice ${cls}" x="${x}" y="${y}" width="${c}" height="${c}" rx="10"/>`;
+    if (active && i >= 0) s += `<text class="dg l" x="${x + 8}" y="${y + 15}">${DIG[row][col]}</text>`;
+    if (!node) { if (active && i >= 0) s += `<text class="r-lbl muted" x="${x + c / 2}" y="${y + c / 2 + 4}">empty</text>`; continue; }
+    if (isScope(node)) s += `<rect class="mark${node.browse ? ' browse' : ''}" x="${x + c / 2 - 14}" y="${y + c - 6}" width="28" height="3" rx="1.5"/>`;
+    s += tileSvg(node, x + c / 2, y + c / 2 - 2);
+  }
+  s += hubSvg(ring, active, depth, ring.cx, ring.cy, 'square', c);
+  return s + '</g>';
+}
+function rdRender() {
+  const svg = $('#ovRadial'), fly = $('#ovRadialFly');
+  if (!RD.open) { svg.innerHTML = ''; fly.innerHTML = ''; return; }
+  const { w, h } = deskSize(); svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+  const draw = RD.opt.shape === 'keypad' ? rdKeypadSvg : rdRingSvg;
+  let s = '';
+  RD.stack.forEach((ring, d) => {
+    const active = d === RD.stack.length - 1, next = RD.stack[d + 1];
+    s += draw(ring, active, d);
+    if (!active && next && !next.outer && ring.chosen >= 0) { const [ix, iy] = slotPos(ring, ring.chosen); s += `<line class="link" x1="${ix}" y1="${iy}" x2="${next.cx}" y2="${next.cy}"/>`; }
+  });
+  const a = top();
+  if (a && a.pages.length > 1) {
+    const y = a.cy + geo().r1 + 20;
+    s += a.pages.map((_, k) => { const x = a.cx + (k - (a.pages.length - 1) / 2) * 34; return `<g class="pg${k === a.pi ? ' on' : ''}" data-page="${k}"><rect x="${x - 14}" y="${y - 10}" width="28" height="20" rx="10"/><text x="${x}" y="${y + 4}">${k + 1}</text></g>`; }).join('');
+  }
+  if (RD.trail.length > 1) s += `<polyline class="trail" points="${RD.trail.map(p => p.x.toFixed(0) + ',' + p.y.toFixed(0)).join(' ')}"/>`;
+  svg.innerHTML = s;
+  if (RD.fly) {
+    const f = RD.fly, fw = 230, fh = 40 + f.n.files.length * 31;
+    const x = Math.max(8, Math.min(w - fw - 8, f.x + 22)), y = Math.max(8, Math.min(h - fh - 8, f.y - 20));
+    fly.innerHTML = `<div class="flyout panel-o" style="left:${x}px;top:${y}px" role="listbox"><div class="fly-h">${esc(f.n.name)} · list presenter</div>${f.n.files.map((fl, i) => `<button class="fly-row${i === RD.flySel ? ' sel' : ''}" data-i="${i}">${icon(extIcon(fl), 20)}<span>${esc(fl)}</span></button>`).join('')}</div>`;
+  } else fly.innerHTML = '';
+}
+const radial = {
+  down(e) {
+    if (e.button === 2) return;
+    const p = localPt(e);
+    if (!RD.open) { rdOpenAt(p); return; }
+    if (RD.fly) { RD.fly = null; top().chosen = -1; rdRender(); return; }
+    const pg = e.target.closest && e.target.closest('[data-page]');
+    if (pg) { top().pi = +pg.dataset.page; RD.hover = -1; rdRender(); return; }
+    RD.pressed = true; RD.trail = [p]; RD.hover = rdHit(p); $('#desk').setPointerCapture(e.pointerId); rdRender();
+  },
+  move(e) {
+    if (!RD.open || RD.fly) return;
+    const p = localPt(e); const h = rdHit(p);
+    if (RD.pressed) { RD.trail.push(p); if (RD.trail.length > 60) RD.trail.shift(); }
+    if (h !== RD.hover || RD.pressed) { RD.hover = h; rdRender(); }
+  },
+  up(e) {
+    if (!RD.pressed) return;
+    RD.pressed = false; RD.trail = [];
+    const p = localPt(e); const h = rdHit(p);
+    if (h === -1) rdFive(p); else if (h === -3) rdClose(); else if (h >= 0 && curSlots(top())[h]) rdChoose(h, p); else rdRender();
+  },
+  ctx(e) {
+    e.preventDefault(); if (!RD.open || RD.fly) { if (RD.fly) rdBack(); return; }
+    const p = localPt(e), h = rdHit(p), ring = top(), n = h >= 0 ? curSlots(ring)[h] : null;
+    if (n && ring.kind !== 'actions') openActions(n, p, h); else rdBack();
+  },
+  key(e) {
+    if (!RD.open) { if (e.key === 'Enter' || e.key === ' ' || /^Numpad\d$/.test(e.code)) { e.preventDefault(); rdOpenAt({ x: deskSize().w / 2, y: deskSize().h / 2 }); } return; }
+    if (RD.fly) {
+      const n = RD.fly.n.files.length;
+      if (e.key === 'ArrowDown' || e.code === 'Numpad2') { RD.flySel = (RD.flySel + 1) % n; rdRender(); }
+      else if (e.key === 'ArrowUp' || e.code === 'Numpad8') { RD.flySel = (RD.flySel + n - 1) % n; rdRender(); }
+      else if (e.key === 'Enter' || e.code === 'Numpad5') { rdLaunch(fileNode(RD.fly.n, RD.fly.n.files[RD.flySel])); }
+      else if (e.key === 'Escape' || e.key === 'Backspace' || e.code === 'NumpadDecimal' || e.code === 'Numpad4') rdBack();
+      else return;
+      e.preventDefault(); return;
+    }
+    const ring = top(), slots = curSlots(ring), n = slots.length;
+    const dm = e.code.match(/^(?:Numpad|Digit)(\d)$/);
+    if (dm) {
+      e.preventDefault(); const d = +dm[1];
+      if (d === 5) { rdFive(); return; }
+      if (d === 0) { rdZero(); return; }
+      const i = D2I[n][d];
+      if (i === undefined) { toast(`A ${n}-slice ring has nothing on ${d}: only 8, 6, 2, 4`); return; }
+      RD.hover = i; if (!slots[i]) { rdRender(); return; }
+      rdChoose(i); return;
+    }
+    switch (e.code) {
+      case 'NumpadDecimal': e.preventDefault(); rdBack(); return;
+      case 'NumpadAdd': case 'PageDown': e.preventDefault(); rdPage(1); return;
+      case 'NumpadSubtract': case 'PageUp': e.preventDefault(); rdPage(-1); return;
+      case 'NumpadDivide': e.preventDefault(); toast('Would open the search layer over <b>' + esc(ring.name) + '</b>'); return;
+      case 'NumpadMultiply': e.preventDefault(); toast('* is unassigned in this proposal'); return;
+    }
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); RD.hover = ((RD.hover < 0 ? -1 : RD.hover) + 1) % n; rdRender(); }
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); RD.hover = ((RD.hover < 0 ? 0 : RD.hover) + n - 1) % n; rdRender(); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (RD.hover >= 0) rdChoose(RD.hover); else rdFive(); }
+    else if (e.key === 'Escape' || e.key === 'Backspace') { e.preventDefault(); rdBack(); }
+  },
+};
+$('#ovRadialFly').addEventListener('click', e => { const b = e.target.closest('.fly-row'); if (!b) return; rdLaunch(fileNode(RD.fly.n, RD.fly.n.files[+b.dataset.i])); });
+$('#ovRadialFly').addEventListener('pointerdown', e => e.stopPropagation());
+
+/* ---------------- grid ---------------- */
+const GD = { open: true, path: [], q: '', sel: null, ss: 0, fly: null, opt: { cols: '5', typing: 'search', labels: 'always' } };
+const gNode = () => GD.path[GD.path.length - 1] || TREE;
+function gDim(n) {
+  if (GD.opt.typing !== 'dim' || !GD.q) return { ok: true, count: 0 };
+  const m = x => !!score(x, GD.q);
+  if (n.kind === 'group') { let c = 0; (function f(g) { for (const x of items(g)) { if (x.kind === 'group') f(x); else if (m(x)) c++; } })(n); return { ok: c > 0 || m(n), count: c }; }
+  return { ok: m(n), count: 0 };
+}
+function gHints(tiles) {
+  const used = new Set(), map = {}, pool = 'asdfghjklqwertyuiopzxcvbnm';
+  for (const t of tiles) {
+    let L = [...norm(t.name).replace(/[^a-z]/g, '')].find(ch => !used.has(ch)) || [...pool].find(ch => !used.has(ch));
+    used.add(L); map[t.id] = L;
+  }
+  return map;
+}
+function gSearchRows() {
+  const all = []; (function walk(n) { for (const c of items(n)) { all.push(c); if (c.kind === 'group') walk(c); } })(gNode());
+  return ranked(all, GD.q).slice(0, 7);
+}
+function gTile(n, hint) {
+  const m = gDim(n), size = n.tile || 'medium', sel = String(GD.sel) === String(n.id);
+  const cls = `tile ${size}${m.ok ? '' : ' dim'}${sel ? ' sel' : ''}`;
+  const badge = (m.count ? `<span class="badge">${m.count}</span>` : '') + (hint ? `<span class="hint">${hint}</span>` : '');
+  let pic;
+  if (n.kind === 'group') pic = `<span class="folder">${items(n).slice(0, 4).map(c => icon(c.icon, 13)).join('')}</span>`;
+  else pic = icon(n.icon, size === 'small' ? 30 : 38);
+  if (size === 'wide') return `<button class="${cls}" data-id="${n.id}" title="${esc(n.name)}">${pic}<span class="t-w"><span class="t-l">${esc(n.name)}</span><span class="t-s">${esc(n.tip || n.exe || '')}</span></span>${badge}</button>`;
+  return `<button class="${cls}" data-id="${n.id}" title="${esc(n.name)}${n.browse ? ' (folder)' : ''}">${pic}<span class="t-l">${esc(n.name)}</span>${badge}</button>`;
+}
+function gRender() {
+  const host = $('#ovGrid');
+  if (!GD.open) { host.innerHTML = ''; return; }
+  const node = gNode(), cols = +GD.opt.cols, typing = GD.opt.typing;
+  const secs = []; let cur = { head: null, items: [] };
+  for (const c of node.children) { if (c.kind === 'sep') { if (cur.items.length || cur.head !== null) secs.push(cur); cur = { head: c.name, items: [] }; } else cur.items.push(c); }
+  secs.push(cur);
+  const tilesAll = secs.flatMap(s => s.items);
+  if (GD.sel === null || !tilesAll.some(t => String(t.id) === String(GD.sel))) GD.sel = tilesAll[0].id;
+  const hints = typing === 'hints' ? gHints(tilesAll) : {};
+  const pill = typing === 'hints' ? 'Press a letter' : GD.q ? esc(GD.q) : (typing === 'search' ? 'Type to search' : 'Type to filter');
+  const head = `<div class="g-head">${GD.path.length ? `<button class="g-back" data-back="1">‹ ${esc(node.name)}</button>` : `<span class="g-title">y-pop</span>`}<span class="g-q${GD.q ? ' on' : ''}">${pill}</span></div>`;
+  const searching = typing === 'search' && GD.q;
+  const body = secs.map(s => `${s.head === null ? '' : s.head ? `<div class="g-sec-h">${esc(s.head)}</div>` : '<div class="g-sec-h blank"></div>'}<div class="g-tiles">${s.items.map(t => gTile(t, hints[t.id])).join('')}</div>`).join('');
+  let results = '';
+  if (searching) {
+    const rs = gSearchRows(); GD.srows = rs; if (GD.ss >= rs.length) GD.ss = 0;
+    results = `<div class="g-results panel-o" role="listbox"><div class="fly-h">Search in ${esc(node.name)}</div>${rs.length ? rs.map((r, i) => `<button class="fly-row${i === GD.ss ? ' sel' : ''}" data-sr="${i}">${icon(r.n.icon, 20)}<span>${hl(r.n.name, r.pos)}</span><span class="crumb">${esc(r.n.crumbs.slice(GD.path.length + 1).join(' › '))}</span></button>`).join('') : `<div class="r-empty">Nothing in ${esc(node.name)} matches “${esc(GD.q)}”.</div>`}</div>`;
+  }
+  host.innerHTML = `<div class="grid-panel panel-o labels-${GD.opt.labels}" id="gpanel" style="--cols:${cols};--tile:${cols >= 6 ? 76 : 84}px">${head}<div class="g-body${searching ? ' faded' : ''}">${body}</div>${results}</div>${GD.fly ? gFlyHtml() : ''}`;
+}
+function gFlyHtml() {
+  const f = GD.fly, { w, h } = deskSize(), fw = 230, fh = 40 + f.n.files.length * 31;
+  const x = Math.max(8, Math.min(w - fw - 8, f.x)), y = Math.max(8, Math.min(h - fh - 8, f.y));
+  return `<div class="flyout panel-o" style="left:${x}px;top:${y}px"><div class="fly-h">${esc(f.n.name)} · list presenter</div>${f.n.files.map((fl, i) => `<button class="fly-row" data-fi="${i}">${icon(extIcon(fl), 20)}<span>${esc(fl)}</span></button>`).join('')}</div>`;
+}
+const findId = id => { let hit = null; for (const r of ROOTS) (function f(n) { for (const c of n.children || []) { if (String(c.id) === String(id)) hit = c; f(c); } })(r); return hit; };
+function gActivate(n) {
+  if (!n) return;
+  if (n.kind === 'group') { GD.path.push(n); GD.q = ''; GD.sel = null; GD.fly = null; gRender(); return; }
+  if (n.browse) {
+    const el = document.querySelector(`.tile[data-id="${n.id}"]`), dr = $('#desk').getBoundingClientRect();
+    const r = el && !GD.q ? el.getBoundingClientRect() : { right: dr.left + dr.width / 2 - 115, top: dr.top + 80 };
+    GD.q = ''; GD.fly = { n, x: r.right - dr.left + 6, y: r.top - dr.top }; gRender(); return;
+  }
+  toast(launchText(n)); gClose();
+}
+function gClose() { GD.open = false; GD.path = []; GD.q = ''; GD.fly = null; gRender(); updateTaskbar(); }
+function gOpen() { GD.open = true; GD.path = []; GD.q = ''; GD.sel = null; GD.ss = 0; GD.fly = null; gRender(); updateTaskbar(); focusDesk(); }
+function gBack() { if (GD.path.length) { GD.path.pop(); GD.sel = null; GD.q = ''; GD.fly = null; gRender(); return true; } return false; }
+function spatial(els, cur, dir) {
+  const c = cur.getBoundingClientRect(), cx = c.left + c.width / 2, cy = c.top + c.height / 2;
+  let best = null, bs = Infinity;
+  for (const el of els) {
+    if (el === cur) continue;
+    const r = el.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2, dx = x - cx, dy = y - cy;
+    let main, side;
+    if (dir === 'ArrowRight') { main = dx; side = dy; } else if (dir === 'ArrowLeft') { main = -dx; side = dy; } else if (dir === 'ArrowDown') { main = dy; side = dx; } else { main = -dy; side = dx; }
+    if (main <= 4) continue;
+    const sc = main + Math.abs(side) * 2.2;
+    if (sc < bs) { bs = sc; best = el; }
+  }
+  return best;
+}
+const grid = {
+  down(e) {
+    if (!GD.open) { gOpen(); return; }
+    if (e.target.closest('.flyout')) return;
+    if (GD.fly && !e.target.closest('.tile')) { GD.fly = null; gRender(); return; }
+    if (!e.target.closest('#gpanel')) gClose();
+  },
+  key(e) {
+    if (!GD.open) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); gOpen(); } return; }
+    if (GD.fly) { if (e.key === 'Escape' || e.key === 'Backspace') { e.preventDefault(); GD.fly = null; gRender(); } return; }
+    const typing = GD.opt.typing, searching = typing === 'search' && GD.q;
+    const printable = e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey && e.key !== ' ';
+    if (searching && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) { e.preventDefault(); const n = GD.srows.length || 1; GD.ss = (GD.ss + (e.key === 'ArrowDown' ? 1 : n - 1)) % n; gRender(); return; }
+    if (e.key.startsWith('Arrow') && !searching) {
+      e.preventDefault();
+      const all = [...document.querySelectorAll('#gpanel .tile')], pool = all.filter(t => !t.classList.contains('dim'));
+      const cur = all.find(t => t.dataset.id === String(GD.sel)) || pool[0]; if (!cur) return;
+      const nx = spatial(pool, cur, e.key); if (nx) { GD.sel = nx.dataset.id; gRender(); }
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (searching) { const r = GD.srows[GD.ss]; if (r) gActivate(r.n); }
+      else if (typing === 'dim' && GD.q) { const t = document.querySelector('#gpanel .tile.sel:not(.dim)') || document.querySelector('#gpanel .tile:not(.dim)'); if (t) gActivate(findId(t.dataset.id)); }
+      else gActivate(findId(GD.sel));
+    }
+    else if (e.key === 'Escape') { e.preventDefault(); if (GD.q) { GD.q = ''; gRender(); } else if (!gBack()) gClose(); }
+    else if (e.key === 'Backspace') { e.preventDefault(); if (GD.q) { GD.q = GD.q.slice(0, -1); GD.ss = 0; gRender(); } else gBack(); }
+    else if (printable) {
+      e.preventDefault();
+      if (typing === 'hints') {
+        const node = gNode(), tiles = items(node), map = gHints(tiles);
+        const t = tiles.find(x => map[x.id] === e.key.toLowerCase());
+        if (t) { GD.sel = t.id; gActivate(t); } else toast('No tile has the letter ' + esc(e.key.toUpperCase()));
+        return;
+      }
+      GD.q += e.key; GD.ss = 0;
+      if (typing === 'dim') { const first = items(gNode()).find(n => gDim(n).ok); if (first) GD.sel = first.id; }
+      gRender();
+    }
+  },
+};
+$('#ovGrid').addEventListener('click', e => {
+  const fr = e.target.closest('.fly-row[data-fi]'); if (fr) { toast(launchText(fileNode(GD.fly.n, GD.fly.n.files[+fr.dataset.fi]))); gClose(); return; }
+  const sr = e.target.closest('[data-sr]'); if (sr) { const r = GD.srows[+sr.dataset.sr]; if (r) gActivate(r.n); focusDesk(); return; }
+  if (e.target.closest('[data-back]')) { gBack(); focusDesk(); return; }
+  const t = e.target.closest('.tile'); if (t) { GD.sel = t.dataset.id; gActivate(findId(t.dataset.id)); focusDesk(); }
+});
+$('#ovGrid').addEventListener('pointerover', e => { const t = e.target.closest('.tile'); if (t && t.dataset.id !== String(GD.sel)) { GD.sel = t.dataset.id; document.querySelectorAll('#gpanel .tile.sel').forEach(x => x.classList.remove('sel')); t.classList.add('sel'); } });
+
+/* ---------------- strip ---------------- */
+const ST = { open: true, sel: 0, stack: null, stackSel: 0, opt: { anchor: 'cursor', labels: 'hover' } };
+const stItems = () => TREE.children.filter(c => c.kind !== 'sep');
+function stRender() {
+  const host = $('#ovStrip');
+  if (!ST.open) { host.innerHTML = ''; return; }
+  let idx = -1;
+  const html = TREE.children.map(c => {
+    if (c.kind === 'sep') return '<span class="s-div" aria-hidden="true"></span>';
+    idx++;
+    const sel = idx === ST.sel, i = idx;
+    let stack = '';
+    if (ST.stack === i) {
+      const list = c.browse ? c.files.map(f => fileNode(c, f)) : items(c);
+      stack = `<div class="stack panel-o" role="listbox"><div class="fly-h">${esc(c.name)} · list presenter</div>${list.map((x, k) => `<button class="fly-row${k === ST.stackSel ? ' sel' : ''}" data-si="${k}">${icon(x.icon, 20)}<span>${esc(x.name)}</span>${x.kind === 'group' ? '<span style="margin-left:auto">›</span>' : ''}</button>`).join('')}</div>`;
+    }
+    const tip = sel && ST.opt.labels === 'hover' && ST.stack === null ? `<span class="s-tip">${esc(c.name)}${c.key ? ' · ' + esc(c.key) : ''}</span>` : '';
+    return `<span class="s-wrap">${stack}${tip}<button class="s-item${sel ? ' sel' : ''}" data-i="${i}" aria-label="${esc(c.name)}">${icon(c.icon, 38)}<span class="s-label">${esc(c.name)}</span>${isScope(c) ? '<span class="s-dot"></span>' : ''}</button></span>`;
+  }).join('');
+  host.innerHTML = `<div class="strip panel-o anchor-${ST.opt.anchor} labels-${ST.opt.labels}" id="spanel">${html}</div>`;
+}
+function stActivate(i) {
+  const n = stItems()[i]; if (!n) return;
+  if (isScope(n)) { ST.stack = ST.stack === i ? null : i; ST.stackSel = 0; stRender(); return; }
+  toast(launchText(n)); stClose();
+}
+function stStackPick(k) {
+  const c = stItems()[ST.stack]; const list = c.browse ? c.files.map(f => fileNode(c, f)) : items(c); const x = list[k];
+  if (!x) return;
+  if (x.kind === 'group') { toast('Nested groups open another stack beside this one (not drawn in this mock)'); return; }
+  toast(launchText(x)); stClose();
+}
+function stClose() { ST.open = false; ST.stack = null; stRender(); updateTaskbar(); }
+function stOpen() { ST.open = true; ST.stack = null; ST.sel = 0; stRender(); updateTaskbar(); focusDesk(); }
+const strip = {
+  down(e) {
+    if (!ST.open) { stOpen(); return; }
+    if (!e.target.closest('#spanel')) { if (ST.stack !== null) { ST.stack = null; stRender(); } else stClose(); }
+  },
+  key(e) {
+    if (!ST.open) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); stOpen(); } return; }
+    const n = stItems().length;
+    if (ST.stack !== null) {
+      const c = stItems()[ST.stack]; const len = c.browse ? c.files.length : items(c).length;
+      if (e.key === 'ArrowDown') ST.stackSel = (ST.stackSel + 1) % len;
+      else if (e.key === 'ArrowUp') ST.stackSel = (ST.stackSel + len - 1) % len;
+      else if (e.key === 'Enter') { e.preventDefault(); stStackPick(ST.stackSel); return; }
+      else if (e.key === 'Escape' || e.key === 'Backspace') ST.stack = null;
+      else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { ST.stack = null; ST.sel = (ST.sel + (e.key === 'ArrowRight' ? 1 : n - 1)) % n; }
+      else return;
+      e.preventDefault(); stRender(); return;
+    }
+    if (e.key === 'ArrowRight') ST.sel = (ST.sel + 1) % n;
+    else if (e.key === 'ArrowLeft') ST.sel = (ST.sel + n - 1) % n;
+    else if (e.key === 'Enter' || e.key === 'ArrowUp') { e.preventDefault(); stActivate(ST.sel); return; }
+    else if (e.key === 'Escape') stClose();
+    else return;
+    e.preventDefault(); stRender();
+  },
+};
+$('#ovStrip').addEventListener('click', e => {
+  const r = e.target.closest('.fly-row'); if (r) { stStackPick(+r.dataset.si); return; }
+  const b = e.target.closest('.s-item'); if (b) { ST.sel = +b.dataset.i; stActivate(ST.sel); focusDesk(); }
+});
+$('#ovStrip').addEventListener('pointerover', e => { const b = e.target.closest('.s-item'); if (b && +b.dataset.i !== ST.sel && ST.stack === null) { ST.sel = +b.dataset.i; stRender(); } });
+
+/* ---------------- search desk handlers ---------------- */
+const search = {
+  down(e) { if (!SR.open) { e.preventDefault(); srOpen(); return; } if (!e.target.closest('#search')) { e.preventDefault(); srClose(); } },
+  key(e) { if (!SR.open && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); srOpen(); } },
+};
+
+/* ---------------- modes, panel, wiring ---------------- */
+const X = s => s.replace(/(&lt;!--[\s\S]*?--&gt;)|(&lt;\/?)([\w-]+)|([\w-]+)(=)(&quot;[^&]*&quot;)|(\/?&gt;)/g, (m, com, lt, tag, attr, eq, val) =>
+  com ? `<span class="c">${com}</span>` : lt ? `${lt}<span class="t">${tag}</span>` : attr ? `<span class="a">${attr}</span>${eq}<span class="v">${val}</span>` : m);
+const xml = s => X(esc(s));
+const MODES = {
+  search: {
+    key: 'Alt+Space', st: SR, open: srOpen, h: search, title: 'Search',
+    lede: 'One box over the tray menus and over the sections you add to <search>: recent launches, the Windows Start menu, apps you only want in search, and plugins. Empty, it shows what you launched last and the sections to browse; ↓ walks them, → opens one.',
+    opts: [['collapsed', 'Opens', [['off', 'Expanded'], ['on', 'Collapsed']]], ['recent', 'Recent', [['on', 'On'], ['off', 'Off']]], ['start', 'Start menu', [['on', 'On'], ['off', 'Off']]], ['admin', 'Search-only items', [['on', 'On'], ['off', 'Off']]], ['plugins', 'Plugins (later)', [['on', 'On'], ['off', 'Off']]], ['bview', 'Tray menus as', [['columns', 'Columns'], ['az', 'A–Z']]], ['layout', 'Results', [['sections', 'Sections'], ['flat', 'Flat']]], ['actions', 'Row actions', [['on', 'On'], ['off', 'Off']]]],
+    try: ['Opens = Collapsed: only the input row; <kbd>↓</kbd> or the ⌄ button unfolds Recent and the sections, <kbd>↑</kbd> on the first row folds them again', 'Empty box: <kbd>↵</kbd> relaunches the last item; <kbd>↓</kbd> walks Recent, then the sections', 'On a section, <kbd>→</kbd> opens it: Tray menus as columns, Start menu A–Z. Type to search inside it, <kbd>Backspace</kbd> to come back', 'Type <code>fire</code>: Firefox comes from the Start menu; <kbd>Ctrl+P</kbd> adds it to a tray menu', 'Type <code>reg</code>: Registry Editor lives in Admin tools, a group only search shows', 'Type <code>/mount</code>: finds a script in Scripts, a folder only search shows; open the Scripts section to list it', 'Type <code>12*7+3</code>: the Calculator plugin answers as Top hit', '<code>!</code> lists open windows (Windows plugin); <code>?</code> lists every prefix', 'Type <code>calc</code>: Calculator is in Utilities and in the Start menu, and shows once', '<code>#</code> every hotkey, <code>#ctrl+alt+x</code> checks a free one; <code>&gt;</code> y-pop commands; <code>/</code> inside browsed folders', '<kbd>Ctrl+Del</kbd> on a recent item forgets it'],
+    keys: [['Type', 'Search everything; a first > # / = ! ? picks what'], ['↑ ↓', 'Move (Recent, then sections, when empty)'], ['→ / ←', 'Open a section or group / back'], ['↵', 'Launch, or open a section'], ['Ctrl+R / Ctrl+E', 'Reveal in its menu / edit in y-pop-config'], ['Ctrl+P', 'Add a Start-menu app to a tray menu'], ['Ctrl+Del', 'Forget a recent item'], ['Ctrl+↵ / Shift+↵', 'As administrator / containing folder'], ['Ctrl+C', 'Copy the path, or the result'], ['Tab / Shift+Tab', 'Search inside / go back up'], ['Esc', 'Clear, then go up, then close']],
+    xml: () => `<y-pop>
+  <search hotkey="Alt+Space"${on('collapsed') ? ' collapsed="true"' : ''} results="${SR.opt.layout}" row-actions="${SR.opt.actions === 'on'}">
+    <!-- sections, in empty-box order; each one is searched too -->
+    <!-- with no children: recent, menus and start-menu -->
+${on('recent') ? '    <recent count="5"/>\n' : ''}    <menus browse="${SR.opt.bview === 'az' ? 'a-z' : 'columns'}"/>
+${on('start') ? '    <start-menu/>\n' : ''}${on('admin') ? `    <group name="Admin tools">   <!-- only in search -->
+      <app name="Registry Editor" exe="%win%\\regedit.exe"/>
+      <app name="Services" exe="services.msc"/>
+      …
+    </group>
+    <app name="Scripts" exe="%mydocs%\\Scripts" browse="true"/>
+` : ''}${on('plugins') ? `    <!-- plugins come later -->
+    <plugin name="Calculator" src="plugins\\calc.wasm" prefix="="/>
+    <plugin name="Windows" src="plugins\\windows.wasm" prefix="!"
+            allow="windows" section="Open windows"/>
+` : ''}  </search>
+  <group name="y-pop">…</group>
+  <group name="Work">…</group>
+</y-pop>`,
+    note: 'Work is an example second tray menu. Recent, the ranking boost, the Start menu, the open windows and the free-hotkey check use sample data. Plugins are planned for after the boards; their switch shows where they would fit.',
+  },
+  radial: {
+    key: 'Ctrl+Num0', st: RD, open: () => rdOpenAt({ x: deskSize().w / 2, y: deskSize().h / 2 }), h: radial, title: 'Radial',
+    lede: 'Slices are numpad positions: 8 is north, 9 north-east, 6 east, and so on. 5 is the center button and 0 a modifier. The digit row works the same way, for keyboards without a numpad. The mouse picks by direction, so a flick works too.',
+    opts: [['shape', 'Shape', [['ring', 'Ring'], ['keypad', 'Keypad']]], ['five', '5 (center)', [['back', 'Back / close'], ['center', 'Center item'], ['repeat', 'Repeat last']]], ['zero', '0', [['actions', 'Actions'], ['search', 'Search']]], ['pages', 'Page 2', [['pages', 'Pages'], ['more', 'More slot']]], ['nest', 'Groups open', [['recenter', 'At pointer'], ['outer', 'Outer ring']]]],
+    try: ['<kbd>8</kbd> launches Notepad, <kbd>6</kbd> <kbd>2</kbd> is Dev › Git Bash', '<kbd>5</kbd>: try each option. Center item is File Explorer on the root and VS Code in Dev', 'With 0 = Actions: <kbd>0</kbd> then <kbd>8</kbd> opens actions for Notepad; <kbd>0</kbd> <kbd>5</kbd> acts on the ring itself', 'Pages: mouse wheel over the ring, the 1 · 2 tabs under it, or <kbd>+</kbd> <kbd>−</kbd>. Compare with “More slot”: page 2 becomes a group on <kbd>7</kbd>', 'Right-click a slice: the same actions as 0', '<kbd>.</kbd> goes back, <kbd>/</kbd> searches this ring', 'Mouse: hold, flick, release; releasing in the center is 5'],
+    keys: [['1–4, 6–9', 'The slot at that numpad position'], ['5', 'Center button (option)'], ['0', 'Actions or search (option)'], ['.', 'Back, then close'], ['+ / − / wheel', 'Next / previous page'], ['/', 'Search this ring'], ['Enter', 'Pick the highlighted slot'], ['Esc / Backspace', 'Back']],
+    xml: () => `<group name="Quick" popup="overlay" popup-style="radial">
+  <hotkey key="Ctrl+Num0"/>
+  <radial shape="${RD.opt.shape}" keys="numpad"
+          five="${RD.opt.five}" zero="${RD.opt.zero}"/>
+  <app name="Notepad" slot="8" exe="%win%\\notepad.exe"/>
+  <app name="Command line" slot="9" exe="%system%\\cmd.exe"/>
+  <group name="Dev" slot="6">…</group>
+  <group name="Explorers" slot="3">…</group>
+  <app name="Recent documents" slot="2" browse="true" …/>
+  <app name="Task Manager" slot="1" …/>
+  <group name="Utilities" slot="4">…</group>
+${RD.opt.pages === 'pages' ? '  <!-- 7 stays empty on purpose -->\n' : ''}  <app name="File Explorer" slot="5" exe="%win%\\explorer.exe"/>
+${RD.opt.pages === 'pages' ? `  <page>   <!-- wheel, page tabs, + or − -->
+    <app name="Calculator" slot="8" exe="calc.exe"/>
+    …
+  </page>` : `  <group name="More" slot="7">   <!-- page 2 as a plain group -->
+    <app name="Calculator" exe="calc.exe"/>
+    …
+  </group>`}
+</group>`,
+    note: 'slot="8" and slot="n" mean the same position. Numpad keys are read by scan code, so they work with Num Lock on or off.',
+  },
+  grid: {
+    key: 'Win+Y', st: GD, open: gOpen, h: grid, title: 'Grid',
+    lede: 'Tiles in sections, like the Start menu\'s pinned area. Typing no longer dims tiles in place: it opens the shared search layer over the board, or, in hint mode, each tile has a letter that launches it.',
+    opts: [['typing', 'Typing', [['search', 'Search layer'], ['hints', 'Hint letters'], ['dim', 'Dim (old)']]], ['cols', 'Columns', [['4', '4'], ['5', '5'], ['6', '6']]], ['labels', 'Labels', [['always', 'Always'], ['hover', 'On hover']]]],
+    try: ['Search layer: type <code>sh</code>. Results come from the whole board, nested groups included; ↑ ↓ and Enter', 'Hint letters: press <kbd>N</kbd> for Notepad, <kbd>D</kbd> for Dev, then a letter inside Dev', 'Dim (old) is kept to compare: matches stay where they are and are hard to spot', 'Arrow keys move to the nearest tile in that direction', 'Recent documents is a browse folder: it opens a list beside the tile'],
+    keys: [['Type', 'Search layer, or a hint letter'], ['Arrows', 'Nearest tile; in the search layer, the results'], ['↵', 'Launch or open'], ['Backspace', 'Delete a character, or go back'], ['Esc', 'Clear, then back, then close']],
+    xml: () => `<group name="y-pop" popup="overlay" popup-style="grid">
+  <hotkey key="Win+Y"/>
+  <grid columns="${GD.opt.cols}" labels="${GD.opt.labels}" typing="${GD.opt.typing === 'dim' ? 'search' : GD.opt.typing}"/>
+  <separator name="Tools"/>
+  <app name="Command line" tile="wide" …/>
+  <app name="Notepad" hint="n" …/>
+  <group name="Explorers">…</group>
+  <separator name="Workbench"/>
+  <group name="Dev">
+    <app name="VS Code" tile="wide" …/>
+  </group>
+  <separator/>
+  <settings tile="small"/> <about tile="small"/> <quit tile="small"/>
+</group>`,
+    note: 'Hint letters default to the first free letter of the name; hint="n" pins one.',
+  },
+  strip: {
+    key: 'Win+Shift+Y', st: ST, open: stOpen, h: strip, title: 'Strip',
+    lede: 'One row of icons near the cursor or on a screen edge, like a dock. Separators become dividers; groups and folders open as a stack above their icon.',
+    opts: [['anchor', 'Anchor', [['cursor', 'Cursor'], ['bottom', 'Bottom edge']]], ['labels', 'Labels', [['hover', 'On hover'], ['always', 'Always']]]],
+    try: ['Hover icons to see names and shortcuts', 'Open <b>Explorers</b> or <b>Dev</b>: a list stack opens above it', 'A dot under an icon marks a group or folder', 'Switch the anchor to the bottom edge'],
+    keys: [['← →', 'Move along the strip'], ['↵ / ↑', 'Launch, or open the stack'], ['↑ ↓ in a stack', 'Move in the stack'], ['Esc', 'Close the stack, then the strip']],
+    xml: () => `<group name="y-pop" popup="overlay" popup-style="strip">
+  <hotkey key="Win+Shift+Y"/>
+  <strip anchor="${ST.opt.anchor}" icon-size="40" labels="${ST.opt.labels}"/>
+  …same children as the tray menu…
+</group>`,
+    note: 'A strip is for a handful of items. Nested groups open stacks, not more strips.',
+  },
+};
+let mode = 'search';
+const RENDER = { search: srRender, radial: rdRender, grid: gRender, strip: stRender };
+
+function updateTaskbar() {
+  const m = MODES[mode];
+  $('#tbKey').textContent = m.key;
+  $('#tbHint').textContent = m.st.open ? (mode === 'radial' ? 'Numpad or digit row, or hold and flick' : 'Click outside the overlay to dismiss it') : (mode === 'radial' ? 'Closed. Click anywhere to open the ring there' : 'Closed. Press the hotkey button or click the desktop');
+}
+function renderSide() {
+  const m = MODES[mode];
+  const opts = m.opts.map(([k, label, vals]) => `<div class="opt"><span class="opt-l">${label}</span><div class="seg" data-opt="${k}">${vals.map(([v, l]) => `<button data-val="${v}" aria-pressed="${m.st.opt[k] === v}">${l}</button>`).join('')}</div></div>`).join('');
+  $('#side').innerHTML = `<div><h2>${m.title}</h2><p class="lede">${m.lede}</p></div>
+    <div><h3>Options</h3><div class="opts">${opts}</div></div>
+    <div><h3>Try</h3><ul class="try">${m.try.map(t => `<li>${t}</li>`).join('')}</ul></div>
+    <div><h3>Keys</h3><table class="keys">${m.keys.map(([k, v]) => `<tr><td><kbd>${esc(k)}</kbd></td><td>${esc(v)}</td></tr>`).join('')}</table></div>
+    <div><h3>Proposed XML</h3><pre class="xml">${xml(m.xml())}</pre></div>
+    <p class="note">${m.note}</p>`;
+}
+function setMode(m) {
+  mode = m;
+  document.querySelectorAll('#modeSeg button').forEach(b => b.setAttribute('aria-pressed', b.dataset.mode === m));
+  $('#ovSearch').hidden = m !== 'search'; $('#ovRadial').toggleAttribute('hidden', m !== 'radial'); $('#ovRadialFly').hidden = m !== 'radial';
+  $('#ovGrid').hidden = m !== 'grid'; $('#ovStrip').hidden = m !== 'strip';
+  MODES[m].open();
+  renderSide(); updateTaskbar();
+}
+$('#modeSeg').addEventListener('click', e => { const b = e.target.closest('button'); if (b) setMode(b.dataset.mode); });
+$('#side').addEventListener('click', e => {
+  const b = e.target.closest('.seg[data-opt] button'); if (!b) return;
+  const k = b.parentElement.dataset.opt; MODES[mode].st.opt[k] = b.dataset.val;
+  if (mode === 'radial') { if (RD.open) rdOpenAt({ x: RD.stack[0].cx, y: RD.stack[0].cy }); }
+  else if (mode === 'search') { if (SR.open) { SR.scope = []; srRender(); $('#rq').focus({ preventScroll: true }); } }
+  else { RENDER[mode](); focusDesk(); }
+  renderSide();
+});
+$('#tbKey').addEventListener('click', () => MODES[mode].open());
+
+const desk = $('#desk');
+desk.addEventListener('pointerdown', e => { const h = MODES[mode].h; if (h.down) h.down(e); if (mode !== 'search') focusDesk(); });
+desk.addEventListener('pointermove', e => { const h = MODES[mode].h; if (h.move) h.move(e); });
+desk.addEventListener('pointerup', e => { const h = MODES[mode].h; if (h.up) h.up(e); });
+desk.addEventListener('pointercancel', () => { RD.pressed = false; RD.trail = []; if (mode === 'radial') rdRender(); });
+desk.addEventListener('contextmenu', e => { if (mode === 'radial') radial.ctx(e); });
+desk.addEventListener('wheel', e => { if (mode === 'radial' && RD.open && !RD.fly && top().pages.length > 1) { e.preventDefault(); rdPage(e.deltaY > 0 ? 1 : -1, true); } }, { passive: false });
+desk.addEventListener('keydown', e => { if (e.target.id === 'rq') return; const h = MODES[mode].h; if (h.key) h.key(e); });
+
+function setSkin(s) {
+  $('#stage').className = 'stage skin-' + s;
+  document.querySelectorAll('#skinSeg button').forEach(b => b.setAttribute('aria-pressed', b.dataset.skin === s));
+  try { localStorage.setItem('ypop-modes-skin', s); } catch (_) {}
+}
+$('#skinSeg').addEventListener('click', e => { const b = e.target.closest('button'); if (b) setSkin(b.dataset.skin); });
+let skin = null; try { skin = localStorage.getItem('ypop-modes-skin'); } catch (_) {}
+if (!skin) { const t = document.documentElement.dataset.theme; skin = t === 'dark' || (!t && matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light'; }
+setSkin(skin);
+
+new ResizeObserver(() => { if (mode === 'radial' && RD.open) { RD.stack.forEach(r => { const k = clampC({ x: r.cx, y: r.cy }); r.cx = k.x; r.cy = k.y; }); rdRender(); } else if (mode === 'grid') gRender(); }).observe(desk);
+
+const now = new Date(); $('#clock').textContent = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+const start = location.hash.slice(1) === 'runner' ? 'search' : location.hash.slice(1);
+setMode(MODES[start] ? start : 'search');
+})();
+</script>

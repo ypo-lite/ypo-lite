@@ -38,9 +38,10 @@ use windows::Win32::Foundation::{
 };
 use windows::Win32::Graphics::Gdi::{
     AC_SRC_ALPHA, AC_SRC_OVER, BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BLENDFUNCTION,
-    CreateCompatibleDC, CreateDIBSection, CreateFontW, DEFAULT_CHARSET, DIB_RGB_COLORS, DT_CENTER,
-    DT_LEFT, DT_RIGHT, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject, DrawTextW, FF_DONTCARE,
-    FW_BOLD, FW_NORMAL, GetDC, GetTextExtentPoint32W, HBITMAP, HDC, HFONT, HGDIOBJ, ReleaseDC,
+    CreateCompatibleDC, CreateDIBSection, CreateFontW, DEFAULT_CHARSET, DIB_RGB_COLORS,
+    DRAW_TEXT_FORMAT, DT_CENTER, DT_END_ELLIPSIS, DT_LEFT, DT_NOPREFIX, DT_RIGHT, DT_SINGLELINE,
+    DT_VCENTER, DeleteDC, DeleteObject, DrawTextW, FF_DONTCARE, FW_BOLD, FW_NORMAL, GetDC,
+    GetTextExtentExPointW, GetTextExtentPoint32W, HBITMAP, HDC, HFONT, HGDIOBJ, ReleaseDC,
     SelectObject, SetBkMode, SetTextColor, TRANSPARENT,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::SetFocus;
@@ -301,7 +302,16 @@ impl Overlay {
     /// Pushes the current pixels to the screen at `position` and shows the
     /// window without activating it.
     pub fn show_at(&self, position: POINT) -> Result<()> {
-        self.update(Some(position))?;
+        self.show_at_size(position, self.canvas.size)
+    }
+
+    /// [`Overlay::show_at`], showing only the top left `size` of the surface
+    /// (clamped to it). A layered window's surface is fixed at creation, so
+    /// a window whose height changes — a list that grows as results come in
+    /// — is created at the largest size it will need and shown at the size
+    /// in use; [`Overlay::refresh_size`] changes it later.
+    pub fn show_at_size(&self, position: POINT, size: (i32, i32)) -> Result<()> {
+        self.update(Some(position), size)?;
 
         // ShowWindow's BOOL return is not a success/failure code — unlike
         // almost every other BOOL-returning Win32 call here, it reports
@@ -337,7 +347,13 @@ impl Overlay {
     /// Pushes the current pixels to an already visible overlay, leaving it
     /// where it is — the redraw path of a HUD that changes while shown.
     pub fn refresh(&self) -> Result<()> {
-        self.update(None)
+        self.update(None, self.canvas.size)
+    }
+
+    /// [`Overlay::refresh`] at a different size, the top left of the surface:
+    /// the window grows or shrinks in place, its top left staying where it is.
+    pub fn refresh_size(&self, size: (i32, i32)) -> Result<()> {
+        self.update(None, size)
     }
 
     pub fn hide(&self) {
@@ -367,10 +383,10 @@ impl Overlay {
         unsafe { SetWindowLongPtrW(self.hwnd, GWL_EXSTYLE, updated.0 as isize) };
     }
 
-    fn update(&self, position: Option<POINT>) -> Result<()> {
+    fn update(&self, position: Option<POINT>, size: (i32, i32)) -> Result<()> {
         let size = SIZE {
-            cx: self.canvas.size.0,
-            cy: self.canvas.size.1,
+            cx: size.0.clamp(1, self.canvas.size.0),
+            cy: size.1.clamp(1, self.canvas.size.1),
         };
         let source = POINT { x: 0, y: 0 };
         let blend = BLENDFUNCTION {
@@ -627,7 +643,29 @@ impl Canvas {
         border_color: Color,
     ) {
         let (width, height) = self.size;
-        let radius = radius.min(width / 2).min(height / 2);
+        let whole = RECT {
+            left: 0,
+            top: 0,
+            right: width,
+            bottom: height,
+        };
+        self.round_rect_corners_with_border(whole, radius, border_width, border_color);
+    }
+
+    /// [`Canvas::round_corners_with_border`] for the part of the surface in
+    /// `rect` — the visible part of an overlay shown smaller than its canvas
+    /// ([`Overlay::show_at_size`]). Corners fade to transparent, as for the
+    /// whole surface; `rect` must lie inside it.
+    pub fn round_rect_corners_with_border(
+        &mut self,
+        rect: RECT,
+        radius: i32,
+        border_width: i32,
+        border_color: Color,
+    ) {
+        let radius = radius
+            .min((rect.right - rect.left) / 2)
+            .min((rect.bottom - rect.top) / 2);
         if radius <= 0 {
             return;
         }
@@ -674,10 +712,10 @@ impl Canvas {
                 }
 
                 for (x, y) in [
-                    (corner_x, corner_y),
-                    (width - 1 - corner_x, corner_y),
-                    (corner_x, height - 1 - corner_y),
-                    (width - 1 - corner_x, height - 1 - corner_y),
+                    (rect.left + corner_x, rect.top + corner_y),
+                    (rect.right - 1 - corner_x, rect.top + corner_y),
+                    (rect.left + corner_x, rect.bottom - 1 - corner_y),
+                    (rect.right - 1 - corner_x, rect.bottom - 1 - corner_y),
                 ] {
                     if in_border_band {
                         // Overwrite outright — this pixel is meant to be
@@ -712,6 +750,39 @@ impl Canvas {
         color: Color,
         align: TextAlign,
     ) -> Result<()> {
+        self.draw_text_with(text, rect, font, color, align, DRAW_TEXT_FORMAT(0))
+    }
+
+    /// [`Canvas::draw_text`] for text that may not fit `rect`: what does not
+    /// is replaced by `…`. `&` is drawn as a letter, not as an underline
+    /// prefix, since this is for names the user wrote (`Q&A`).
+    pub fn draw_text_ellipsis(
+        &mut self,
+        text: &str,
+        rect: RECT,
+        font: &Font,
+        color: Color,
+        align: TextAlign,
+    ) -> Result<()> {
+        self.draw_text_with(
+            text,
+            rect,
+            font,
+            color,
+            align,
+            DT_END_ELLIPSIS | DT_NOPREFIX,
+        )
+    }
+
+    fn draw_text_with(
+        &mut self,
+        text: &str,
+        rect: RECT,
+        font: &Font,
+        color: Color,
+        align: TextAlign,
+        extra: DRAW_TEXT_FORMAT,
+    ) -> Result<()> {
         let mut rect = rect;
         let text: Vec<u16> = text.encode_utf16().collect();
 
@@ -731,7 +802,7 @@ impl Canvas {
                 self.dc,
                 &mut buffer,
                 &mut rect,
-                alignment | DT_SINGLELINE | DT_VCENTER,
+                alignment | DT_SINGLELINE | DT_VCENTER | extra,
             );
 
             SelectObject(self.dc, previous);
@@ -743,6 +814,63 @@ impl Canvas {
 
         self.restore_alpha(rect, color.a);
         Ok(())
+    }
+
+    /// A text caret: a bar `thickness` pixels wide and `height` tall, its
+    /// left edge at `x`. Draw it after the text (it needs no GDI, so it
+    /// leaves alpha alone). A selection highlight is a [`Canvas::fill_rect`]
+    /// drawn *before* the text, between the two offsets
+    /// [`Font::caret_offsets`] gives for its ends.
+    pub fn draw_caret(&mut self, x: i32, top: i32, height: i32, thickness: i32, color: Color) {
+        self.fill_rect(
+            RECT {
+                left: x,
+                top,
+                right: x + thickness,
+                bottom: top + height,
+            },
+            color,
+        );
+    }
+
+    /// Composites `pixels` — `width`×`height` words, `0xAARRGGBB`
+    /// premultiplied, top row first, as [`crate::icon::Icon::to_pixels`]
+    /// makes — over the surface with its top left at `(x, y)`, clipped to
+    /// the surface. Unlike the fills this one *blends*, so an icon's soft
+    /// edge lands on whatever is underneath.
+    ///
+    /// Pure pixel work, no GDI: it can come before or after text and
+    /// [`Canvas::restore_alpha`] without being disturbed by either. Like all
+    /// drawing, it comes before the corner rounding.
+    pub fn blit(&mut self, x: i32, y: i32, width: i32, height: i32, pixels: &[u32]) {
+        if width <= 0 || height <= 0 || pixels.len() < (width * height) as usize {
+            return;
+        }
+        let (surface_width, surface_height) = self.size;
+        let left = x.max(0);
+        let right = (x + width).min(surface_width);
+        let top = y.max(0);
+        let bottom = (y + height).min(surface_height);
+
+        for row in top..bottom {
+            let source = ((row - y) * width) as usize;
+            let target = (row * surface_width) as usize;
+            for column in left..right {
+                let source = pixels[source + (column - x) as usize];
+                let target = &mut self.pixels_mut()[target + column as usize];
+                *target = over(source, *target);
+            }
+        }
+    }
+
+    /// Draws `icon` at `size`×`size` with its top left at `(x, y)`. Renders
+    /// it every call (`Icon::to_pixels`); a caller that draws the same icon
+    /// repeatedly keeps the pixels and uses [`Canvas::blit`]. Nothing is
+    /// drawn if the icon cannot be rendered.
+    pub fn draw_icon(&mut self, icon: &crate::icon::Icon, x: i32, y: i32, size: i32) {
+        if let Some(pixels) = icon.to_pixels(size) {
+            self.blit(x, y, size, size, &pixels);
+        }
     }
 
     /// Sets the alpha channel of every pixel in `rect`, repairing what GDI
@@ -792,6 +920,24 @@ impl Canvas {
         let width = self.size.0;
         let index = (y * width + x) as usize;
         self.pixels_mut()[index] = value;
+    }
+}
+
+/// `source` laid over `destination`, both premultiplied: the source plus
+/// what the destination keeps of itself, `destination * (1 - source alpha)`.
+fn over(source: u32, destination: u32) -> u32 {
+    match source >> 24 {
+        255 => source,
+        0 => destination,
+        alpha => {
+            let keep = 255 - alpha;
+            let channel = |shift: u32| {
+                let from_source = (source >> shift) & 0xFF;
+                let from_destination = (destination >> shift) & 0xFF;
+                (from_source + (from_destination * keep + 127) / 255).min(255) << shift
+            };
+            channel(24) | channel(16) | channel(8) | channel(0)
+        }
     }
 }
 
@@ -957,6 +1103,43 @@ impl Font {
         }
         (size.cx, size.cy)
     }
+
+    /// Where each caret position of `text` falls, in pixels from the left of
+    /// the text: entry `n` is the width of the first `n` UTF-16 units, so
+    /// there are one more entries than units, the first `0` and the last the
+    /// whole width. What a caret or a selection highlight needs, from the
+    /// positions `y-pop`'s text input keeps in the same unit. The two halves
+    /// of a surrogate pair share an offset (a caret never sits between them).
+    pub fn caret_offsets(&self, text: &str) -> Vec<i32> {
+        let units: Vec<u16> = text.encode_utf16().collect();
+        let mut offsets = vec![0; units.len() + 1];
+        if units.is_empty() {
+            return offsets;
+        }
+
+        let mut size = SIZE::default();
+        unsafe {
+            let dc = GetDC(None);
+            let previous = SelectObject(dc, self.handle.into());
+            let _ = GetTextExtentExPointW(
+                dc,
+                PCWSTR(units.as_ptr()),
+                units.len() as i32,
+                i32::MAX,
+                None,
+                Some(offsets[1..].as_mut_ptr()),
+                &mut size,
+            );
+            SelectObject(dc, previous);
+            ReleaseDC(None, dc);
+        }
+
+        // Never go backwards, whatever the font does with combining marks.
+        for at in 1..offsets.len() {
+            offsets[at] = offsets[at].max(offsets[at - 1]);
+        }
+        offsets
+    }
 }
 
 impl Drop for Font {
@@ -982,7 +1165,133 @@ impl WindowHandler for NoHandler {
 
 #[cfg(test)]
 mod tests {
-    use super::{Canvas, Color};
+    use super::{Canvas, Color, Font, TextAlign, over};
+    use windows::Win32::Foundation::RECT;
+
+    #[test]
+    fn over_keeps_what_the_source_leaves() {
+        let opaque = 0xFF10_2030;
+        let half_white = Color::WHITE.with_alpha(128).premultiplied(); // 0x80808080
+        assert_eq!(over(opaque, 0xFFAA_BBCC), opaque, "opaque replaces");
+        assert_eq!(over(0, 0xFFAA_BBCC), 0xFFAA_BBCC, "transparent leaves");
+        assert_eq!(over(0, 0), 0);
+
+        // Half-transparent white on opaque black: mid grey, still opaque.
+        let on_black = over(half_white, 0xFF00_0000);
+        assert_eq!(on_black >> 24, 255);
+        assert!(((on_black >> 8) & 0xFF).abs_diff(128) <= 1, "{on_black:#x}");
+
+        // On a transparent surface: the source as it was.
+        assert_eq!(over(half_white, 0), half_white);
+
+        // Never more than full.
+        assert!(over(0xFFFF_FFFF, 0xFFFF_FFFF) == 0xFFFF_FFFF);
+        assert_eq!(over(0x80FF_FFFF, 0xFFFF_FFFF), 0xFFFF_FFFF);
+    }
+
+    #[test]
+    fn blit_blends_inside_and_clips_outside_the_surface() {
+        let mut canvas = Canvas::new((6, 4)).unwrap();
+        canvas.clear(Color::rgb(0, 0, 0));
+
+        // A 3x2 block: one opaque red pixel, the rest transparent.
+        let red = Color::rgb(255, 0, 0).premultiplied();
+        let block = [red, 0, 0, 0, 0, 0];
+        canvas.blit(1, 1, 3, 2, &block);
+        canvas.blit(5, 3, 3, 2, &[red; 6]); // hangs off the corner
+        canvas.blit(-2, -1, 3, 2, &[red; 6]); // hangs off the other
+
+        let pixels = canvas.pixels_mut().to_vec();
+        let at = |x: usize, y: usize| pixels[y * 6 + x];
+        assert_eq!(at(1, 1), red);
+        assert_eq!(
+            at(2, 1),
+            Color::rgb(0, 0, 0).premultiplied(),
+            "transparent leaves it"
+        );
+        assert_eq!(at(5, 3), red, "clipped, not dropped");
+        assert_eq!(at(0, 0), red, "clipped on the other side");
+        assert_eq!(at(1, 0), Color::rgb(0, 0, 0).premultiplied());
+
+        // Nonsense sizes draw nothing and do not panic.
+        canvas.blit(0, 0, 0, 5, &[]);
+        canvas.blit(0, 0, 4, 4, &[red; 3]);
+    }
+
+    #[test]
+    fn a_caret_is_a_bar() {
+        let mut canvas = Canvas::new((10, 10)).unwrap();
+        canvas.clear(Color::TRANSPARENT);
+        canvas.draw_caret(4, 2, 5, 2, Color::WHITE);
+        let pixels = canvas.pixels_mut().to_vec();
+        let lit: Vec<(usize, usize)> = (0..100)
+            .filter(|&i| pixels[i] != 0)
+            .map(|i| (i % 10, i / 10))
+            .collect();
+        assert_eq!(lit.len(), 10);
+        assert!(
+            lit.iter()
+                .all(|&(x, y)| (4..6).contains(&x) && (2..7).contains(&y))
+        );
+    }
+
+    #[test]
+    fn caret_offsets_has_one_more_entry_than_units_and_grows() {
+        let font = Font::new("Segoe UI", 16, false).unwrap();
+        assert_eq!(font.caret_offsets(""), [0]);
+
+        let text = "Open 😀 é";
+        let units = text.encode_utf16().count();
+        let offsets = font.caret_offsets(text);
+        assert_eq!(offsets.len(), units + 1);
+        assert_eq!(offsets[0], 0);
+        assert!(
+            offsets.windows(2).all(|pair| pair[0] <= pair[1]),
+            "{offsets:?}"
+        );
+        assert!(offsets[units] > offsets[1], "wider as it goes");
+
+        let measured = font.measure(text).0;
+        assert!(
+            (offsets[units] - measured).abs() <= 2,
+            "{} vs {measured}",
+            offsets[units]
+        );
+    }
+
+    #[test]
+    fn long_text_is_cut_with_an_ellipsis_and_stays_inside_its_rectangle() {
+        let font = Font::new("Segoe UI", 16, false).unwrap();
+        let (width, height) = (60, 24);
+        let mut canvas = Canvas::new((200, height)).unwrap();
+        canvas.clear(Color::rgb(0, 0, 0));
+        let rect = RECT {
+            left: 0,
+            top: 0,
+            right: width,
+            bottom: height,
+        };
+        canvas
+            .draw_text_ellipsis(
+                "A very long name that cannot possibly fit",
+                rect,
+                &font,
+                Color::WHITE,
+                TextAlign::Left,
+            )
+            .unwrap();
+
+        let pixels = canvas.pixels_mut().to_vec();
+        let lit_right_of_rect = (0..height as usize)
+            .flat_map(|y| (width as usize..200).map(move |x| (x, y)))
+            .any(|(x, y)| pixels[y * 200 + x] != Color::rgb(0, 0, 0).premultiplied());
+        assert!(!lit_right_of_rect, "nothing is drawn past the rectangle");
+        let lit_inside = (0..width as usize).any(|x| {
+            pixels[12 * 200 + x] != Color::rgb(0, 0, 0).premultiplied()
+                || pixels[8 * 200 + x] != Color::rgb(0, 0, 0).premultiplied()
+        });
+        assert!(lit_inside, "and something is drawn inside it");
+    }
 
     #[test]
     fn premultiplies() {
@@ -990,6 +1299,36 @@ mod tests {
         assert_eq!(Color::TRANSPARENT.premultiplied(), 0);
         // Half-transparent white: every channel halved with it.
         assert_eq!(Color::WHITE.with_alpha(128).premultiplied(), 0x8080_8080);
+    }
+
+    #[test]
+    fn a_rounded_border_can_be_traced_on_part_of_the_surface() {
+        let interior = Color::rgb(0, 0, 255);
+        let border = Color::rgb(255, 0, 0);
+        let mut canvas = Canvas::new((40, 40)).unwrap();
+        canvas.clear(interior);
+        // The top left 30x20 of the surface is the visible window.
+        let visible = RECT {
+            left: 0,
+            top: 0,
+            right: 30,
+            bottom: 20,
+        };
+        canvas.round_rect_corners_with_border(visible, 8, 2, border);
+
+        let pixel =
+            |canvas: &mut Canvas, x: i32, y: i32| canvas.pixels_mut()[(y * 40 + x) as usize];
+        // The visible window's own corners are cut, all four…
+        for (x, y) in [(0, 0), (29, 0), (0, 19), (29, 19)] {
+            assert_eq!(pixel(&mut canvas, x, y), 0, "{x},{y}");
+        }
+        // …and its border band is traced along them…
+        assert_eq!(pixel(&mut canvas, 5, 1), border.premultiplied());
+        assert_eq!(pixel(&mut canvas, 24, 18), border.premultiplied());
+        // …while the surface beyond it is not touched.
+        assert_eq!(pixel(&mut canvas, 35, 35), interior.premultiplied());
+        assert_eq!(pixel(&mut canvas, 39, 0), interior.premultiplied());
+        assert_eq!(pixel(&mut canvas, 15, 39), interior.premultiplied());
     }
 
     #[test]

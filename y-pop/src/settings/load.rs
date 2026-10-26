@@ -18,8 +18,9 @@ use y_core::overlay::Color;
 use y_core::xml::{self, Comment as XmlComment, Document, Element, Node, Writer};
 
 use super::{
-    AppFields, Comment, Entry, Globals, HotkeyEntry, Item, ItemKind, PopupStyle, Renderer,
-    Settings, Skin, Var, VarEntry,
+    AppFields, Comment, Entry, Globals, HotkeyEntry, Item, ItemKind, MenusMode, PopupStyle,
+    Renderer, ResultsMode, SearchEntry, SearchSection, SearchSettings, SectionKind, Settings, Skin,
+    Var, VarEntry,
 };
 use crate::config::{self, LoadError};
 use crate::model::OpenFolder;
@@ -74,6 +75,7 @@ struct Body {
     intro: Vec<Comment>,
     variables: Option<Vec<VarEntry>>,
     skin: Option<Skin>,
+    search: Option<SearchSettings>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -107,6 +109,7 @@ impl Loader {
         settings.intro = body.intro;
         settings.variables = body.variables.unwrap_or_default();
         settings.skin = body.skin.unwrap_or_default();
+        settings.search = body.search;
         settings.roots = body.entries;
         // A `<hotkey>` directly under `<y-pop>` is read by nobody: it came
         // back as a disabled item among `body.inner`, which belongs with
@@ -131,6 +134,7 @@ impl Loader {
         let mut seen_element = false;
         let mut seen_variables = false;
         let mut seen_skin = false;
+        let mut seen_search = false;
 
         for node in element.children_with_comments() {
             let child = match node {
@@ -171,6 +175,13 @@ impl Loader {
                     body.skin = Some(self.skin(child));
                     continue;
                 }
+                "search" if container == Container::Root && !seen_search => {
+                    seen_search = true;
+                    let (lead, blank_before) = attached(&mut pending, child);
+                    self.free(&mut body, &mut pending, container, first);
+                    body.search = Some(self.search(child, lead, blank_before));
+                    continue;
+                }
                 _ => {}
             }
 
@@ -200,26 +211,7 @@ impl Loader {
                 continue;
             };
 
-            // Attached comments: the run directly above, each with no empty
-            // line before the next thing.
-            let mut start = pending.len();
-            let mut linked = !child.blank_before();
-            while linked && start > 0 {
-                start -= 1;
-                linked = !pending[start].blank_before;
-            }
-            let lead: Vec<Comment> = pending.split_off(start);
-            item.blank_before = match lead.first() {
-                Some(first_lead) => first_lead.blank_before,
-                None => child.blank_before(),
-            };
-            item.lead = lead
-                .into_iter()
-                .map(|comment| Comment {
-                    blank_before: false,
-                    ..comment
-                })
-                .collect();
+            (item.lead, item.blank_before) = attached(&mut pending, child);
 
             self.free(&mut body, &mut pending, container, first);
             body.entries.push(Entry::Item(item));
@@ -252,6 +244,94 @@ impl Loader {
                 .entries
                 .extend(comments.into_iter().map(Entry::Comment)),
         }
+    }
+
+    /// `<search>` and everything in it. Group and folder children are
+    /// ordinary [`Item`]s; the other sections keep only what they say.
+    fn search(
+        &mut self,
+        element: Element<'_>,
+        lead: Vec<Comment>,
+        blank_before: bool,
+    ) -> SearchSettings {
+        let mut attrs = Attrs::of(element);
+        let mut search = SearchSettings {
+            lead,
+            blank_before,
+            hotkey: attrs.take("hotkey"),
+            can_override: attrs.bool("override").unwrap_or(false),
+            collapsed: attrs.bool("collapsed"),
+            results: attrs.parse("results", ResultsMode::parse),
+            row_actions: attrs.bool("row-actions"),
+            history: attrs.bool("history"),
+            ..SearchSettings::default()
+        };
+        search.extra_attrs = attrs.rest();
+
+        let mut pending: Vec<Comment> = Vec::new();
+        for node in element.children_with_comments() {
+            let child = match node {
+                Node::Comment(comment) => {
+                    pending.push(comment_of(comment));
+                    continue;
+                }
+                Node::Element(child) => child,
+            };
+            let (lead, blank_before) = attached(&mut pending, child);
+            search
+                .children
+                .extend(pending.drain(..).map(SearchEntry::Comment));
+
+            let entry = match child.name() {
+                "group" | "app" => self.item(child).map(|mut item| {
+                    (item.lead, item.blank_before) = (lead, blank_before);
+                    SearchEntry::Item(item)
+                }),
+                _ => self.section(child).map(|mut section| {
+                    (section.lead, section.blank_before) = (lead, blank_before);
+                    SearchEntry::Section(section)
+                }),
+            };
+            let entry = entry.unwrap_or_else(|| {
+                let reason = format!("y-pop does not load <{}> here", child.name());
+                SearchEntry::Comment(self.disabled(child, &reason))
+            });
+            search.children.push(entry);
+        }
+        search
+            .children
+            .extend(pending.into_iter().map(SearchEntry::Comment));
+        search
+    }
+
+    /// `<recent>`, `<menus>`, `<start-menu>` or `<plugin>`. `None` for
+    /// anything else, and for one that holds children or comments, which
+    /// the model has nowhere to keep.
+    fn section(&mut self, element: Element<'_>) -> Option<SearchSection> {
+        if element.children_with_comments().next().is_some() {
+            return None;
+        }
+        let mut attrs = Attrs::of(element);
+        let kind = match element.name() {
+            "recent" => SectionKind::Recent {
+                count: attrs.parse("count", parse_u32),
+            },
+            "menus" => SectionKind::Menus {
+                browse: attrs.parse("browse", MenusMode::parse),
+                include: attrs.take("include"),
+            },
+            "start-menu" => SectionKind::StartMenu {
+                exclude: attrs.take("exclude"),
+            },
+            "plugin" => SectionKind::Plugin,
+            _ => return None,
+        };
+        Some(SearchSection {
+            lead: Vec::new(),
+            blank_before: false,
+            kind,
+            extra_attrs: attrs.rest(),
+        })
     }
 
     /// A menu element, or `None` if y-pop wouldn't load it.
@@ -435,6 +515,32 @@ impl Loader {
     }
 }
 
+/// Takes the comments attached to `child` off the end of `pending`: the run
+/// directly above it, each with no empty line before the next thing. Returns
+/// them (with their own empty-line flag cleared) and whether an empty line
+/// separates the whole attached group from what came before.
+fn attached(pending: &mut Vec<Comment>, child: Element<'_>) -> (Vec<Comment>, bool) {
+    let mut start = pending.len();
+    let mut linked = !child.blank_before();
+    while linked && start > 0 {
+        start -= 1;
+        linked = !pending[start].blank_before;
+    }
+    let lead: Vec<Comment> = pending.split_off(start);
+    let blank_before = match lead.first() {
+        Some(first_lead) => first_lead.blank_before,
+        None => child.blank_before(),
+    };
+    let lead = lead
+        .into_iter()
+        .map(|comment| Comment {
+            blank_before: false,
+            ..comment
+        })
+        .collect();
+    (lead, blank_before)
+}
+
 /// The XML of `element` and everything in it, without its comments.
 fn element_xml(element: Element<'_>) -> String {
     fn write(element: Element<'_>, writer: &mut Writer) {
@@ -527,6 +633,26 @@ fn parse_bool(text: &str) -> Option<bool> {
         "true" | "yes" | "on" | "1" => Some(true),
         "false" | "no" | "off" | "0" => Some(false),
         _ => None,
+    }
+}
+
+impl ResultsMode {
+    fn parse(text: &str) -> Option<Self> {
+        match text {
+            "sections" => Some(Self::Sections),
+            "flat" => Some(Self::Flat),
+            _ => None,
+        }
+    }
+}
+
+impl MenusMode {
+    fn parse(text: &str) -> Option<Self> {
+        match text {
+            "columns" => Some(Self::Columns),
+            "a-z" => Some(Self::AZ),
+            _ => None,
+        }
     }
 }
 

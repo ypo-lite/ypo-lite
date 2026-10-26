@@ -8,7 +8,9 @@
 //! is not a use of anything here. Menu items see every variable, resolved to
 //! the last definition.
 
-use super::{AppFields, Entry, Item, ItemId, ItemKind, Settings, Var, VarEntry};
+use super::{
+    AppFields, Entry, Item, ItemId, ItemKind, SearchEntry, SearchSettings, Settings, Var, VarEntry,
+};
 use crate::variables::{self, Lookup, Variable};
 
 /// Where a variable is referenced.
@@ -149,6 +151,36 @@ fn for_each_item_mut(entries: &mut [Entry], f: &mut impl FnMut(&mut Item)) {
     }
 }
 
+/// Every item under `<search>`: its groups and folders, and what is in them.
+fn search_items(search: &SearchSettings) -> Vec<&Item> {
+    fn walk<'a>(entries: &'a [Entry], out: &mut Vec<&'a Item>) {
+        for entry in entries {
+            if let Entry::Item(item) = entry {
+                out.push(item);
+                walk(&item.children, out);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for entry in &search.children {
+        if let SearchEntry::Item(item) = entry {
+            out.push(item);
+            walk(&item.children, &mut out);
+        }
+    }
+    out
+}
+
+/// The search-only groups and folders of `<search>`, and what is in them.
+fn for_each_search_item_mut(search: &mut SearchSettings, f: &mut impl FnMut(&mut Item)) {
+    for entry in &mut search.children {
+        if let SearchEntry::Item(item) = entry {
+            f(item);
+            for_each_item_mut(&mut item.children, f);
+        }
+    }
+}
+
 impl Settings {
     /// The entry index of the last variable named `name` above `before` —
     /// the definition a reference made at `before` resolves to.
@@ -170,7 +202,8 @@ impl Settings {
 
         // Menu items see the whole list.
         if self.definition_before(&var.name, self.variables.len()) == Some(index) {
-            for item in self.items() {
+            let search_items = self.search.iter().flat_map(search_items);
+            for item in self.items().chain(search_items) {
                 for (field, text) in texts(item) {
                     if references(text).contains(&var.name.as_str()) {
                         users.push(UsedIn::Item { id: item.id, field });
@@ -351,14 +384,18 @@ impl Settings {
         let mut rewritten = 0;
 
         if self.definition_before(&old, self.variables.len()) == Some(index) {
-            for_each_item_mut(&mut self.roots, &mut |item| {
+            let mut rename = |item: &mut Item| {
                 for text in texts_mut(item) {
                     if let Some(changed) = rename_references(text, &old, new_name) {
                         *text = changed;
                         rewritten += 1;
                     }
                 }
-            });
+            };
+            for_each_item_mut(&mut self.roots, &mut rename);
+            if let Some(search) = &mut self.search {
+                for_each_search_item_mut(search, &mut rename);
+            }
         }
         for later in index + 1..self.variables.len() {
             if self.definition_before(&old, later) != Some(index) {

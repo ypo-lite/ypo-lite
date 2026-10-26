@@ -39,6 +39,7 @@
 //! | Module | For |
 //! | ------ | --- |
 //! | [`tray`] | notification area icon, balloon tips |
+//! | [`clipboard`] | the clipboard's text: read it, replace it |
 //! | [`menu`] | popup menus, checkable and disabled items |
 //! | [`hotkey`] | system-wide hotkeys, with a low-level-hook override |
 //! | [`icon`] | loading an icon from a file, synchronously, with a small cache |
@@ -74,6 +75,8 @@ pub mod build;
 pub mod app;
 #[cfg(feature = "win")]
 pub mod apps_folder;
+#[cfg(feature = "win")]
+pub mod clipboard;
 #[cfg(feature = "win")]
 pub mod config;
 #[cfg(feature = "win")]

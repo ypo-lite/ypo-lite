@@ -270,11 +270,93 @@ pub struct Var {
     pub extra_attrs: Vec<(String, String)>,
 }
 
+/// `<search>`: its own attributes and its children, in order. Like [`Item`],
+/// raw and tolerant — a value the reader wouldn't understand stays in
+/// `extra_attrs` rather than being lost.
+#[derive(Clone, PartialEq, Debug, Default)]
+pub struct SearchSettings {
+    /// Comments attached above the element.
+    pub lead: Vec<Comment>,
+    pub blank_before: bool,
+    /// `Win+Space`, raw.
+    pub hotkey: Option<String>,
+    pub can_override: bool,
+    pub collapsed: Option<bool>,
+    pub results: Option<ResultsMode>,
+    pub row_actions: Option<bool>,
+    pub history: Option<bool>,
+    pub extra_attrs: Vec<(String, String)>,
+    pub children: Vec<SearchEntry>,
+}
+
+/// `results="sections|flat"`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ResultsMode {
+    Sections,
+    Flat,
+}
+
+/// One child of `<search>`.
+#[derive(Clone, PartialEq, Debug)]
+pub enum SearchEntry {
+    Comment(Comment),
+    /// A search-only `<group>`, or a browsed-folder `<app>`.
+    Item(Item),
+    Section(SearchSection),
+}
+
+/// A section element that is not a menu item.
+#[derive(Clone, PartialEq, Debug)]
+pub struct SearchSection {
+    pub lead: Vec<Comment>,
+    pub blank_before: bool,
+    pub kind: SectionKind,
+    pub extra_attrs: Vec<(String, String)>,
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub enum SectionKind {
+    Recent {
+        count: Option<u32>,
+    },
+    Menus {
+        browse: Option<MenusMode>,
+        /// `;`-separated, raw.
+        include: Option<String>,
+    },
+    StartMenu {
+        exclude: Option<String>,
+    },
+    /// Every attribute stays in `extra_attrs`: plugins have no editor yet.
+    Plugin,
+}
+
+impl SectionKind {
+    /// The element's name in the file.
+    pub fn element(&self) -> &'static str {
+        match self {
+            Self::Recent { .. } => "recent",
+            Self::Menus { .. } => "menus",
+            Self::StartMenu { .. } => "start-menu",
+            Self::Plugin => "plugin",
+        }
+    }
+}
+
+/// `<menus browse="columns|a-z">`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MenusMode {
+    Columns,
+    AZ,
+}
+
 /// A whole `y-pop.xml`.
 #[derive(Clone, Debug)]
 pub struct Settings {
     pub globals: Globals,
     pub skin: Skin,
+    /// `<search>`, written right after `<skin>`.
+    pub search: Option<SearchSettings>,
     pub variables: Vec<VarEntry>,
     /// Comments before `<y-pop>`.
     pub prolog: Vec<Comment>,
@@ -304,6 +386,7 @@ impl Settings {
         Self {
             globals: Globals::default(),
             skin: Skin::default(),
+            search: None,
             variables: Vec::new(),
             prolog: Vec::new(),
             intro: Vec::new(),

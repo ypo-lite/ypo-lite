@@ -11,11 +11,13 @@ use y_core::xml::Element;
 
 use crate::model::{
     App, Browse, Builder, ConfigTree, Defaults, EventMask, HotkeyBinding, IconSource, MAX_DEPTH,
-    NodeData, NodeFlags, NodeId, NodeKind, OpenFolder, PopupMode, PresenterStyle,
+    MenusBrowse, NodeData, NodeFlags, NodeId, NodeKind, OpenFolder, PluginSection, PopupMode,
+    PresenterStyle, ResultsLayout, SearchConfig, Section,
 };
 use crate::variables::{self, Lookup, Pool, Variable};
 
 use std::fmt;
+use std::sync::Arc;
 
 /// `pub(crate)`, with `warn`/`check`/`warnings` too: [`crate::theme`]'s own
 /// `impl Reader` block (the `<skin>`/`theme=` parsing methods) needs to
@@ -30,6 +32,9 @@ pub(crate) struct Reader<'b> {
     custom: Vec<Variable>,
     builtins: &'b mut dyn Lookup,
     builder: Builder,
+    /// Set while the children of `<search>` are read: a `<group>` there is
+    /// a search-only group and takes no hotkey.
+    in_search: bool,
 }
 
 impl<'b> Reader<'b> {
@@ -40,16 +45,24 @@ impl<'b> Reader<'b> {
             custom: Vec::new(),
             builtins,
             builder: Builder::new(),
+            in_search: false,
         }
     }
 
-    /// Assembles the finished tree from `roots`/`defaults` (computed by
-    /// [`super::load_str`] from this reader's own methods) plus whatever
-    /// this reader accumulated along the way — the one place `builder`/
-    /// `warnings` are consumed, so `super::load_str` never has to reach
-    /// into a `Reader`'s private fields itself.
-    pub(super) fn finish(self, roots: Vec<NodeId>, defaults: Defaults) -> ConfigTree {
-        self.builder.finish(roots, defaults, self.warnings)
+    /// Assembles the finished tree from `roots`/`defaults`/`search`
+    /// (computed by [`super::load_str`] from this reader's own methods) plus
+    /// whatever this reader accumulated along the way — the one place
+    /// `builder`/`warnings` are consumed, so `super::load_str` never has to
+    /// reach into a `Reader`'s private fields itself.
+    pub(super) fn finish(
+        self,
+        roots: Vec<NodeId>,
+        defaults: Defaults,
+        search: Option<SearchConfig>,
+    ) -> ConfigTree {
+        let mut tree = self.builder.finish(roots, defaults, self.warnings);
+        tree.search = search;
+        tree
     }
 
     pub(crate) fn warn(&mut self, element: Element<'_>, message: impl fmt::Display) {
@@ -139,7 +152,7 @@ impl<'b> Reader<'b> {
                     Some("runner") => {
                         self.warn(
                             element,
-                            "popup-style=\"runner\" is not implemented yet — falling back to \"list\"",
+                            "popup-style=\"runner\" is replaced by <search> — falling back to \"list\"",
                         );
                         PresenterStyle::List
                     }
@@ -270,15 +283,237 @@ impl<'b> Reader<'b> {
         flags
     }
 
+    /// `<search>`, directly under the root only; a second one warns and is
+    /// ignored. `None` when the file has none.
+    ///
+    /// No children means [`SearchConfig::default_sections`]. As soon as one
+    /// is written the list is exactly what is written, except that
+    /// `<menus/>` is always there: added right after `<recent>` (or first)
+    /// when missing. Search-only groups and folders become nodes of the
+    /// arena, outside `roots`.
+    pub(super) fn read_search(&mut self, root: Element<'_>) -> Option<SearchConfig> {
+        let element = root.child("search")?;
+        for extra in root.children_named("search").skip(1) {
+            self.warn(
+                extra,
+                "a second <search> is ignored — only the first one is read",
+            );
+        }
+        self.check(
+            element,
+            &[
+                "hotkey",
+                "override",
+                "collapsed",
+                "results",
+                "row-actions",
+                "history",
+            ],
+        );
+
+        let hotkey =
+            element
+                .attr("hotkey")
+                .and_then(|text| match y_core::hotkey::Hotkey::parse(text) {
+                    Some(hotkey) => Some(HotkeyBinding {
+                        hotkey,
+                        can_override: element.attr_bool("override").unwrap_or(false),
+                    }),
+                    None => {
+                        self.warn(element, format!("{text:?} is not a key combination"));
+                        None
+                    }
+                });
+        let results = match element.attr("results") {
+            None | Some("sections") => ResultsLayout::Sections,
+            Some("flat") => ResultsLayout::Flat,
+            Some(other) => {
+                self.warn(element, format!("unknown results {other:?}"));
+                ResultsLayout::Sections
+            }
+        };
+
+        let mut sections = Vec::new();
+        let (mut seen_recent, mut seen_menus, mut seen_start) = (false, false, false);
+        self.in_search = true;
+        for child in element.children() {
+            let section = match child.name() {
+                "recent" => {
+                    if !std::mem::replace(&mut seen_recent, true) {
+                        self.read_recent(child)
+                    } else {
+                        self.warn(child, "a second <recent> is ignored");
+                        None
+                    }
+                }
+                "menus" => {
+                    if !std::mem::replace(&mut seen_menus, true) {
+                        Some(self.read_menus(child))
+                    } else {
+                        self.warn(child, "a second <menus> is ignored");
+                        None
+                    }
+                }
+                "start-menu" => {
+                    if !std::mem::replace(&mut seen_start, true) {
+                        Some(self.read_start_menu(child))
+                    } else {
+                        self.warn(child, "a second <start-menu> is ignored");
+                        None
+                    }
+                }
+                "group" => Some(Section::Group(self.read_group(child))),
+                "app" => self.read_search_folder(child),
+                "plugin" => self.read_plugin(child),
+                other => {
+                    self.warn(child, format!("unknown element <{other}>, skipping"));
+                    None
+                }
+            };
+            sections.extend(section);
+        }
+        self.in_search = false;
+
+        if element.children().next().is_none() {
+            sections = SearchConfig::default_sections();
+        } else if !seen_menus {
+            let at = sections
+                .iter()
+                .position(|section| matches!(section, Section::Recent { .. }))
+                .map_or(0, |recent| recent + 1);
+            sections.insert(
+                at,
+                Section::Menus {
+                    browse: MenusBrowse::default(),
+                    include: Vec::new(),
+                },
+            );
+        }
+
+        Some(SearchConfig {
+            hotkey,
+            collapsed: element.attr_bool("collapsed").unwrap_or(false),
+            results,
+            row_actions: element.attr_bool("row-actions").unwrap_or(true),
+            history: element.attr_bool("history").unwrap_or(true),
+            sections,
+        })
+    }
+
+    fn read_recent(&mut self, element: Element<'_>) -> Option<Section> {
+        self.check(element, &["count"]);
+        let count = match element.attr("count") {
+            None => Section::DEFAULT_RECENT,
+            Some(raw) => raw.trim().parse().unwrap_or_else(|_| {
+                self.warn(
+                    element,
+                    format!("count={raw:?} is not a non-negative integer"),
+                );
+                Section::DEFAULT_RECENT
+            }),
+        };
+        Some(Section::Recent { count })
+    }
+
+    fn read_menus(&mut self, element: Element<'_>) -> Section {
+        self.check(element, &["browse", "include"]);
+        let browse = match element.attr("browse") {
+            None | Some("columns") => MenusBrowse::Columns,
+            Some("a-z") => MenusBrowse::AZ,
+            Some(other) => {
+                self.warn(element, format!("unknown browse {other:?}"));
+                MenusBrowse::Columns
+            }
+        };
+        Section::Menus {
+            browse,
+            include: self.name_list(element, "include"),
+        }
+    }
+
+    fn read_start_menu(&mut self, element: Element<'_>) -> Section {
+        self.check(element, &["exclude"]);
+        Section::StartMenu {
+            exclude: self.name_list(element, "exclude"),
+        }
+    }
+
+    /// A `;`-separated list of names or patterns (not whitespace-separated:
+    /// a tray menu may well be called "Admin tools"). Empty items dropped.
+    fn name_list(&mut self, element: Element<'_>, attr: &str) -> Vec<Arc<str>> {
+        let Some(raw) = element.attr(attr) else {
+            return Vec::new();
+        };
+        raw.split(';')
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(|name| self.text(name))
+            .collect()
+    }
+
+    /// An `<app>` directly in `<search>`: only a browsed folder makes
+    /// sense there (spec §2.5.3).
+    fn read_search_folder(&mut self, element: Element<'_>) -> Option<Section> {
+        if !element.attr_bool("browse").unwrap_or(false) {
+            self.warn(
+                element,
+                "an <app> directly in <search> must be a browsed folder (browse=\"true\") — put \
+                 other apps in a <group>",
+            );
+            return None;
+        }
+        self.read_app(element).map(Section::Folder)
+    }
+
+    /// `<plugin>` parses and is kept, but nothing runs it yet.
+    fn read_plugin(&mut self, element: Element<'_>) -> Option<Section> {
+        self.check(element, &["name", "src", "prefix", "section", "allow"]);
+        let (Some(name), Some(src)) = (
+            self.opt_text(element, "name"),
+            self.opt_text(element, "src"),
+        ) else {
+            self.warn(element, "a <plugin> needs both a name and a src attribute");
+            return None;
+        };
+        self.warn(
+            element,
+            format!("<plugin> {name:?} is not implemented yet — kept, but not run"),
+        );
+        let prefix = element.attr("prefix").and_then(|raw| {
+            let mut chars = raw.chars();
+            match (chars.next(), chars.next()) {
+                (Some(prefix), None) => Some(prefix),
+                _ => {
+                    self.warn(element, format!("prefix={raw:?} must be one character"));
+                    None
+                }
+            }
+        });
+        Some(Section::Plugin(PluginSection { name, src, prefix }))
+    }
+
+    /// The tray menus: the children of the root. `<search>` is read apart
+    /// ([`Reader::read_search`]), so it is skipped here — anywhere else it
+    /// is an unknown element.
+    pub(super) fn read_roots(&mut self, root: Element<'_>) -> Vec<NodeId> {
+        self.read_nodes(root, true)
+    }
+
     /// Walks every child of `element` that is a menu node (`group`, `app`,
     /// `separator`, `about`, `quit`, `settings`, `break`), skipping `<hotkey>` (already
     /// consumed by [`Reader::hotkeys`]) and `<variables>`, and warning on
     /// anything else.
     pub(super) fn read_children(&mut self, element: Element<'_>) -> Vec<NodeId> {
+        self.read_nodes(element, false)
+    }
+
+    fn read_nodes(&mut self, element: Element<'_>, is_root: bool) -> Vec<NodeId> {
         let mut children = Vec::new();
         for child in element.children() {
             match child.name() {
                 "hotkey" | "variables" | "skin" => {} // consumed elsewhere
+                "search" if is_root => {}             // read_search
+
                 "group" => children.push(self.read_group(child)),
                 "app" => {
                     if let Some(id) = self.read_app(child) {
@@ -308,6 +543,7 @@ impl<'b> Reader<'b> {
             name: self.pool.intern(String::new()),
             icon: None,
             tooltip: None,
+            keywords: None,
             hotkeys: Vec::new(),
             flags: NodeFlags::default(),
             show_shortcut: None,
@@ -323,6 +559,7 @@ impl<'b> Reader<'b> {
                 "name",
                 "icon",
                 "tooltip",
+                "keywords",
                 "default",
                 "autoopen",
                 "show-shortcuts",
@@ -331,7 +568,15 @@ impl<'b> Reader<'b> {
             ],
         );
 
-        let hotkeys = self.hotkeys(element);
+        let mut hotkeys = self.hotkeys(element);
+        if self.in_search && !hotkeys.is_empty() {
+            self.warn(
+                element,
+                "a <hotkey> in a group of <search> is ignored — it would make the group a tray \
+                 menu in all but name",
+            );
+            hotkeys.clear();
+        }
         let flags = self.common_flags(element);
         let popup = self.popup_mode(element, "popup", "popup-style");
         let name = self.opt_text(element, "name").unwrap_or_else(|| {
@@ -340,6 +585,7 @@ impl<'b> Reader<'b> {
         });
         let icon = element.attr("icon").map(|raw| self.icon(raw));
         let tooltip = self.opt_text(element, "tooltip");
+        let keywords = self.opt_text(element, "keywords");
         let show_shortcut = element.attr_bool("show-shortcuts");
 
         let id = self.builder.push(NodeData {
@@ -347,6 +593,7 @@ impl<'b> Reader<'b> {
             name,
             icon,
             tooltip,
+            keywords,
             hotkeys,
             flags,
             show_shortcut,
@@ -366,6 +613,7 @@ impl<'b> Reader<'b> {
                 "name",
                 "icon",
                 "tooltip",
+                "keywords",
                 "default",
                 "show-shortcuts",
                 "exe",
@@ -403,6 +651,7 @@ impl<'b> Reader<'b> {
         });
         let icon = element.attr("icon").map(|raw| self.icon(raw));
         let tooltip = self.opt_text(element, "tooltip");
+        let keywords = self.opt_text(element, "keywords");
         let show_shortcut = element.attr_bool("show-shortcuts");
 
         let browse = element
@@ -442,6 +691,7 @@ impl<'b> Reader<'b> {
             name,
             icon,
             tooltip,
+            keywords,
             hotkeys,
             flags,
             show_shortcut,
@@ -460,7 +710,7 @@ impl<'b> Reader<'b> {
     /// defaulted — a written-but-empty attribute is a choice, not an
     /// omission.
     fn read_leaf(&mut self, element: Element<'_>, kind: NodeKind, default_name: &str) -> NodeId {
-        self.check(element, &["name", "icon", "tooltip", "default"]);
+        self.check(element, &["name", "icon", "tooltip", "keywords", "default"]);
 
         let hotkeys = self.hotkeys(element);
         let flags = self.common_flags(element);
@@ -469,12 +719,14 @@ impl<'b> Reader<'b> {
             .unwrap_or_else(|| self.pool.intern(default_name.to_owned()));
         let icon = element.attr("icon").map(|raw| self.icon(raw));
         let tooltip = self.opt_text(element, "tooltip");
+        let keywords = self.opt_text(element, "keywords");
 
         self.builder.push(NodeData {
             kind,
             name,
             icon,
             tooltip,
+            keywords,
             hotkeys,
             flags,
             show_shortcut: None,

@@ -66,6 +66,12 @@ pub struct ConfigTree {
     /// `hotkeys` vector implied, and not a hash lookup either.
     hotkeys: Vec<(NodeId, HotkeyBinding)>,
     pub defaults: Defaults,
+    /// `<search>`, if the file has one. Its search-only groups and folders
+    /// live in the same arena as everything else (so `NodeId`, `launch`,
+    /// icons and `browse` work on them unchanged) but are **not** in
+    /// [`ConfigTree::roots`], which keeps meaning "tray icons"; they are
+    /// reached through [`SearchConfig::sections`].
+    pub search: Option<SearchConfig>,
     /// Problems that did not stop the file from loading, one line each — the
     /// same severity split `y-snap`'s config reader follows: a malformed
     /// document is fatal (see `crate::config::LoadError::Malformed`), a
@@ -112,6 +118,99 @@ pub enum PresenterStyle {
     List,
     Runner,
     Radial,
+}
+
+/// `<search>` — see `docs/overlay-modes.md` §2.
+#[derive(Clone, Debug)]
+pub struct SearchConfig {
+    /// `hotkey="…"` (and `override="true"`): search has exactly one entry
+    /// point, so it is an attribute rather than a `<hotkey>` child.
+    pub hotkey: Option<HotkeyBinding>,
+    /// Open on the input row alone instead of on Recent and the sections.
+    pub collapsed: bool,
+    pub results: ResultsLayout,
+    /// Buttons on the selected result row; the keys work either way.
+    pub row_actions: bool,
+    /// Whether launches are remembered (`y-pop.history`).
+    pub history: bool,
+    /// In the order the empty box lists them; always contains a
+    /// [`Section::Menus`].
+    pub sections: Vec<Section>,
+}
+
+impl SearchConfig {
+    /// What `<search/>` with no children means: `<recent/><menus/><start-menu/>`.
+    pub fn default_sections() -> Vec<Section> {
+        vec![
+            Section::Recent {
+                count: Section::DEFAULT_RECENT,
+            },
+            Section::Menus {
+                browse: MenusBrowse::default(),
+                include: Vec::new(),
+            },
+            Section::StartMenu {
+                exclude: Vec::new(),
+            },
+        ]
+    }
+
+    /// The nodes of the search-only groups and folders, in section order.
+    pub fn nodes(&self) -> impl Iterator<Item = NodeId> + '_ {
+        self.sections.iter().filter_map(|section| match section {
+            Section::Group(id) | Section::Folder(id) => Some(*id),
+            _ => None,
+        })
+    }
+}
+
+/// `results="sections|flat"`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum ResultsLayout {
+    /// Top hit, then groups of at most five.
+    #[default]
+    Sections,
+    Flat,
+}
+
+/// `<menus browse="columns|a-z"/>`: how the tray menus section opens.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum MenusBrowse {
+    #[default]
+    Columns,
+    AZ,
+}
+
+/// One child of `<search>`.
+#[derive(Clone, Debug)]
+pub enum Section {
+    /// `<recent count="5"/>`: lists items of the other sections.
+    Recent { count: u32 },
+    /// `<menus/>`: every tray menu. `include` names the tray menus to limit
+    /// it to (empty: all of them).
+    Menus {
+        browse: MenusBrowse,
+        include: Vec<Arc<str>>,
+    },
+    /// `<start-menu/>`. `exclude` adds name patterns to the built-in filter.
+    StartMenu { exclude: Vec<Arc<str>> },
+    /// A search-only `<group>`: a node outside [`ConfigTree::roots`].
+    Group(NodeId),
+    /// A search-only browsed folder (`<app browse="true">`).
+    Folder(NodeId),
+    /// `<plugin>`: parsed and kept, not run yet (spec §2.11).
+    Plugin(PluginSection),
+}
+
+impl Section {
+    pub const DEFAULT_RECENT: u32 = 5;
+}
+
+#[derive(Clone, Debug)]
+pub struct PluginSection {
+    pub name: Arc<str>,
+    pub src: Arc<str>,
+    pub prefix: Option<char>,
 }
 
 /// A small set of per-node booleans, packed into a byte instead of separate
@@ -225,6 +324,8 @@ pub struct NodeData {
     pub name: Arc<str>,
     pub icon: Option<IconSource>,
     pub tooltip: Option<Arc<str>>,
+    /// `keywords="…"`: extra words search matches this node by.
+    pub keywords: Option<Arc<str>>,
     /// Almost always 0 or 1 element. An empty `Vec` is one pointer-sized
     /// word and no heap allocation, so the common case costs nothing extra
     /// without reaching for a small-vec crate the workspace otherwise has no
@@ -371,11 +472,13 @@ impl ConfigTree {
         self.node(id).children.iter().copied()
     }
 
-    /// Every node in the tree, roots and descendants alike, in no
-    /// particular order — for a whole-tree walk (firing every `start`/`exit`
+    /// Every node in the tree, roots and descendants alike — and the
+    /// search-only groups and folders, which no tray icon reaches — in no
+    /// particular order. For a whole-tree walk (firing every `start`/`exit`
     /// event, say) rather than one that cares about menu order.
     pub fn all_nodes(&self) -> impl Iterator<Item = NodeId> + '_ {
         let mut stack = self.roots.clone();
+        stack.extend(self.search.iter().flat_map(SearchConfig::nodes));
         std::iter::from_fn(move || {
             let id = stack.pop()?;
             stack.extend(self.children(id));
@@ -390,6 +493,15 @@ impl ConfigTree {
     pub fn hotkey_owner(&self, id: u32) -> Option<NodeId> {
         let slot = id.checked_sub(y_core::ids::IDH_FIRST)? as usize;
         self.hotkeys.get(slot).map(|&(node, _)| node)
+    }
+
+    /// The search hotkey and the id to register it under: the one after the
+    /// last node hotkey, so [`ConfigTree::hotkey_owner`] answers `None` for
+    /// it and a `WM_HOTKEY` handler can tell the two apart by asking this
+    /// first.
+    pub fn search_hotkey(&self) -> Option<(u32, HotkeyBinding)> {
+        let binding = self.search.as_ref()?.hotkey?;
+        Some((y_core::ids::IDH_FIRST + self.hotkeys.len() as u32, binding))
     }
 
     /// Every `(id, binding)` pair to register, in the order hotkey ids were
@@ -452,6 +564,7 @@ impl Builder {
             roots,
             hotkeys: self.hotkeys,
             defaults,
+            search: None,
             warnings,
         }
     }
@@ -467,6 +580,7 @@ mod tests {
             name: Arc::from("Quit"),
             icon: None,
             tooltip: None,
+            keywords: None,
             hotkeys,
             flags: NodeFlags::default(),
             show_shortcut: None,

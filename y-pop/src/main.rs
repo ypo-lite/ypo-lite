@@ -14,6 +14,7 @@
 
 mod browse;
 mod menu;
+mod search_window;
 mod tooltip;
 
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -29,7 +30,7 @@ use y_core::{
     monitor,
     prelude::*,
     resources::{IconSize, app_icon_or_stock},
-    tray::TrayEvent,
+    tray::{Notification, Notify, TrayEvent},
     window,
 };
 
@@ -39,6 +40,10 @@ use y_pop::{
 };
 
 const APP: AppInfo = AppInfo::new("Y-Pop", ipc::CLASS).single_instance();
+
+/// How many warnings a balloon shows before pointing at the file. A
+/// notification the user cannot read is a notification wasted.
+const MAX_REPORTED: usize = 6;
 
 struct YPop {
     tree: ConfigTree,
@@ -62,6 +67,9 @@ struct YPop {
     reload_pending: bool,
     /// Hover tooltips for the open popup — see `tooltip`'s module doc.
     tooltip: tooltip::Tooltip,
+    /// The search window. Made in `on_create`, once there is an owner
+    /// window for it to post to.
+    search: Option<search_window::SearchWindow>,
 }
 
 impl YPop {
@@ -87,6 +95,7 @@ impl YPop {
             reload_message: ipc::reload_message(),
             reload_pending: false,
             tooltip: tooltip::Tooltip::default(),
+            search: None,
         }
     }
 
@@ -172,7 +181,10 @@ impl YPop {
     /// `tray`, which a reload does first.
     fn install(&mut self, hwnd: HWND) -> Result<()> {
         let mut hotkeys = HotkeyManager::new(hwnd);
-        for (id, binding) in self.tree.hotkey_bindings() {
+        let search = self.tree.search_hotkey();
+        let mut refused = Vec::new();
+        let mut hint = false;
+        for (id, binding) in self.tree.hotkey_bindings().chain(search) {
             // Only ever installs the low-level hook once RegisterHotKey has
             // already refused the combination, never proactively — see
             // `HotkeyBinding::can_override`'s doc comment.
@@ -186,6 +198,8 @@ impl YPop {
                     "hotkey {} could not be registered: {error}",
                     binding.hotkey
                 ));
+                refused.push(binding.hotkey.to_string());
+                hint |= !binding.can_override;
             }
         }
         self.hotkeys = Some(hotkeys);
@@ -202,7 +216,42 @@ impl YPop {
             )?;
             self.tray.push(tray);
         }
+        self.report(&refused, hint);
         Ok(())
+    }
+
+    /// Tells the user, once and in one balloon, what the configuration got
+    /// wrong: hotkeys another application already owns, then the file's own
+    /// warnings. Needs a tray icon to speak from, so it runs at the end of
+    /// [`YPop::install`]; a configuration with no tray menu has none, and
+    /// those problems stay in the log.
+    fn report(&mut self, refused: &[String], hint: bool) {
+        let mut lines = Vec::new();
+        if !refused.is_empty() {
+            lines.push(format!(
+                "Already taken by another application: {}",
+                refused.join(", ")
+            ));
+            if hint {
+                lines.push("Add override=\"true\" to claim one anyway.".to_owned());
+            }
+        }
+        lines.extend(self.tree.warnings.iter().take(MAX_REPORTED).cloned());
+        if self.tree.warnings.len() > MAX_REPORTED {
+            lines.push(format!(
+                "…and {} more, see {}",
+                self.tree.warnings.len() - MAX_REPORTED,
+                config::path().display()
+            ));
+        }
+
+        if !lines.is_empty()
+            && let Some(tray) = self.tray.first_mut()
+        {
+            let _ = tray.notify(
+                &Notification::new("Configuration", &lines.join("\n")).level(Notify::Warning),
+            );
+        }
     }
 
     /// Re-reads `y-pop.xml` and swaps it in — `y-pop-config` asks for this
@@ -233,6 +282,11 @@ impl YPop {
             y_core::log::line(format_args!("{}: {warning}", config::FILE_NAME));
         }
 
+        // Like the native popup, the search window is closed before the tree
+        // it was opened on is swapped out.
+        if let Some(search) = self.search.as_mut() {
+            search.close();
+        }
         self.hotkeys = None;
         self.tray.clear();
         self.tree = tree;
@@ -285,6 +339,7 @@ fn show_about() {
 
 impl TrayApp for YPop {
     fn on_create(&mut self, hwnd: HWND) -> Result<()> {
+        self.search = Some(search_window::SearchWindow::new(hwnd));
         self.install(hwnd)?;
         self.fire_events(EventMask::START);
         Ok(())
@@ -365,6 +420,20 @@ impl TrayApp for YPop {
             return Some(LRESULT(0));
         }
 
+        // The search window's own requests (typing, clicks, close…). What it
+        // was closed to run is run here, once it has gone.
+        let handled_by_search = self
+            .search
+            .as_mut()
+            .map(|search| (search.on_message(msg, wparam, lparam, &self.tree), search));
+        if let Some((true, search)) = handled_by_search {
+            if let Some(node) = search.take_activation() {
+                let position = monitor::cursor_position().unwrap_or(POINT { x: 0, y: 0 });
+                self.run(hwnd, node, position);
+            }
+            return Some(LRESULT(0));
+        }
+
         // Registered at run time, so a guard rather than a constant pattern;
         // 0 means registration failed, and 0 is also `WM_NULL`.
         if msg != 0 && msg == self.reload_message {
@@ -373,7 +442,14 @@ impl TrayApp for YPop {
         }
 
         if msg == WM_HOTKEY {
-            if let Some(node) = self.tree.hotkey_owner(wparam.0 as u32) {
+            if self.tree.search_hotkey().map(|(id, _)| id) == Some(wparam.0 as u32) {
+                // Opens the search window, or closes it if it is open.
+                if let Some(search) = self.search.as_mut()
+                    && let Err(error) = search.toggle(&self.tree)
+                {
+                    y_core::log::line(format_args!("search could not open: {error}"));
+                }
+            } else if let Some(node) = self.tree.hotkey_owner(wparam.0 as u32) {
                 let position = monitor::cursor_position().unwrap_or(POINT { x: 0, y: 0 });
                 self.run(hwnd, node, position);
             }
@@ -401,6 +477,7 @@ impl TrayApp for YPop {
 
     fn on_destroy(&mut self) {
         self.fire_events(EventMask::EXIT);
+        self.search = None; // destroys its window, if open
         self.hotkeys = None; // unregisters every hotkey
         self.tray.clear(); // removes every tray icon
     }
