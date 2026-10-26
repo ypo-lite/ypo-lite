@@ -6,7 +6,10 @@ use std::ops::Range;
 
 use crate::model::{ConfigTree, NodeKind};
 
+use super::commands::{Command, Line, PREFIXES};
 use super::index::{Entry, Field, Kind, Source};
+use super::keycheck::Availability;
+use super::matcher::plain;
 use super::results::Heading;
 
 /// A stretch of a title, in UTF-16 units (what
@@ -45,6 +48,9 @@ pub fn runs(text: &str, positions: &[usize]) -> Vec<Run> {
 pub fn heading(heading: Heading) -> &'static str {
     match heading {
         Heading::Recent => "RECENT",
+        Heading::Browse => "BROWSE",
+        Heading::Hotkeys => "HOTKEYS",
+        Heading::Prefixes => "PREFIXES",
         Heading::TopHit => "TOP HIT",
         Heading::Apps => "APPS",
         Heading::StartMenu => "START MENU",
@@ -52,6 +58,77 @@ pub fn heading(heading: Heading) -> &'static str {
         Heading::Folders => "FOLDERS",
         Heading::Commands => "COMMANDS",
         Heading::All => "",
+    }
+}
+
+/// What a [`Line`] needs to be worded: facts only the window can read.
+#[derive(Clone, Copy, Default)]
+pub struct LineContext<'a> {
+    /// Whether y-pop starts with Windows now.
+    pub startup: bool,
+    /// The search hotkey, written out.
+    pub search_hotkey: Option<&'a str>,
+    /// The combination `#` is checking and what the system said of it; `None`
+    /// for the answer while it is still being asked.
+    pub check: Option<(&'a str, Option<Availability>)>,
+}
+
+/// The words of one row of a prefixed list.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct LineText {
+    pub title: String,
+    pub subtitle: String,
+    /// At the right end, in the dim hotkey style.
+    pub trailing: Option<String>,
+}
+
+/// The title, second line and right-hand text of `line`.
+pub fn line_text(line: Line, context: &LineContext) -> LineText {
+    let plain = |title: &str, subtitle: &str| LineText {
+        title: title.to_owned(),
+        subtitle: subtitle.to_owned(),
+        trailing: None,
+    };
+    match line {
+        Line::Command(command) => LineText {
+            trailing: (command == Command::StartWithWindows)
+                .then(|| if context.startup { "On" } else { "Off" }.to_owned()),
+            ..plain(command.label(), command.description())
+        },
+        Line::Prefix(prefix) => {
+            let info = PREFIXES.iter().find(|info| info.prefix == prefix);
+            LineText {
+                title: format!("{prefix}  {}", info.map_or("", |info| info.name)),
+                subtitle: info.map_or("", |info| info.description).to_owned(),
+                trailing: None,
+            }
+        }
+        Line::SearchHotkey => LineText {
+            trailing: context.search_hotkey.map(str::to_owned),
+            ..plain("Open Search", "The search hotkey")
+        },
+        Line::Check => {
+            let Some((typed, availability)) = context.check else {
+                return plain("Checking…", "");
+            };
+            let key = y_core::hotkey::Hotkey::parse(typed)
+                .map_or_else(|| typed.to_owned(), |hotkey| hotkey.to_string());
+            match availability {
+                None => plain(&format!("Checking {key}…"), ""),
+                Some(Availability::Free) => plain(
+                    &format!("{key} is free"),
+                    "No other program holds it. Enter opens the settings to assign it.",
+                ),
+                Some(Availability::Reserved(owner)) => plain(
+                    &format!("{key} is taken by {owner}"),
+                    "Windows keeps it. override=\"true\" could still claim it with the low-level hook.",
+                ),
+                Some(Availability::Taken) => plain(
+                    &format!("{key} is taken"),
+                    "Another program holds it (Windows does not say which). override=\"true\" could still claim it.",
+                ),
+            }
+        }
     }
 }
 
@@ -144,7 +221,7 @@ fn location(tree: &ConfigTree, entry: &Entry) -> String {
             .iter()
             .map(|&id| tree.node(id).name.as_ref())
             .collect();
-        parts.push(path.join(" › "));
+        parts.push(plain(&path.join(" › ")));
     }
     match (&node.kind, entry.kind) {
         (NodeKind::App(app), _) => {
@@ -278,6 +355,9 @@ mod tests {
     fn every_heading_but_the_flat_one_has_a_caption() {
         for heading_ in [
             Heading::Recent,
+            Heading::Browse,
+            Heading::Hotkeys,
+            Heading::Prefixes,
             Heading::TopHit,
             Heading::Apps,
             Heading::StartMenu,
@@ -290,6 +370,69 @@ mod tests {
         assert_eq!(heading(Heading::All), "");
     }
 
+    #[test]
+    fn a_line_says_what_it_is_and_what_state_it_is_in() {
+        let context = LineContext::default();
+        let reload = line_text(Line::Command(Command::Reload), &context);
+        assert_eq!(reload.title, "Reload configuration");
+        assert_eq!(reload.trailing, None);
+
+        let start = |on| LineContext {
+            startup: on,
+            ..LineContext::default()
+        };
+        let startup = Line::Command(Command::StartWithWindows);
+        assert_eq!(
+            line_text(startup, &start(true)).trailing.as_deref(),
+            Some("On")
+        );
+        assert_eq!(
+            line_text(startup, &start(false)).trailing.as_deref(),
+            Some("Off")
+        );
+
+        let own = LineContext {
+            search_hotkey: Some("Alt+Space"),
+            ..LineContext::default()
+        };
+        assert_eq!(
+            line_text(Line::SearchHotkey, &own).trailing.as_deref(),
+            Some("Alt+Space")
+        );
+        assert_eq!(line_text(Line::Prefix('#'), &context).title, "#  hotkeys");
+    }
+
+    #[test]
+    fn a_key_check_answers_free_reserved_or_taken_in_the_keys_own_spelling() {
+        let check = |availability| LineContext {
+            check: Some(("ctrl+alt+x", availability)),
+            ..LineContext::default()
+        };
+        assert_eq!(
+            line_text(Line::Check, &check(Some(Availability::Free))).title,
+            "Ctrl+Alt+X is free"
+        );
+        assert_eq!(
+            line_text(Line::Check, &check(Some(Availability::Taken))).title,
+            "Ctrl+Alt+X is taken"
+        );
+        let reserved = LineContext {
+            check: Some((
+                "win+e",
+                Some(Availability::Reserved("File Explorer (Windows)")),
+            )),
+            ..LineContext::default()
+        };
+        assert_eq!(
+            line_text(Line::Check, &reserved).title,
+            "Win+E is taken by File Explorer (Windows)"
+        );
+        assert!(
+            line_text(Line::Check, &check(None))
+                .title
+                .starts_with("Checking")
+        );
+    }
     #[test]
     fn how_long_ago_is_said_in_a_few_words() {
         assert_eq!(ago(0), "just now");

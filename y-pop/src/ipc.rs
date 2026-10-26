@@ -13,6 +13,9 @@ use y_core::single_instance;
 /// (`AppInfo::single_instance` derives one from the other).
 pub const CLASS: &str = "YpoLite.YPop";
 
+/// The name y-pop is registered under to start with Windows (`HKCU...Run`).
+pub const STARTUP_NAME: &str = "Y-Pop";
+
 /// The settings app's executable, looked for next to `y-pop.exe` by the
 /// `<settings/>` menu item.
 pub const CONFIG_EXE: &str = "y-pop-config.exe";

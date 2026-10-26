@@ -30,7 +30,7 @@ runs it and reports; sessions don't drive the desktop themselves)
 | 11 `y-pop-config` support | ⬜ |
 | later | Search layer in the boards; plugins |
 
-**Resume here:** phase 6: 6.4 (the sections list), 6.5 (prefix line), 6.7 (Clear history) remain; 6.1–6.3 and 6.6 are built (awaiting a live look). The user manual is `docs/user-manual.md`: update it with each feature. Still to look at (👁): all of phase 4 (checklist under its "Done when"), the action menu, the row buttons, Reveal and the configured shortcuts of 5.2–5.6, the start-up balloon and the search hotkey (phase 1), icon quality at 32 and 48 px and `y-snap`'s overlays unchanged (phase 3). Task 1.9 (`tray="true"`) is for later.
+**Resume here:** phase 8.4 (`/` files, background thread) is the one open task of phases 6 and 8; everything else through 8 is built (awaiting a live look; 6.4 is the flat-list form, the real views come with phases 7, 9, 10). The user manual is `docs/user-manual.md`: update it with each feature. Still to look at (👁): all of phase 4 (checklist under its "Done when"), the action menu, the row buttons, Reveal and the configured shortcuts of 5.2–5.6, the start-up balloon and the search hotkey (phase 1), icon quality at 32 and 48 px and `y-snap`'s overlays unchanged (phase 3). Task 1.9 (`tray="true"`) is for later.
 
 ---
 
@@ -468,6 +468,12 @@ button; a `<actions>` that removes or rebinds some.
 - This departs from the spec's "can open the submenu but not highlight":
   the highlight works too, by key presses. Spec §2.9 should be corrected after 👁.
 
+**Fix (2026-10-26) — the footer under an action menu.** When the menu reached
+the footer, the window grew but the footer stayed where it was, under the menu.
+`Layout::with_menu` now keeps the room for the footer below the menu and moves
+the footer to the new bottom whenever the menu reaches it; a menu that fits above
+it leaves it alone (2 tests).
+
 **5.1 (the first cut) built (2026-10-26),** kept for what it left behind: `state::Action` (`Open`, `RunAsAdmin`,
 `ContainingFolder`, `CopyPath`) rides on `Outcome::Activate(hit, action)`;
 `Key::Digit` for the number row. 7 new `State` tests, 2 for `display`, 2 for
@@ -503,10 +509,10 @@ Spec §2.4, §2.10. After this phase the empty box looks like the mockup.
 | 6.1 | `history` (pure + file): `y-pop.history` next to the config; lines `key \t count \t last-launch`; keys `menu:<path>`, `start:<target>`, `folder:<path>`; cap 200; written when search closes; unknown/vanished keys skipped and dropped on next write. `history="false"` writes nothing. Tests. | ✅ |
 | 6.2 | Ranking bonus from history, computed once per opening. | ✅ |
 | 6.3 | Empty box: Recent (`count`, with "2 min ago"), first row selected so hotkey + Enter relaunches; Ctrl+Del forgets one. | 👁 |
-| 6.4 | Sections list (one row per section, count, ›); → / Enter / Tab opens one as a scope chip; ← / Backspace comes back. Each section's "opened" content: menus (phase 7), Start menu (phase 9), search-only (phase 10). Until those exist, only sections that work are shown. | ⬜ |
-| 6.5 | The prefix line under the sections (clickable; phase 8 makes the prefixes work). | ⬜ |
+| 6.4 | Sections list (one row per section, count, ›); → / Enter / Tab opens one as a scope chip; ← / Backspace comes back. Each section's "opened" content: menus (phase 7), Start menu (phase 9), search-only (phase 10). Until those exist, only sections that work are shown. | 👁 (flat lists) |
+| 6.5 | The prefix line under the sections (clickable; phase 8 makes the prefixes work). | 👁 |
 | 6.6 | **`collapsed="true"`**: open on the input row alone with a ⌄ button; ↓ or ⌄ unfolds, ↑ on the first row folds, erasing the text folds again, Esc order: clear text, leave section, fold, close. Footer hidden while folded. The window resizes (the overlay is recreated or resized: decide by which is simpler with `UpdateLayeredWindow`). | 👁 |
-| 6.7 | `>Clear search history` (with phase 8's commands, or a temporary tray entry). | ⬜ |
+| 6.7 | `>Clear search history` (with phase 8's commands, or a temporary tray entry). | 👁 (as `>Clear search history`) |
 
 **Done when:** 👁 both opening modes, Recent across restarts, forgetting an
 entry.
@@ -543,6 +549,82 @@ entry.
   `actions::available(…, forgettable)` — and stays open, the selection keeping
   its place (`State::remove_recent`). It was `false` everywhere before.
 - 19 new tests. The painting of the header and the time are the window's, so 👁.
+
+**6.4 built (2026-10-26), the flat-list form** — the sections list:
+
+- `search::sections` (`rows`, 3 tests): what the empty box lists under
+  **BROWSE**, in configuration order, one `Row::Section` each: **Tray menus**
+  (`<menus>`, implied) and each search-only **group**, if they hold an app, with
+  their app count on the second line. Not listed because they have nothing to
+  open yet: `<start-menu>` (phase 9), search-only folders (10.2), plugins. The
+  list is computed once per opening.
+- **Opening** (`Enter`, `→`, `Tab`, a click): the section becomes a chip, like a
+  group entered with `Tab` — `Place::Menus` or `Place::Group(id)` replaces the
+  `NodeId` scopes (`State::scopes` now returns `&[Place]`). Inside, the empty
+  box lists the section's items: the tray icons for **Tray menus** (the roots,
+  whose groups `Tab` goes into), the group's direct children for a group.
+  Typing searches only there (`Scope::Menus` is new: entries of the tray menus,
+  not the search-only ones). `←` on an empty box, or `Backspace`, comes back
+  with the section's row selected again.
+- Selection rests on section rows as on results (`first_selectable`); they have
+  no actions, buttons or menu, and are not counted by `Alt+n`.
+- **Replaced later, section by section**: the tray menus by Miller columns
+  with a details pane (7.1) and the A–Z list (7.2); the `include` filter (7.3) is
+  not read yet, so the section covers every tray menu; the Start menu gets 9.4.
+- 10 new `State` tests, 1 `Scope` change. Painting a section row (folder glyph,
+  name, "N apps", ›) is the window's, so 👁.
+
+**Fix (2026-10-26) — menu mnemonics in names.** A tray menu's names carry
+`&` markers (`&Word`, `Publ&isher`, `&Office`). Search drew them raw, where GDI
+swallowed the `&` and underlined the next letter, and the matched-letter runs
+were drawn as separate pieces, so the first letter vanished. `matcher::plain`
+now strips them (`&&` is a literal `&`) in the index (name and path), on the
+rows, in the second line's group path and in the chips. A whole-name prefix
+match now sees the first letter too. The tray menu itself keeps its markers, and
+history keys use the raw names, which are the identity.
+
+**8.1, 8.2, 8.3, 8.5 and 6.5, 6.7 built (2026-10-26)** — the prefixes:
+
+- A **prefix** is the first character of the box, on the outermost box only
+  (inside a section or a group `>` is text): `State::prefix`. The text after it
+  (`rest`, trimmed) is the query. `search::commands` (pure, 2 tests) holds
+  `Command`, `Line` (the rows of a prefixed list that are not index entries:
+  a command, a prefix, the search hotkey, a key check) and `PREFIXES`.
+- **`>` commands** (8.1, 6.7): Reload configuration, Open settings, Edit
+  `y-pop.xml`, Open configuration folder, Clear search history, Start with
+  Windows (shows On/Off), About, Quit; found by label, or at 60 % by other
+  words (`restart` finds Reload). *Refresh the Start menu* and *Reload plugins*
+  join with phases 9 and later. Enter → `Outcome::Command`, handed to the owner
+  (`SearchWindow::take_command`, `YPop::run_command`) after the window has
+  closed — except *Clear search history*, which the window does itself since it
+  holds the history (it also deletes `y-pop.history`). Start with Windows
+  toggles `HKCU\…\Run` under `ipc::STARTUP_NAME`.
+- **`#` hotkeys** (8.2): empty, the search hotkey first, then every entry with a
+  hotkey, in index order; with text, the entries with a hotkey ranked as in a
+  plain search (`Scope::Hotkeys`; a combination typed in any order matches as a
+  set). Enter launches what the key opens. The search hotkey's row closes.
+- **`#<combination>` check** (8.3, `search::keycheck`, 3 tests): a *complete*
+  combination (`y_core::hotkey::Hotkey::parse`) that no entry and not the search
+  hotkey uses adds a **Line::Check** row. The window answers it on the next
+  layout (`Open::probe_check`, once per typed combination): a
+  `HotkeyManager::register` with `Fallback::None` on the overlay's own window,
+  then `unregister` at once. Refused: named from a built-in table of the keys
+  Windows keeps (`keycheck::RESERVED`, 23 of them) or "taken" with a note that
+  `override="true"` could still claim it. Free: Enter opens `y-pop-config`
+  (plain open, no `--select` yet; see 5.7). Nothing happens on Enter otherwise.
+- **`?`** (8.5): the prefixes that work, Enter types one; the same list is the
+  line under the sections.
+- **The line of prefixes** (6.5): the last row of the empty box, not selectable
+  (`Row::selectable`), a chip for each prefix (`Layout::with_prefix_chips`,
+  `Hit::Prefix`, 2 tests); a click types it (`State::prefix_click`).
+- 21 new tests (state 13, layout 2, display 2, commands 2, keycheck 3). 👁 for
+  the painting, the probe (`RegisterHotKey` on the search window: a key held by a
+  program must be seen as taken), the commands and the toggle of Start with
+  Windows.
+- **Not done: 8.4, `/` (files in browsed folders)**, and `/` is therefore not in
+  `?` or on the line of prefixes. It needs a background listing thread, a
+  `WM_APP` message to append results without moving the selection, and the
+  `index="true"` rule for network folders.
 
 **6.6 built (2026-10-26)** — `collapsed="true"`:
 
@@ -588,11 +670,11 @@ Spec §2.7, §2.14.
 
 | | Task | Status |
 |---|---|---|
-| 8.1 | `>` commands: reload, open settings, edit `y-pop.xml`, open configuration folder, clear history, refresh Start menu, start with Windows, about, quit. | ⬜ |
-| 8.2 | `#` hotkeys: every binding (search's own included), filtered. | ⬜ |
-| 8.3 | `#<combination>` check: `RegisterHotKey` probe on the search window, unregistered at once; built-in table of keys Windows reserves; "free" row opens `y-pop-config` ready to assign (plain open until 11.x). | ⬜ |
+| 8.1 | `>` commands: reload, open settings, edit `y-pop.xml`, open configuration folder, clear history, refresh Start menu, start with Windows, about, quit. | 👁 (without Start menu refresh, which has no Start menu yet) |
+| 8.2 | `#` hotkeys: every binding (search's own included), filtered. | 👁 |
+| 8.3 | `#<combination>` check: `RegisterHotKey` probe on the search window, unregistered at once; built-in table of keys Windows reserves; "free" row opens `y-pop-config` ready to assign (plain open until 11.x). | 👁 |
 | 8.4 | `/` files in browsed folders: listed on first `/` per opening on a background thread, results posted back (`WM_APP` pattern) and appended without moving the selection; network folders skipped unless `index="true"`. | ⬜ |
-| 8.5 | `?` lists the prefixes. | ⬜ |
+| 8.5 | `?` lists the prefixes. | 👁 |
 
 **Done when:** 👁 each prefix; `/` stays responsive on a slow folder.
 

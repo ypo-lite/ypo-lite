@@ -14,7 +14,7 @@
 use crate::model::NodeId;
 
 use super::hotkey::KeyCombo;
-use super::index::{Entry, Field, Index, Kind};
+use super::index::{Entry, Field, Index, Kind, Source};
 use super::matcher::{Matcher, fold};
 
 /// What was typed, folded and split once per keystroke.
@@ -52,6 +52,11 @@ pub enum Scope {
     /// What is under this group, at any depth (the group itself excluded):
     /// the box after `Tab` on a group.
     Within(NodeId),
+    /// Only the tray menus: not the search-only groups, not (later) the Start
+    /// menu.
+    Menus,
+    /// Only what has a hotkey: the list of `#`.
+    Hotkeys,
 }
 
 /// One result: an entry of the index, how well it matched, and by what.
@@ -82,6 +87,19 @@ impl Searcher {
         Self::default()
     }
 
+    /// How well `text` (already folded) matches every word of `query`, or
+    /// `None`: for the few rows that are not entries, like the `>` commands.
+    pub fn score_text(&mut self, query: &Query, text: &str) -> Option<u32> {
+        if query.words.is_empty() {
+            return Some(0);
+        }
+        let mut total = 0;
+        for word in &query.words {
+            total += self.matcher.score(word, text)?;
+        }
+        Some(total / query.words.len() as u32)
+    }
+
     /// What history adds to each entry's score, by position in the index.
     pub fn set_bonuses(&mut self, bonuses: Vec<u32>) {
         self.bonuses = bonuses;
@@ -95,9 +113,13 @@ impl Searcher {
             return &self.hits;
         }
         for (position, entry) in index.entries().iter().enumerate() {
-            if let Scope::Within(group) = scope
-                && !entry.ancestors.contains(&group)
-            {
+            let outside = match scope {
+                Scope::All => false,
+                Scope::Within(group) => !entry.ancestors.contains(&group),
+                Scope::Menus => entry.source != Source::Menu,
+                Scope::Hotkeys => entry.hotkeys().is_empty(),
+            };
+            if outside {
                 continue;
             }
             if let Some((score, matched)) = self.score(entry, query) {
@@ -336,6 +358,30 @@ mod tests {
         assert_eq!(first(&mut searcher), editors[1]);
     }
 
+    #[test]
+    fn a_menu_names_mnemonic_marker_does_not_hide_its_first_letter() {
+        let tree = config::load_str(
+            r#"<y-pop><group name="&amp;Office"><app name="&amp;Word" exe="w.exe"/><app name="Publ&amp;isher" exe="p.exe"/></group></y-pop>"#,
+            &mut Vec::<Variable>::new(),
+        )
+        .unwrap();
+        let index = Index::from_tree(&tree);
+        let names: Vec<_> = index
+            .entries()
+            .iter()
+            .map(|e| e.name().to_owned())
+            .collect();
+        assert_eq!(names, ["office", "word", "publisher"]);
+
+        // "word" is a whole-name prefix, not a mid-word match after the &.
+        let mut searcher = Searcher::new();
+        let hits = searcher.search(&index, &Query::new("w"), Scope::All);
+        assert_eq!(index.entries()[hits[0].entry as usize].name(), "word");
+        // And its path carries no marker either.
+        let hits = searcher.search(&index, &Query::new("office"), Scope::All);
+        assert!(hits.len() >= 3, "the group and what is under it");
+        assert_eq!(hits[0].matched, Field::Name);
+    }
     #[test]
     fn a_command_ranks_below_an_app_that_matches_as_well() {
         let index = Index::from_tree(&tree());

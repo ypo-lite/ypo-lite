@@ -99,6 +99,9 @@ const BUTTON_GAP: i32 = 4;
 const BUTTON_PADDING: i32 = 10;
 /// The buttons may take this share of the row's width, no more.
 const BUTTONS_SHARE: f32 = 0.5;
+// The chips of the line of prefixes.
+const CHIP_HEIGHT: i32 = 22;
+const CHIP_GAP: i32 = 6;
 
 /// What a layout is made from.
 #[derive(Clone, Copy, Debug)]
@@ -155,6 +158,8 @@ pub enum Hit {
     Footer,
     /// The **⌄** of a folded box.
     Chevron,
+    /// A chip of the line of prefixes, by index.
+    Prefix(usize),
     /// An action button of the selected row, by index into its buttons.
     Button(usize),
     /// The **⋯** that ends the selected row.
@@ -189,6 +194,9 @@ pub struct Layout {
     /// The **⌄** that unfolds a folded box, at the input row's right end
     /// ([`Layout::with_chevron`]).
     pub chevron: Option<Rect>,
+    /// The chips of the line of prefixes, if it is visible
+    /// ([`Layout::with_prefix_chips`]).
+    pub prefix_chips: Vec<Rect>,
     scale: f32,
 }
 
@@ -268,8 +276,38 @@ impl Layout {
             menu: None,
             buttons: None,
             chevron: None,
+            prefix_chips: Vec::new(),
             scale,
         }
+    }
+
+    /// This layout with the chips of the line of prefixes, if that row is on
+    /// screen: one for each of `widths` — the width of each label, in physical
+    /// pixels — from the left padding on, as many as fit.
+    pub fn with_prefix_chips(mut self, widths: &[i32]) -> Self {
+        let Some(row) = self
+            .rows
+            .iter()
+            .find(|placed| placed.kind == RowKind::Prefixes)
+            .map(|placed| placed.rect)
+        else {
+            return self;
+        };
+        let px = |logical: i32| scaled(logical, self.scale);
+        let (height, gap, inner) = (px(CHIP_HEIGHT), px(CHIP_GAP), px(BUTTON_PADDING));
+        let top = row.top + (row.height() - height) / 2;
+        let limit = row.right - px(PADDING);
+        let mut x = row.left + px(PADDING);
+        for &label in widths {
+            let width = label + 2 * inner;
+            if x + width > limit {
+                break;
+            }
+            self.prefix_chips
+                .push(Rect::new(x, top, x + width, top + height));
+            x += width + gap;
+        }
+        self
     }
 
     /// This layout with the **⌄** that unfolds a folded box, ending the input
@@ -375,6 +413,13 @@ impl Layout {
         if self.footer.is_some_and(|footer| footer.contains(x, y)) {
             return Some(Hit::Footer);
         }
+        if let Some(n) = self
+            .prefix_chips
+            .iter()
+            .position(|chip| chip.contains(x, y))
+        {
+            return Some(Hit::Prefix(n));
+        }
         if let Some(buttons) = &self.buttons {
             if buttons.more.contains(x, y) {
                 return Some(Hit::More);
@@ -394,9 +439,12 @@ impl Layout {
     /// This layout with the action menu of `count` items open on the row at
     /// `anchor`: a panel at the window's right edge, tucked under the row, or
     /// over it if it would pass `limit` (the tallest the window can be). The
-    /// window grows to hold it.
+    /// window grows to hold it, and the footer, if the menu reaches it, goes
+    /// down to the new bottom so that it stays the last thing in the window.
     pub fn with_menu(mut self, anchor: Rect, count: usize, limit: i32) -> Self {
         let px = |logical: i32| scaled(logical, self.scale);
+        let footer_height = self.footer.map_or(0, |footer| footer.height());
+        let limit = limit - footer_height;
         let width = px(MENU_WIDTH).min(self.size.0 - 2 * px(MENU_MARGIN));
         let height = px(MENU_ITEM_HEIGHT) * count as i32 + 2 * px(MENU_PADDING);
         let right = self.size.0 - px(MENU_MARGIN);
@@ -419,7 +467,18 @@ impl Layout {
                 )
             })
             .collect();
-        self.size.1 = self.size.1.max(rect.bottom);
+        match self.footer {
+            Some(footer) if rect.bottom > footer.top => {
+                self.size.1 = self.size.1.max(rect.bottom + footer_height);
+                self.footer = Some(Rect::new(
+                    0,
+                    self.size.1 - footer_height,
+                    self.size.0,
+                    self.size.1,
+                ));
+            }
+            _ => self.size.1 = self.size.1.max(rect.bottom),
+        }
         self.menu = Some(MenuLayout { rect, items });
         self
     }
@@ -680,6 +739,38 @@ mod tests {
     }
 
     #[test]
+    fn a_menu_that_reaches_the_footer_pushes_it_to_the_new_bottom() {
+        let rows = [Header, Item, Item];
+        let spec = spec(1000);
+        let layout = Layout::new(&spec, &rows, 0);
+        let row = layout.rect_of(2).unwrap();
+        let footer_before = layout.footer.unwrap();
+
+        let layout = layout.with_menu(row, 4, max_height(&spec));
+        let menu = layout.menu.clone().unwrap();
+        let footer = layout.footer.unwrap();
+
+        assert!(menu.rect.bottom > footer_before.top, "it does reach it");
+        assert_eq!(footer.bottom, layout.size.1, "the footer is the last thing");
+        assert_eq!(footer.height(), footer_before.height());
+        assert!(
+            menu.rect.bottom <= footer.top,
+            "and the menu does not cover it"
+        );
+        assert!(layout.size.1 <= max_height(&spec));
+    }
+
+    #[test]
+    fn a_menu_that_fits_above_the_footer_leaves_it_alone() {
+        let rows = [Header, Item, Item, Item, Item, Item];
+        let spec = spec(1000);
+        let layout = Layout::new(&spec, &rows, 0);
+        let row = layout.rect_of(1).unwrap();
+        let (footer, size) = (layout.footer, layout.size);
+        let layout = layout.with_menu(row, 2, max_height(&spec));
+        assert_eq!((layout.footer, layout.size), (footer, size));
+    }
+    #[test]
     fn near_the_bottom_the_menu_opens_upwards() {
         let rows = vec![Item; 12];
         let spec = spec(6 + 5 * 52 + 6);
@@ -873,6 +964,40 @@ mod tests {
         };
         let layout = Layout::new(&folded, &[], 0).with_chevron();
         assert_eq!(layout.size, (640, 56));
+    }
+
+    #[test]
+    fn the_line_of_prefixes_has_a_clickable_chip_for_each_prefix() {
+        let rows = [Header, Item, Prefixes];
+        let layout = Layout::new(&spec(1000), &rows, 0).with_prefix_chips(&[60, 50, 40]);
+        let row = layout.rect_of(2).unwrap();
+
+        assert_eq!(layout.prefix_chips.len(), 3);
+        assert_eq!(
+            layout.prefix_chips[0].left,
+            row.left + 16,
+            "from the padding"
+        );
+        assert_eq!(layout.prefix_chips[0].width(), 60 + 20);
+        assert_eq!(
+            layout.prefix_chips[0].right + 6,
+            layout.prefix_chips[1].left
+        );
+        for (n, chip) in layout.prefix_chips.iter().enumerate() {
+            let (x, y) = ((chip.left + chip.right) / 2, (chip.top + chip.bottom) / 2);
+            assert_eq!(layout.hit_test(x, y), Some(Hit::Prefix(n)));
+        }
+        let gap = layout.prefix_chips[0].right + 2;
+        assert_eq!(layout.hit_test(gap, row.top + 17), Some(Hit::Row(2)));
+    }
+
+    #[test]
+    fn without_that_line_on_screen_there_are_no_chips() {
+        let layout = Layout::new(&spec(1000), &[Header, Item], 0).with_prefix_chips(&[60]);
+        assert!(layout.prefix_chips.is_empty());
+        // Chips that would run off the row are left out.
+        let layout = Layout::new(&spec(1000), &[Prefixes], 0).with_prefix_chips(&[300, 300, 300]);
+        assert_eq!(layout.prefix_chips.len(), 1);
     }
     #[test]
     fn at_least_one_row_is_placed_however_little_room() {

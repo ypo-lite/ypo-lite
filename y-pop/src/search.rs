@@ -9,6 +9,8 @@
 //! * [`matcher`]: fuzzy subsequence scoring of one query word against one
 //!   piece of text.
 //! * [`actions`]: which actions apply to which result.
+//! * [`commands`]: the `>` commands, the `?` prefixes and the rows they make.
+//! * [`keycheck`]: is a key combination free? The table of the keys Windows keeps.
 //! * [`display`]: the text of a result row (matched runs, headings, second line).
 //! * [`history`]: what was launched and when, for Recent and a ranking bonus.
 //! * [`hotkey`]: a key combination as a set, for queries like `shift+ctrl+esc`.
@@ -20,16 +22,20 @@
 //! * [`query`]: running a typed query over the index.
 //! * [`state`]: the box's behaviour — events in, outcomes out.
 //! * [`results`]: the Top hit / groups layout of a result list.
+//! * [`sections`]: the sections the empty box lists, and the places a box can be scoped to.
 
 pub mod actions;
+pub mod commands;
 pub mod display;
 pub mod history;
 pub mod hotkey;
 pub mod index;
 pub mod input;
+pub mod keycheck;
 pub mod keys;
 pub mod layout;
 pub mod matcher;
 pub mod query;
 pub mod results;
+pub mod sections;
 pub mod state;

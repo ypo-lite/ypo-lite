@@ -8,7 +8,7 @@
 use crate::model::{ConfigTree, NodeId, NodeKind};
 
 use super::hotkey::KeyCombo;
-use super::matcher::fold;
+use super::matcher::{fold, plain};
 
 /// Where an entry comes from. Decides its group in a result list and the
 /// "only in search" label.
@@ -104,7 +104,7 @@ impl Entry {
             id,
             ancestors: Vec::new(),
             facts: Facts::default(),
-            name: fold(name).into(),
+            name: fold(&plain(name)).into(),
             keywords: "".into(),
             exe: "".into(),
             path: "".into(),
@@ -127,7 +127,7 @@ impl Entry {
 
     /// The names of the groups it sits in, outermost first.
     pub fn with_path(mut self, groups: &[&str]) -> Self {
-        self.path = fold(&groups.join(" › ")).into();
+        self.path = fold(&plain(&groups.join(" › "))).into();
         self
     }
 

@@ -38,6 +38,7 @@ use y_core::{
 use y_pop::{
     config, ipc,
     model::{ActionId, ConfigTree, EventMask, NodeId, NodeKind, TrayExtras},
+    search::commands::Command,
 };
 
 const APP: AppInfo = AppInfo::new("Y-Pop", ipc::CLASS).single_instance();
@@ -189,6 +190,30 @@ impl YPop {
             ActionId::CopyPath => {}
             // Not reachable yet: a Start-menu item and a history row.
             ActionId::AddToMenu | ActionId::Forget => {}
+        }
+    }
+
+    /// A y-pop command chosen with `>` in the search window, once it has
+    /// closed. (*Clear search history* is done by the window.)
+    fn run_command(&mut self, hwnd: HWND, command: Command) {
+        match command {
+            Command::Reload => self.reload(hwnd),
+            Command::OpenSettings => self.open_settings(),
+            Command::EditConfig => y_core::shell::open(&config::path()),
+            Command::OpenFolder => {
+                if let Some(folder) = config::path().parent() {
+                    y_core::shell::open(folder);
+                }
+            }
+            Command::StartWithWindows => {
+                let enable = !y_core::startup::is_enabled(ipc::STARTUP_NAME);
+                if let Err(error) = y_core::startup::set_enabled(ipc::STARTUP_NAME, enable) {
+                    y_core::log::line(format_args!("start with Windows: {error}"));
+                }
+            }
+            Command::About => show_about(),
+            Command::Quit => window::quit(0),
+            Command::ClearHistory => {}
         }
     }
 
@@ -558,8 +583,12 @@ impl TrayApp for YPop {
             .as_mut()
             .map(|search| (search.on_message(msg, wparam, lparam, &self.tree), search));
         if let Some((true, search)) = handled_by_search {
+            let command = search.take_command();
             if let Some((node, action)) = search.take_activation() {
                 self.run_search_pick(hwnd, node, action);
+            }
+            if let Some(command) = command {
+                self.run_command(hwnd, command);
             }
             return Some(LRESULT(0));
         }

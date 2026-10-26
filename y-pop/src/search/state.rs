@@ -6,14 +6,18 @@
 //! the window with the Win32 half only: reading the keyboard, the clipboard,
 //! painting.
 
-use crate::model::{ActionId, ActionsConfig, NodeId, ResultsLayout};
+use crate::model::{ActionId, ActionsConfig, ResultsLayout};
 
 use super::actions::{self, Available};
+use super::commands::{Command, Line, PREFIXES};
+use super::hotkey::KeyCombo;
 use super::index::{Field, Index, Kind};
 use super::input::Input;
 use super::layout::RowKind;
+use super::matcher::fold;
 use super::query::{Hit, Query, Scope, Searcher};
 use super::results::{self, Heading};
+pub use super::sections::{Place, SectionRow};
 
 /// How many results `PgUp`/`PgDn` move over.
 pub const PAGE: usize = 5;
@@ -43,6 +47,11 @@ pub enum Outcome {
     Copy(String),
     /// Read the clipboard and answer with [`Event::Paste`].
     Paste,
+    /// Run this y-pop command (`>`).
+    Command(Command),
+    /// Enter on the answer of a key check (`#`): the window knows whether the key
+    /// is free.
+    CheckKey,
 }
 
 /// One row of the list, in the order shown.
@@ -50,6 +59,20 @@ pub enum Outcome {
 pub enum Row {
     Header(Heading),
     Result(Hit),
+    /// A section of the empty box: Enter opens it as a chip.
+    Section(SectionRow),
+    /// A line of a prefixed list: a command, a prefix, the answer of a key check.
+    Line(Line),
+    /// The line of clickable prefixes under the sections.
+    Prefixes,
+}
+
+impl Row {
+    /// Whether the selection can rest on it: not a header, not the line of
+    /// prefixes.
+    pub fn selectable(&self) -> bool {
+        !matches!(self, Self::Header(_) | Self::Prefixes)
+    }
 }
 
 /// The action menu opened on a result: what it lists and which line is lit.
@@ -67,7 +90,7 @@ pub struct State {
     query: Query,
     /// The groups entered with Tab, outermost first: the chips in the box.
     /// A search looks only under the last.
-    scopes: Vec<NodeId>,
+    scopes: Vec<Place>,
     layout: ResultsLayout,
     searcher: Searcher,
     rows: Vec<Row>,
@@ -81,6 +104,13 @@ pub struct State {
     row_actions: bool,
     /// The last launches, newest first, listed by the empty box.
     recent: Vec<Recent>,
+    /// The sections the empty box lists under Browse.
+    sections: Vec<SectionRow>,
+    /// The search hotkey, listed by `#`.
+    search_hotkey: Option<KeyCombo>,
+    /// What the typed combination is, when `#` asks whether it is free: the
+    /// text after the prefix, for the window to probe.
+    check: Option<String>,
     /// `collapsed="true"`: the list can be folded away, leaving the input row.
     collapsible: bool,
     /// Folded now: no rows, whatever the text. Only ever true when collapsible.
@@ -111,6 +141,9 @@ impl State {
             menu: None,
             row_actions: true,
             recent: Vec::new(),
+            sections: Vec::new(),
+            search_hotkey: None,
+            check: None,
             collapsible: false,
             folded: false,
         }
@@ -118,8 +151,15 @@ impl State {
 
     /// Sets what the empty box lists under **Recent** and what history adds to
     /// the scores, and shows the empty box. Called once, as the window opens.
-    pub fn start(&mut self, index: &Index, recent: Vec<Recent>, bonuses: Vec<u32>) {
+    pub fn start(
+        &mut self,
+        index: &Index,
+        recent: Vec<Recent>,
+        sections: Vec<SectionRow>,
+        bonuses: Vec<u32>,
+    ) {
         self.recent = recent;
+        self.sections = sections;
         self.searcher.set_bonuses(bonuses);
         self.refresh(index);
     }
@@ -131,7 +171,7 @@ impl State {
 
     /// When `hit` was launched, if it is listed under Recent right now.
     pub fn last_launch(&self, hit: Hit) -> Option<u64> {
-        if !self.query.is_empty() || !self.scopes.is_empty() {
+        if !self.query.is_empty() || !self.scopes.is_empty() || self.prefix().is_some() {
             return None;
         }
         self.recent
@@ -147,11 +187,14 @@ impl State {
         self.recent.retain(|recent| recent.entry != entry);
         self.refresh(index);
         if let Some(at) = at {
-            let same_place = matches!(self.rows.get(at), Some(Row::Result(_))).then_some(at);
+            let same_place =
+                matches!(self.rows.get(at), Some(Row::Result(_) | Row::Section(_))).then_some(at);
             self.selected = same_place.or_else(|| {
-                self.rows
+                let last_recent = self
+                    .rows
                     .iter()
-                    .rposition(|row| matches!(row, Row::Result(_)))
+                    .rposition(|row| matches!(row, Row::Result(_)));
+                last_recent.or_else(|| self.first_selectable())
             });
         }
     }
@@ -192,11 +235,13 @@ impl State {
             && !self.folded
             && self.query.is_empty()
             && self.scopes.is_empty()
-            && self.selected
-                == self
-                    .rows
-                    .iter()
-                    .position(|row| matches!(row, Row::Result(_)))
+            && self.prefix().is_none()
+            && self.selected == self.first_selectable()
+    }
+
+    /// The first row a selection can rest on: not a header.
+    fn first_selectable(&self) -> Option<usize> {
+        self.rows.iter().position(Row::selectable)
     }
 
     fn fold(&mut self, index: &Index) -> Outcome {
@@ -264,14 +309,15 @@ impl State {
     }
 
     /// The groups entered, outermost first — what the box shows as chips.
-    pub fn scopes(&self) -> &[NodeId] {
+    pub fn scopes(&self) -> &[Place] {
         &self.scopes
     }
 
     fn scope(&self) -> Scope {
-        self.scopes
-            .last()
-            .map_or(Scope::All, |&group| Scope::Within(group))
+        self.scopes.last().map_or(Scope::All, |&place| match place {
+            Place::Menus => Scope::Menus,
+            Place::Group(group) => Scope::Within(group),
+        })
     }
 
     /// The rows as the layout wants to know them.
@@ -280,7 +326,8 @@ impl State {
             .iter()
             .map(|row| match row {
                 Row::Header(_) => RowKind::Header,
-                Row::Result(_) => RowKind::Item,
+                Row::Result(_) | Row::Section(_) | Row::Line(_) => RowKind::Item,
+                Row::Prefixes => RowKind::Prefixes,
             })
             .collect()
     }
@@ -294,7 +341,7 @@ impl State {
     pub fn selected_hit(&self) -> Option<Hit> {
         match self.rows.get(self.selected?)? {
             Row::Result(hit) => Some(*hit),
-            Row::Header(_) => None,
+            _ => None,
         }
     }
 
@@ -309,7 +356,7 @@ impl State {
     /// range, or already selected.
     pub fn select_row(&mut self, row: usize) -> bool {
         match self.rows.get(row) {
-            Some(Row::Result(_)) if self.selected != Some(row) => {
+            Some(selectable) if selectable.selectable() && self.selected != Some(row) => {
                 self.selected = Some(row);
                 true
             }
@@ -320,11 +367,22 @@ impl State {
     /// A click on `row`: selects it and, if it is a result, opens it the way
     /// Enter would.
     pub fn click_row(&mut self, index: &Index, row: usize) -> Outcome {
-        if !matches!(self.rows.get(row), Some(Row::Result(_))) {
-            return Outcome::Nothing;
+        match self.rows.get(row) {
+            Some(Row::Result(_)) => {
+                self.selected = Some(row);
+                self.perform(index, ActionId::Open)
+            }
+            Some(Row::Section(section)) => {
+                let place = section.place;
+                self.selected = Some(row);
+                self.enter(index, place)
+            }
+            Some(Row::Line(_)) => {
+                self.selected = Some(row);
+                self.activate_line(index)
+            }
+            _ => Outcome::Nothing,
         }
-        self.selected = Some(row);
-        self.perform(index, ActionId::Open)
     }
 
     /// `row`'s place among the results, counting from 1 — the `n` of the
@@ -541,18 +599,111 @@ impl State {
         if entry.kind != Kind::Group {
             return Outcome::Nothing;
         }
-        self.scopes.push(entry.id);
+        self.enter(index, Place::Group(entry.id))
+    }
+
+    /// Goes inside `place`: it becomes a chip, and the search looks only there.
+    fn enter(&mut self, index: &Index, place: Place) -> Outcome {
+        self.scopes.push(place);
         self.input.clear();
         self.refresh(index);
         Outcome::Redraw
     }
 
-    /// Back out of the innermost group.
-    fn leave_scope(&mut self, index: &Index) -> Outcome {
-        if self.scopes.pop().is_none() {
-            return Outcome::Nothing;
+    /// Enter, `→` or `Tab` on a section row of the empty box.
+    fn enter_section(&mut self, index: &Index) -> Outcome {
+        match self.selected.and_then(|row| self.rows.get(row)) {
+            Some(Row::Section(section)) => {
+                let place = section.place;
+                self.enter(index, place)
+            }
+            _ => Outcome::Nothing,
         }
+    }
+
+    /// Whether the selected row is a line of a prefixed list.
+    fn on_line(&self) -> bool {
+        matches!(
+            self.selected.and_then(|row| self.rows.get(row)),
+            Some(Row::Line(_))
+        )
+    }
+
+    /// Enter or a click on the selected line.
+    fn activate_line(&mut self, index: &Index) -> Outcome {
+        match self.selected.and_then(|row| self.rows.get(row)) {
+            Some(Row::Line(Line::Command(command))) => Outcome::Command(*command),
+            Some(Row::Line(Line::Prefix(prefix))) => {
+                let prefix = *prefix;
+                self.type_prefix(index, prefix)
+            }
+            Some(Row::Line(Line::SearchHotkey)) => Outcome::Close,
+            Some(Row::Line(Line::Check)) => Outcome::CheckKey,
+            _ => Outcome::Nothing,
+        }
+    }
+
+    /// Types a prefix into an empty box, the way a click on its chip does.
+    pub fn type_prefix(&mut self, index: &Index, prefix: char) -> Outcome {
+        self.input.set_text(&prefix.to_string());
+        self.settle(index);
+        Outcome::Redraw
+    }
+
+    /// A click on the `n`th chip of the line of prefixes.
+    pub fn prefix_click(&mut self, index: &Index, n: usize) -> Outcome {
+        match PREFIXES.get(n) {
+            Some(info) => self.type_prefix(index, info.prefix),
+            None => Outcome::Nothing,
+        }
+    }
+
+    /// The search hotkey, to list under `#`.
+    pub fn set_search_hotkey(&mut self, hotkey: Option<KeyCombo>) {
+        self.search_hotkey = hotkey;
+    }
+
+    /// The combination `#` is being asked about, when nothing in the file uses
+    /// it: the text the window should try to register.
+    pub fn check(&self) -> Option<&str> {
+        self.check.as_deref()
+    }
+
+    /// The prefix typed first, if it starts a list of its own. Only on the
+    /// outermost box: inside a section or a group a `>` is text.
+    fn prefix(&self) -> Option<char> {
+        if !self.scopes.is_empty() {
+            return None;
+        }
+        self.input
+            .text()
+            .chars()
+            .next()
+            .filter(|c| PREFIXES.iter().any(|info| info.prefix == *c))
+    }
+
+    /// Whether the selected row is a section of the empty box.
+    fn on_section(&self) -> bool {
+        matches!(
+            self.selected.and_then(|row| self.rows.get(row)),
+            Some(Row::Section(_))
+        )
+    }
+
+    /// Back out of the innermost place. Back on the empty box, the section it
+    /// was opened from is selected again.
+    fn leave_scope(&mut self, index: &Index) -> Outcome {
+        let Some(left) = self.scopes.pop() else {
+            return Outcome::Nothing;
+        };
         self.refresh(index);
+        let row = self
+            .rows
+            .iter()
+            .position(|row| matches!(row, Row::Section(section) if section.place == left));
+        if row.is_some() {
+            self.selected = row;
+        }
         Outcome::Redraw
     }
 
@@ -573,6 +724,19 @@ impl State {
 
     fn key(&mut self, index: &Index, key: Key, mods: Mods) -> Outcome {
         let Mods { ctrl, shift, .. } = mods;
+
+        // On a line of a prefixed list Enter does what it says.
+        if self.on_line() && mods == Mods::default() && key == Key::Enter {
+            return self.activate_line(index);
+        }
+
+        // On a section of the empty box Enter, `→` and Tab go inside it.
+        if self.on_section()
+            && mods == Mods::default()
+            && matches!(key, Key::Enter | Key::Right | Key::Tab)
+        {
+            return self.enter_section(index);
+        }
 
         // What the configuration binds to a shortcut comes first. (A shortcut
         // that would clash with editing or the arrows cannot be configured.)
@@ -603,6 +767,10 @@ impl State {
             Key::PageUp => self.step(-(PAGE as isize)),
             Key::PageDown => self.step(PAGE as isize),
 
+            // `←` on an empty box comes back out of a section, like Backspace.
+            Key::Left if self.input.is_empty() && !self.scopes.is_empty() => {
+                self.leave_scope(index)
+            }
             Key::Left => self.caret(|input| input.move_left(shift, ctrl)),
             Key::Right => self.caret(|input| input.move_right(shift, ctrl)),
             Key::Home => self.caret(|input| input.home(shift)),
@@ -662,7 +830,7 @@ impl State {
             .rows
             .iter()
             .enumerate()
-            .filter_map(|(row, kind)| matches!(kind, Row::Result(_)).then_some(row))
+            .filter_map(|(row, kind)| kind.selectable().then_some(row))
             .collect();
         let Some(&first) = results.first() else {
             return Outcome::Nothing;
@@ -685,9 +853,9 @@ impl State {
     /// Searches for the text as it is now and rebuilds the rows, the best
     /// result selected.
     ///
-    /// With nothing typed and no group entered the rows are the **Recent**
-    /// launches, if there are any (the sections are task 6.4). Inside a
-    /// group, an empty box lists what the group holds, in file order.
+    /// With nothing typed and nothing entered the rows are the **Recent**
+    /// launches, if there are any, then the **Browse** sections. Inside a place,
+    /// an empty box lists what it holds, in file order.
     fn refresh(&mut self, index: &Index) {
         self.menu = None;
         self.query = Query::new(self.input.text());
@@ -697,33 +865,58 @@ impl State {
             return;
         }
 
+        self.check = None;
+        if let Some(prefix) = self.prefix() {
+            let rest = self.input.text()[prefix.len_utf8()..].trim().to_owned();
+            self.query = Query::new(&rest);
+            self.list_prefixed(index, prefix, &rest);
+            self.selected = self.first_selectable();
+            return;
+        }
+
         if self.query.is_empty() {
-            if self.scopes.is_empty() {
-                if !self.recent.is_empty() {
-                    self.rows.push(Row::Header(Heading::Recent));
-                    self.rows.extend(self.recent.iter().map(|recent| {
+            let listed = |keep: &dyn Fn(&super::index::Entry) -> bool| -> Vec<Row> {
+                index
+                    .entries()
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, entry)| keep(entry))
+                    .map(|(position, _)| {
                         Row::Result(Hit {
-                            entry: recent.entry,
+                            entry: position as u32,
                             score: 0,
                             matched: Field::Name,
                         })
-                    }));
-                }
-            } else if let Some(&group) = self.scopes.last() {
-                self.rows.extend(
-                    index
-                        .entries()
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, entry)| entry.ancestors.last() == Some(&group))
-                        .map(|(position, _)| {
+                    })
+                    .collect()
+            };
+            match self.scopes.last().copied() {
+                // The empty box: the last launches, then the sections.
+                None => {
+                    if !self.recent.is_empty() {
+                        self.rows.push(Row::Header(Heading::Recent));
+                        self.rows.extend(self.recent.iter().map(|recent| {
                             Row::Result(Hit {
-                                entry: position as u32,
+                                entry: recent.entry,
                                 score: 0,
                                 matched: Field::Name,
                             })
-                        }),
-                );
+                        }));
+                    }
+                    if !self.sections.is_empty() {
+                        self.rows.push(Row::Header(Heading::Browse));
+                        self.rows
+                            .extend(self.sections.iter().copied().map(Row::Section));
+                    }
+                    self.rows.push(Row::Prefixes);
+                }
+                // The tray menus: the tray icons, whose menus Tab goes into.
+                Some(Place::Menus) => self.rows.extend(listed(&|entry| {
+                    entry.source == super::index::Source::Menu && entry.ancestors.is_empty()
+                })),
+                Some(Place::Group(group)) => self
+                    .rows
+                    .extend(listed(&|entry| entry.ancestors.last() == Some(&group))),
             }
         } else {
             let hits = self
@@ -737,10 +930,117 @@ impl State {
                 self.rows.extend(group.hits.into_iter().map(Row::Result));
             }
         }
-        self.selected = self
-            .rows
-            .iter()
-            .position(|row| matches!(row, Row::Result(_)));
+        self.selected = self.first_selectable();
+    }
+
+    /// The rows of a list a prefix asked for (spec §2.7): `rest` is what was
+    /// typed after it.
+    fn list_prefixed(&mut self, index: &Index, prefix: char, rest: &str) {
+        match prefix {
+            '>' => {
+                let mut scored: Vec<(u32, Command)> = Vec::new();
+                for command in Command::ALL {
+                    let by_label = self
+                        .searcher
+                        .score_text(&self.query, &fold(command.label()));
+                    // Words that are not in the label count for less.
+                    let by_words = self
+                        .searcher
+                        .score_text(&self.query, &fold(command.keywords()))
+                        .map(|score| score * 6 / 10);
+                    if let Some(score) = by_label.max(by_words) {
+                        scored.push((score, command));
+                    }
+                }
+                scored.sort_by_key(|&(score, _)| std::cmp::Reverse(score));
+                if !scored.is_empty() {
+                    self.rows.push(Row::Header(Heading::Commands));
+                    self.rows.extend(
+                        scored
+                            .into_iter()
+                            .map(|(_, command)| Row::Line(Line::Command(command))),
+                    );
+                }
+            }
+            '#' => self.list_hotkeys(index, rest),
+            '?' => {
+                let mut lines = Vec::new();
+                for info in PREFIXES {
+                    let text = fold(&format!(
+                        "{} {} {}",
+                        info.prefix, info.name, info.description
+                    ));
+                    if self.searcher.score_text(&self.query, &text).is_some() {
+                        lines.push(Row::Line(Line::Prefix(info.prefix)));
+                    }
+                }
+                if !lines.is_empty() {
+                    self.rows.push(Row::Header(Heading::Prefixes));
+                    self.rows.extend(lines);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// `#`: every binding of the file (the search hotkey too), filtered by what
+    /// follows; and, for a whole combination that nothing in the file uses, one
+    /// more row that asks the system whether it is free (spec §2.14).
+    fn list_hotkeys(&mut self, index: &Index, rest: &str) {
+        let compact: String = rest.split_whitespace().collect();
+        let typed = KeyCombo::is_query(&compact)
+            .then(|| KeyCombo::parse(&compact))
+            .flatten();
+        let mut rows = Vec::new();
+
+        if rest.is_empty() {
+            if self.search_hotkey.is_some() {
+                rows.push(Row::Line(Line::SearchHotkey));
+            }
+            rows.extend(
+                index
+                    .entries()
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, entry)| !entry.hotkeys().is_empty())
+                    .map(|(position, _)| {
+                        Row::Result(Hit {
+                            entry: position as u32,
+                            score: 0,
+                            matched: Field::Hotkey,
+                        })
+                    }),
+            );
+        } else {
+            let own = typed.as_ref().zip(self.search_hotkey.as_ref());
+            if own.is_some_and(|(typed, own)| typed.match_score(own).is_some()) {
+                rows.push(Row::Line(Line::SearchHotkey));
+            }
+            let hits = self
+                .searcher
+                .search(index, &self.query, Scope::Hotkeys)
+                .to_vec();
+            rows.extend(hits.into_iter().map(Row::Result));
+
+            if let Some(combo) = typed
+                && y_core::hotkey::Hotkey::parse(rest).is_some()
+            {
+                let used = self.search_hotkey.as_ref() == Some(&combo)
+                    || index
+                        .entries()
+                        .iter()
+                        .any(|entry| entry.hotkeys().contains(&combo));
+                if !used {
+                    self.check = Some(rest.to_owned());
+                    rows.push(Row::Line(Line::Check));
+                }
+            }
+        }
+
+        if !rows.is_empty() {
+            self.rows.push(Row::Header(Heading::Hotkeys));
+            self.rows.extend(rows);
+        }
     }
 }
 
@@ -956,7 +1256,7 @@ mod tests {
         press(&mut state, &index, Key::End);
         state.handle(&index, Event::Key(Key::Backspace, with(true, false)));
         assert_eq!(state.input().text(), "");
-        assert!(state.rows().is_empty());
+        assert!(only_prefixes(&state));
     }
 
     #[test]
@@ -965,7 +1265,7 @@ mod tests {
         type_text(&mut state, &index, "not");
         assert_eq!(press(&mut state, &index, Key::Escape), Outcome::Redraw);
         assert!(state.input().is_empty());
-        assert!(state.rows().is_empty());
+        assert!(only_prefixes(&state));
         assert_eq!(press(&mut state, &index, Key::Escape), Outcome::Close);
     }
 
@@ -1008,7 +1308,7 @@ mod tests {
             Outcome::Copy("notepad".into())
         );
         assert!(state.input().is_empty());
-        assert!(state.rows().is_empty(), "and the results follow");
+        assert!(only_prefixes(&state), "and the results follow");
 
         assert_eq!(
             state.handle(&index, Event::Key(Key::Letter('V'), ctrl)),
@@ -1032,7 +1332,7 @@ mod tests {
             .iter()
             .filter_map(|row| match row {
                 Row::Result(hit) => Some(name_of(index, *hit).to_owned()),
-                Row::Header(_) => None,
+                _ => None,
             })
             .collect()
     }
@@ -1110,7 +1410,7 @@ mod tests {
             state.scopes().is_empty(),
             "and leaves once the box is empty"
         );
-        assert!(state.rows().is_empty());
+        assert!(only_prefixes(&state));
         assert_eq!(
             press(&mut state, &index, Key::Backspace),
             Outcome::Nothing,
@@ -1667,17 +1967,27 @@ mod tests {
                 last: 1000 - n as u64,
             })
             .collect();
-        state.start(&index, recent, Vec::new());
+        state.start(&index, recent, Vec::new(), Vec::new());
         (state, index)
+    }
+
+    /// The box shows nothing but the line of prefixes: the empty box with no
+    /// history and no sections.
+    fn only_prefixes(state: &State) -> bool {
+        state.rows().iter().all(|row| matches!(row, Row::Prefixes))
     }
 
     fn row_names(state: &State, index: &Index) -> Vec<String> {
         state
             .rows()
             .iter()
-            .map(|row| match row {
-                Row::Header(heading) => format!("[{heading:?}]"),
-                Row::Result(hit) => index.entries()[hit.entry as usize].name().to_owned(),
+            .filter_map(|row| match row {
+                Row::Header(heading) => Some(format!("[{heading:?}]")),
+                Row::Result(hit) => Some(index.entries()[hit.entry as usize].name().to_owned()),
+                Row::Section(section) => Some(format!("<{:?}>", section.place)),
+                Row::Line(line) => Some(format!("{line:?}")),
+                // Always last on the empty box: left out so the tests read.
+                Row::Prefixes => None,
             })
             .collect()
     }
@@ -1725,7 +2035,7 @@ mod tests {
             .iter()
             .filter_map(|row| match row {
                 Row::Result(hit) => state.last_launch(*hit),
-                Row::Header(_) => None,
+                _ => None,
             })
             .collect();
         assert_eq!(hits, [1000, 999]);
@@ -1778,7 +2088,7 @@ mod tests {
         assert_eq!(state.selected(), Some(1), "the last one: the one before");
 
         state.remove_recent(&index, position(&index, "notepad"));
-        assert!(state.rows().is_empty());
+        assert!(only_prefixes(&state));
         assert_eq!(state.selected(), None);
     }
 
@@ -1793,7 +2103,7 @@ mod tests {
                 last: 1000 - n as u64,
             })
             .collect();
-        state.start(&index, recent, Vec::new());
+        state.start(&index, recent, Vec::new(), Vec::new());
         (state, index)
     }
 
@@ -1895,6 +2205,342 @@ mod tests {
         assert_eq!(state.unfold(&index), Outcome::Redraw);
         assert_eq!(row_names(&state, &index), ["[Recent]", "notepad"]);
         assert_eq!(state.unfold(&index), Outcome::Nothing, "already open");
+    }
+
+    const SECTIONS: &str = r#"<y-pop>
+        <search>
+            <recent count="3"/>
+            <group name="Admin"><app name="Regedit" exe="r.exe"/><app name="Services" exe="s.exe"/></group>
+        </search>
+        <group name="Work">
+            <app name="Outlook" exe="o.exe"/>
+            <group name="Servers"><app name="Putty" exe="p.exe"/></group>
+        </group>
+        <app name="Alone" exe="a.exe"/>
+    </y-pop>"#;
+
+    /// A state on the sections of `SECTIONS`, with `recent` launched before.
+    fn with_sections(recent: &[&str]) -> (State, Index) {
+        let mut builtins: Vec<Variable> = Vec::new();
+        let tree = config::load_str(SECTIONS, &mut builtins).unwrap();
+        let index = Index::from_tree(&tree);
+        let recent = recent
+            .iter()
+            .enumerate()
+            .map(|(n, name)| Recent {
+                entry: position(&index, name),
+                last: 1000 - n as u64,
+            })
+            .collect();
+        let mut state = state();
+        state.start(
+            &index,
+            recent,
+            super::super::sections::rows(&tree, &index),
+            Vec::new(),
+        );
+        (state, index)
+    }
+
+    #[test]
+    fn the_empty_box_lists_recent_then_the_sections() {
+        let (state, index) = with_sections(&["outlook"]);
+        assert_eq!(
+            row_names(&state, &index),
+            [
+                "[Recent]",
+                "outlook",
+                "[Browse]",
+                "<Menus>",
+                &format!(
+                    "<{:?}>",
+                    Place::Group(index.entries()[position(&index, "admin") as usize].id)
+                ),
+            ]
+        );
+        assert_eq!(state.selected(), Some(1), "the last launch, not a section");
+    }
+
+    #[test]
+    fn with_no_history_the_first_section_is_selected() {
+        let (state, _) = with_sections(&[]);
+        assert_eq!(state.selected(), Some(1));
+        assert!(matches!(state.rows()[1], Row::Section(_)));
+    }
+
+    #[test]
+    fn the_arrows_walk_the_sections_too() {
+        let (mut state, index) = with_sections(&["outlook"]);
+        press(&mut state, &index, Key::Down);
+        assert_eq!(state.selected(), Some(3), "the header is skipped");
+        press(&mut state, &index, Key::Down);
+        assert_eq!(state.selected(), Some(4));
+        press(&mut state, &index, Key::Down);
+        assert_eq!(state.selected(), Some(4), "the end");
+        assert!(state.selected_hit().is_none(), "a section is not a result");
+    }
+
+    #[test]
+    fn enter_right_and_tab_open_a_section_as_a_chip() {
+        for key in [Key::Enter, Key::Right, Key::Tab] {
+            let (mut state, index) = with_sections(&[]);
+            assert_eq!(press(&mut state, &index, key), Outcome::Redraw, "{key:?}");
+            assert_eq!(state.scopes(), [Place::Menus], "{key:?}");
+            assert!(state.input().is_empty());
+        }
+    }
+
+    #[test]
+    fn the_tray_menus_section_lists_the_tray_icons_and_searches_only_the_menus() {
+        let (mut state, index) = with_sections(&[]);
+        press(&mut state, &index, Key::Enter);
+        assert_eq!(row_names(&state, &index), ["work", "alone"]);
+
+        // Searching inside finds the menus' items, not the search-only ones.
+        type_text(&mut state, &index, "e");
+        let found = row_names(&state, &index);
+        assert!(found.contains(&"outlook".to_owned()), "{found:?}");
+        assert!(!found.contains(&"regedit".to_owned()), "{found:?}");
+    }
+
+    #[test]
+    fn a_search_only_group_section_lists_what_is_in_it() {
+        let (mut state, index) = with_sections(&[]);
+        press(&mut state, &index, Key::Down);
+        press(&mut state, &index, Key::Enter);
+        assert_eq!(row_names(&state, &index), ["regedit", "services"]);
+    }
+
+    #[test]
+    fn left_and_backspace_come_back_to_the_section_they_left() {
+        for key in [Key::Left, Key::Backspace] {
+            let (mut state, index) = with_sections(&[]);
+            press(&mut state, &index, Key::Down);
+            press(&mut state, &index, Key::Enter);
+            assert_eq!(state.scopes().len(), 1);
+
+            press(&mut state, &index, key);
+            assert!(state.scopes().is_empty(), "{key:?}");
+            assert_eq!(state.selected(), Some(2), "{key:?}: the Admin row, again");
+        }
+    }
+
+    #[test]
+    fn a_section_has_no_actions_and_no_buttons() {
+        let (mut state, index) = with_sections(&[]);
+        assert!(!state.has_row_buttons(&index));
+        assert!(state.available_actions(&index).is_empty());
+        assert_eq!(
+            state.handle(&index, shortcut("Alt+Enter")),
+            Outcome::Nothing
+        );
+        assert_eq!(state.handle(&index, shortcut("Ctrl+E")), Outcome::Nothing);
+    }
+
+    #[test]
+    fn a_click_on_a_section_goes_inside_it() {
+        let (mut state, index) = with_sections(&[]);
+        assert!(state.select_row(2), "hover lights a section");
+        assert_eq!(state.click_row(&index, 1), Outcome::Redraw);
+        assert_eq!(state.scopes(), [Place::Menus]);
+    }
+
+    #[test]
+    fn typing_replaces_the_sections_and_erasing_brings_them_back() {
+        let (mut state, index) = with_sections(&[]);
+        type_text(&mut state, &index, "out");
+        assert!(
+            state
+                .rows()
+                .iter()
+                .all(|row| !matches!(row, Row::Section(_)))
+        );
+        for _ in 0..3 {
+            press(&mut state, &index, Key::Backspace);
+        }
+        assert!(matches!(state.rows()[1], Row::Section(_)));
+    }
+
+    const KEYED: &str = r#"<y-pop>
+        <search hotkey="Alt+Space"/>
+        <group name="Work">
+            <app name="Task Manager" exe="t.exe"><hotkey key="Ctrl+Shift+Esc"/></app>
+            <app name="Notes" exe="n.exe"><hotkey key="Win+N"/></app>
+            <app name="Plain" exe="p.exe"/>
+        </group>
+    </y-pop>"#;
+
+    /// A state on `KEYED`, which knows the search hotkey.
+    fn keyed() -> (State, Index) {
+        let mut builtins: Vec<Variable> = Vec::new();
+        let tree = config::load_str(KEYED, &mut builtins).unwrap();
+        let index = Index::from_tree(&tree);
+        let mut state = state();
+        state.set_search_hotkey(KeyCombo::parse("alt+space"));
+        state.start(&index, Vec::new(), Vec::new(), Vec::new());
+        (state, index)
+    }
+
+    fn lines(state: &State) -> Vec<Line> {
+        state
+            .rows()
+            .iter()
+            .filter_map(|row| match row {
+                Row::Line(line) => Some(*line),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_empty_box_ends_with_the_line_of_prefixes_which_cannot_be_selected() {
+        let (mut state, index) = with_sections(&["outlook"]);
+        assert_eq!(state.rows().last(), Some(&Row::Prefixes));
+        assert_eq!(
+            state.row_kinds().last(),
+            Some(&super::super::layout::RowKind::Prefixes)
+        );
+        for _ in 0..6 {
+            press(&mut state, &index, Key::Down);
+        }
+        assert_ne!(state.selected(), Some(state.rows().len() - 1));
+        assert!(!state.select_row(state.rows().len() - 1));
+    }
+
+    #[test]
+    fn a_click_on_a_prefix_types_it() {
+        let (mut state, index) = with_sections(&[]);
+        assert_eq!(state.prefix_click(&index, 1), Outcome::Redraw);
+        assert_eq!(state.input().text(), "#");
+        assert_eq!(state.prefix_click(&index, 9), Outcome::Nothing);
+    }
+
+    #[test]
+    fn greater_than_lists_the_commands_and_enter_runs_one() {
+        let (mut state, index) = keyed();
+        type_text(&mut state, &index, ">");
+        assert_eq!(
+            lines(&state),
+            Command::ALL.map(Line::Command),
+            "all of them, in order"
+        );
+        assert_eq!(state.rows()[0], Row::Header(Heading::Commands));
+        assert_eq!(
+            press(&mut state, &index, Key::Enter),
+            Outcome::Command(Command::Reload)
+        );
+    }
+
+    #[test]
+    fn a_command_is_found_by_its_name_or_by_other_words() {
+        let (mut state, index) = keyed();
+        type_text(&mut state, &index, ">quit");
+        assert_eq!(lines(&state)[0], Line::Command(Command::Quit));
+        press(&mut state, &index, Key::Escape);
+
+        type_text(&mut state, &index, ">restart");
+        assert_eq!(lines(&state), [Line::Command(Command::Reload)]);
+        press(&mut state, &index, Key::Escape);
+
+        type_text(&mut state, &index, ">zzzz");
+        assert!(state.rows().is_empty());
+        assert_eq!(press(&mut state, &index, Key::Enter), Outcome::Nothing);
+    }
+
+    #[test]
+    fn hash_lists_every_binding_with_the_search_hotkey_first() {
+        let (mut state, index) = keyed();
+        type_text(&mut state, &index, "#");
+        assert_eq!(row_names(&state, &index)[0], "[Hotkeys]");
+        assert_eq!(lines(&state), [Line::SearchHotkey]);
+        let names = row_names(&state, &index);
+        assert!(names.contains(&"task manager".to_owned()), "{names:?}");
+        assert!(names.contains(&"notes".to_owned()));
+        assert!(
+            !names.contains(&"plain".to_owned()),
+            "no hotkey, not listed"
+        );
+
+        // Enter on a binding launches what it opens.
+        press(&mut state, &index, Key::Down);
+        let hit = state.selected_hit().unwrap();
+        assert_eq!(
+            press(&mut state, &index, Key::Enter),
+            Outcome::Activate(hit, ActionId::Open)
+        );
+    }
+
+    #[test]
+    fn hash_and_part_of_a_combination_filters_the_bindings() {
+        let (mut state, index) = keyed();
+        type_text(&mut state, &index, "#shift+ctrl");
+        let names = row_names(&state, &index);
+        assert!(names.contains(&"task manager".to_owned()), "{names:?}");
+        assert!(!names.contains(&"notes".to_owned()));
+        assert_eq!(state.check(), None, "not a whole combination");
+    }
+
+    #[test]
+    fn a_whole_combination_nothing_uses_asks_whether_it_is_free() {
+        let (mut state, index) = keyed();
+        type_text(&mut state, &index, "#ctrl+alt+x");
+        assert_eq!(lines(&state), [Line::Check]);
+        assert_eq!(state.check(), Some("ctrl+alt+x"));
+        assert_eq!(press(&mut state, &index, Key::Enter), Outcome::CheckKey);
+    }
+
+    #[test]
+    fn a_combination_the_file_uses_is_found_not_checked() {
+        let (mut state, index) = keyed();
+        type_text(&mut state, &index, "#win+n");
+        assert_eq!(state.check(), None);
+        assert!(lines(&state).is_empty());
+        assert!(row_names(&state, &index).contains(&"notes".to_owned()));
+
+        press(&mut state, &index, Key::Escape);
+        type_text(&mut state, &index, "#alt+space");
+        assert_eq!(
+            lines(&state),
+            [Line::SearchHotkey],
+            "it is the search's own"
+        );
+        assert_eq!(state.check(), None);
+    }
+
+    #[test]
+    fn question_mark_lists_the_prefixes_and_enter_types_one() {
+        let (mut state, index) = keyed();
+        type_text(&mut state, &index, "?");
+        assert_eq!(
+            lines(&state),
+            PREFIXES.map(|info| Line::Prefix(info.prefix))
+        );
+        press(&mut state, &index, Key::Down);
+        assert_eq!(press(&mut state, &index, Key::Enter), Outcome::Redraw);
+        assert_eq!(state.input().text(), "#", "the second one");
+        assert_eq!(lines(&state), [Line::SearchHotkey]);
+    }
+
+    #[test]
+    fn a_prefix_is_only_a_prefix_on_the_outermost_box() {
+        let (mut state, index) = with_sections(&[]);
+        press(&mut state, &index, Key::Enter);
+        assert_eq!(state.scopes().len(), 1);
+        type_text(&mut state, &index, ">");
+        assert!(lines(&state).is_empty(), "a > inside a section is text");
+    }
+
+    #[test]
+    fn erasing_the_prefix_brings_the_empty_box_back() {
+        let (mut state, index) = with_sections(&["outlook"]);
+        type_text(&mut state, &index, ">");
+        assert!(!lines(&state).is_empty());
+        press(&mut state, &index, Key::Backspace);
+        assert_eq!(state.rows()[0], Row::Header(Heading::Recent));
+        // Escape clears it too.
+        type_text(&mut state, &index, "?");
+        assert_eq!(press(&mut state, &index, Key::Escape), Outcome::Redraw);
+        assert!(state.input().is_empty());
     }
     #[test]
     fn row_actions_false_takes_every_button_away() {

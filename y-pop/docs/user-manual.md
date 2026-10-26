@@ -13,6 +13,8 @@ this page is for using it. It grows with each feature.
 - [The search window](#the-search-window)
 - [Actions](#actions)
 - [History and Recent](#history-and-recent)
+- [Prefixes](#prefixes)
+- [Sections](#sections)
 - [Collapsed mode](#collapsed-mode)
 - [Configuring the search](#configuring-the-search)
 - [Not there yet](#not-there-yet)
@@ -73,8 +75,8 @@ second line saying where it comes from, and its hotkey if it has one.
 | `PgUp` `PgDn` | move five results |
 | `Enter` | open the selected result (see [Actions](#actions)) |
 | `Alt+1` … `Alt+9` | open the *n*-th result at once. The rows show the number. |
-| `Tab` | go **inside** the selected group: it becomes a chip in the box and the search looks only there |
-| `Shift+Tab`, `Backspace` on an empty box | leave the innermost group |
+| `Tab` (`Enter`, `→` on a section row) | go **inside** the selected group or section: it becomes a chip in the box and the search looks only there |
+| `Shift+Tab`, `←` or `Backspace` on an empty box | leave the innermost group or section |
 | `Esc` | clear the text; then leave the groups; then close |
 | `Ctrl+C` | copy the selected text of the box; with none selected, copy the **path** of the selected result |
 | `Ctrl+V`, `Ctrl+X`, `Ctrl+A` | paste, cut, select all (in the box) |
@@ -198,6 +200,80 @@ file is read or written.
 
 ---
 
+## Prefixes
+
+The **first character** of the box can pick what to search. Under the sections
+the empty box has a line of clickable chips — `> commands`, `# hotkeys`,
+`? help` — and typing the character does the same. A prefix only counts in the
+outermost box: inside a section or a group, `>` is just text. Erase the
+character (or press `Esc`) to come back.
+
+### `>` — y-pop commands
+
+| Command | Does |
+| --- | --- |
+| Reload configuration | reads `y-pop.xml` again |
+| Open settings | opens `y-pop-config` |
+| Edit y-pop.xml | opens the file in its editor |
+| Open configuration folder | shows the folder in Explorer |
+| Clear search history | forgets what was launched, and deletes `y-pop.history` |
+| Start with Windows | turns running y-pop at logon on or off (the row says which) |
+| About, Quit | what they say |
+
+Type to filter: `>rel` finds *Reload*, and so do other words (`>restart`).
+`Enter` runs the selected one. *Refresh the Start menu* and *Reload plugins*
+come with the Start menu and the plugins.
+
+### `#` — hotkeys
+
+`#` alone lists every hotkey of the file: the search hotkey first, then each
+item that has one (tray icons included). `Enter` launches what the key opens.
+Type after it to narrow: a name (`#notes`), or part of a combination in any
+order (`#shift+ctrl` lists the hotkeys that hold both).
+
+**Is a key free?** Type a *whole* combination that nothing in the file uses —
+`#ctrl+alt+x` — and a row tells you. y-pop asks Windows by registering the key
+on the search window for a moment and letting go at once:
+
+- **"Ctrl+Alt+X is free"**: no other program holds it. `Enter` opens
+  `y-pop-config`, to assign it.
+- **"Win+E is taken by File Explorer (Windows)"**: refused, and Windows keeps it
+  for that (y-pop knows a table of about twenty such keys).
+- **"Ctrl+Alt+X is taken"**: another program holds it; Windows does not say
+  which. `override="true"` on a `<hotkey>` could still claim it with the
+  low-level hook.
+
+A combination the file already uses is just found, not checked.
+
+### `?` — the prefixes
+
+Lists the prefixes with what each does; `Enter` types the selected one.
+
+---
+
+## Sections
+
+Under Recent, the empty box lists your **sections** under **BROWSE**, one row
+each with the number of apps it holds and a ›:
+
+- **Tray menus** — every tray menu (`<menus>`, always there; it comes first
+  unless you place it);
+- each **search-only group** you wrote in `<search>`.
+
+`Enter`, `→`, `Tab` or a click on a row goes **inside**: the section becomes a
+chip in the box, the list shows what is in it, and typing searches only there.
+Inside *Tray menus* you see the tray icons; `Tab` on a group goes down into it,
+as anywhere. `←` or `Backspace` on an empty box comes back to the section you
+left. A section row has no actions.
+
+This is the simple form: a flat list. The tray menus will become Miller
+columns with a details pane, the Start menu an A–Z list, and a folder will
+list its files, as those parts get built. A section with nothing to open yet
+(the Start menu, a browsed folder, a plugin) is not listed, and `include=` on
+`<menus>` is not read yet.
+
+---
+
 ## Collapsed mode
 
 `<search collapsed="true">` is for a bare launcher box: the window opens as **the
@@ -307,10 +383,10 @@ Not search settings, but they feed it: the `name`, `keywords`, `tooltip`,
 Written in the spec, parsed from the file where it makes sense, but not doing
 anything yet:
 
-- the **sections** of the empty box (`<menus>` and the others): below Recent it
-  lists nothing yet;
+- the **real views** of the sections: Miller columns for the tray menus, the
+  A–Z lists (today every section is a flat list), and `include=` on `<menus>`;
 - **`<start-menu>`**: Start menu apps are not searched yet;
-- **prefixes** and the hotkey check;
+- the **`/` prefix** (files inside browsed folders);
 - **plugins** (`<plugin>` is kept but not run);
 - **Add to a menu**;
 - **Edit** selecting the item in `y-pop-config`.

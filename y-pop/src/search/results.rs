@@ -16,6 +16,12 @@ pub const PER_GROUP: usize = 5;
 pub enum Heading {
     /// The last launches, on the empty box.
     Recent,
+    /// The sections, on the empty box.
+    Browse,
+    /// The hotkeys, under `#`.
+    Hotkeys,
+    /// The prefixes, under `?`.
+    Prefixes,
     TopHit,
     /// Apps of the tray menus and of search-only groups.
     Apps,

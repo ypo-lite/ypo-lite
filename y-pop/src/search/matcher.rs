@@ -27,6 +27,27 @@
 //! starts a word or follows the previous match scores more, a gap costs a
 //! little (more as it grows).
 
+/// `text` without the menu mnemonic markers of a tray menu's names: `&Word`
+/// is `Word` (the `&` only underlines the letter after it in a menu), `&&` is a
+/// literal `&`. Search shows, indexes and emphasizes this form: drawn as it is,
+/// the `&` would swallow itself and underline the next letter, and a whole-name
+/// prefix match would never see the first letter.
+pub fn plain(text: &str) -> String {
+    let mut plain = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '&' {
+            if chars.peek() == Some(&'&') {
+                plain.push('&');
+                chars.next();
+            }
+        } else {
+            plain.push(c);
+        }
+    }
+    plain
+}
+
 /// `text` lower-cased with accents removed, one `char` per `char`.
 pub fn fold(text: &str) -> String {
     text.chars().map(fold_char).collect()
@@ -278,6 +299,16 @@ mod tests {
 
     fn chars(text: &str) -> Vec<char> {
         fold(text).chars().collect()
+    }
+
+    #[test]
+    fn mnemonic_markers_are_not_part_of_a_name() {
+        assert_eq!(plain("&Word"), "Word");
+        assert_eq!(plain("Publ&isher"), "Publisher");
+        assert_eq!(plain("R&&D"), "R&D");
+        assert_eq!(plain("Trailing &"), "Trailing ");
+        assert_eq!(plain("Plain"), "Plain");
+        assert_eq!(plain("y-pop › &Office"), "y-pop › Office");
     }
 
     fn score(query: &str, text: &str) -> Option<u32> {

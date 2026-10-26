@@ -61,6 +61,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 use y_core::{
     Result, clipboard,
+    hotkey::{Fallback, Hotkey, HotkeyManager},
     icon::IconCache,
     ids::WM_APP_FIRST,
     monitor::Monitor,
@@ -69,13 +70,18 @@ use y_core::{
 };
 
 use y_pop::model::{ActionId, ActionsConfig, ConfigTree, NodeId, ResultsLayout, Section};
-use y_pop::search::display;
+use y_pop::search::commands::{Command, Line, PREFIXES};
+use y_pop::search::display::{self, LineContext};
 use y_pop::search::history::{self, History};
+use y_pop::search::hotkey::KeyCombo;
 use y_pop::search::index::Index;
+use y_pop::search::keycheck::{self, Availability};
 use y_pop::search::layout::{self, Hit, Layout, Placed, Spec};
+use y_pop::search::matcher::plain;
 use y_pop::search::query;
+use y_pop::search::sections::{self, Place, SectionRow};
 use y_pop::search::state::{Event, Key, Mods, Outcome, Row, State};
-use y_pop::skins;
+use y_pop::{ipc, skins};
 
 /// Posted to the owner when the window should close (focus lost, a click
 /// outside). `wParam` is the generation.
@@ -119,6 +125,14 @@ const GLYPH_FAMILY: &str = "Segoe MDL2 Assets";
 const GLYPH_SEARCH: &str = "\u{E721}";
 /// "More" (⋯): the button that opens the action menu.
 const GLYPH_MORE: &str = "\u{E712}";
+/// Keys of a section row's icon in the pixel cache, which is otherwise keyed by
+/// index entry: far above any entry number.
+const SECTIONS_ICON: u32 = u32::MAX;
+const SECTION_ICON_BASE: u32 = 1 << 31;
+/// "Folder": the icon of a section row, when the system gives no icon.
+const GLYPH_FOLDER: &str = "\u{E8B7}";
+/// "ChevronRight" (›): the row opens something.
+const GLYPH_ENTER: &str = "\u{E76C}";
 /// "ChevronDown" (⌄): unfolds a collapsed box.
 const GLYPH_CHEVRON: &str = "\u{E70D}";
 // Logical pixels, like the layout's.
@@ -126,6 +140,8 @@ const INPUT_FONT: i32 = 18;
 const TITLE_FONT: i32 = 15;
 const SMALL_FONT: i32 = 12;
 const GLYPH_FONT: i32 = 16;
+/// The id of the hotkey registered for a moment to see whether a key is free.
+const PROBE_ID: u32 = 0x7F01;
 const ICON_SIZE: i32 = 32;
 /// The window's top edge, as a share of the work area's height: the upper
 /// third, a little above where the eye rests.
@@ -154,6 +170,9 @@ pub struct SearchWindow {
     /// The node the user picked, closed over and waiting for the owner to
     /// act on it ([`SearchWindow::take_activation`]).
     activation: Option<(NodeId, ActionId)>,
+    /// The y-pop command the user ran with `>`, waiting for the owner
+    /// ([`SearchWindow::take_command`]).
+    command: Option<Command>,
 }
 
 struct Open {
@@ -180,6 +199,12 @@ struct Open {
     /// the window closes. Empty, and left alone, with `history="false"`.
     history: History,
     history_on: bool,
+    /// Whether y-pop starts with Windows, for the line in `>`; read once.
+    startup: bool,
+    /// The search hotkey as written, for the line in `#`.
+    search_hotkey: Option<String>,
+    /// What the system said of the combination `#` is checking.
+    check: Option<(String, Availability)>,
     /// The row button under the pointer, if any: a [`Hit::Button`] or [`Hit::More`].
     hover: Option<Hit>,
     icons: IconCache,
@@ -206,6 +231,7 @@ impl SearchWindow {
             open: None,
             generation: 0,
             activation: None,
+            command: None,
         }
     }
 
@@ -221,6 +247,12 @@ impl SearchWindow {
     /// had it, which the new program can then take.
     pub fn take_activation(&mut self) -> Option<(NodeId, ActionId)> {
         self.activation.take()
+    }
+
+    /// The command chosen with `>`, once, after the window has closed. (Clearing
+    /// the history is done by the window itself and never comes out here.)
+    pub fn take_command(&mut self) -> Option<Command> {
+        self.command.take()
     }
 
     /// The hotkey: opens the window, or closes it if it is already open.
@@ -298,13 +330,14 @@ impl SearchWindow {
             recent_count,
             history::now(),
         );
+        let sections = sections::rows(tree, &index);
         let mut state = State::new(
             search.map_or(ResultsLayout::Sections, |search| search.results),
             search.map_or_else(ActionsConfig::default, |search| search.actions.clone()),
         )
         .with_row_actions(search.is_none_or(|search| search.row_actions))
         .with_collapsed(search.is_some_and(|search| search.collapsed));
-        state.start(&index, recent, bonuses);
+        state.start(&index, recent, sections, bonuses);
 
         let mut open = Open {
             palette: Palette::of(design.as_ref()),
@@ -336,6 +369,11 @@ impl SearchWindow {
             state,
             history,
             history_on,
+            startup: y_core::startup::is_enabled(ipc::STARTUP_NAME),
+            search_hotkey: tree
+                .search_hotkey()
+                .map(|(_, binding)| binding.hotkey.to_string()),
+            check: None,
             hover: None,
             icons: IconCache::with_size(icon_size),
             icon_size,
@@ -445,7 +483,9 @@ impl SearchWindow {
                         // and leaves the list and the buttons alone.
                         matches!(hit, Some(Hit::Menu(item)) if open.state.menu_select(item))
                     } else {
-                        let button = hit.filter(|hit| matches!(hit, Hit::Button(_) | Hit::More));
+                        let button = hit.filter(|hit| {
+                            matches!(hit, Hit::Button(_) | Hit::More | Hit::Prefix(_))
+                        });
                         let lit = std::mem::replace(&mut open.hover, button) != button;
                         matches!(hit, Some(Hit::Row(row)) if open.state.select_row(row)) || lit
                     };
@@ -474,6 +514,7 @@ impl SearchWindow {
                         Some(Hit::Row(row)) => Some(open.state.click_row(&open.index, row)),
                         Some(Hit::Button(n)) => Some(open.state.button_click(&open.index, n)),
                         Some(Hit::Chevron) => Some(open.state.unfold(&open.index)),
+                        Some(Hit::Prefix(n)) => Some(open.state.prefix_click(&open.index, n)),
                         Some(Hit::More) => Some(open.state.open_menu(&open.index)),
                         _ => None,
                     }
@@ -576,6 +617,31 @@ impl SearchWindow {
                     self.event(tree, Event::Paste(text));
                 }
             }
+            Outcome::Command(Command::ClearHistory) => {
+                // The window holds the history, so it does this one itself.
+                if let Some(open) = self.open.as_mut() {
+                    open.history.clear();
+                }
+                let _ = std::fs::remove_file(history::path());
+                self.close();
+            }
+            Outcome::Command(command) => {
+                self.command = Some(command);
+                self.close();
+            }
+            Outcome::CheckKey => {
+                let free = self
+                    .open
+                    .as_ref()
+                    .and_then(|open| open.check.as_ref())
+                    .is_some_and(|(_, availability)| *availability == Availability::Free);
+                // Free: open the settings, to put the key somewhere (it cannot
+                // yet go to a given item: `y-pop-config` has no `--select`).
+                if free {
+                    self.command = Some(Command::OpenSettings);
+                    self.close();
+                }
+            }
         }
     }
 
@@ -647,6 +713,17 @@ impl Open {
                 .collect();
             layout = layout.with_row_buttons(selected, &widths);
         }
+        // The line of prefixes, each chip as wide as its label.
+        let chips: Vec<i32> = PREFIXES
+            .iter()
+            .map(|info| {
+                self.fonts
+                    .small
+                    .measure(&chip_label(info.prefix, info.name))
+                    .0
+            })
+            .collect();
+        layout = layout.with_prefix_chips(&chips);
         // An open action menu hangs from its row, and the window grows to hold it.
         self.layout = match self.state.menu() {
             Some(menu) => match layout.rect_of(menu.row) {
@@ -656,6 +733,26 @@ impl Open {
             None => layout,
         };
         self.visible.set(self.layout.size);
+        self.probe_check();
+    }
+
+    /// Asks the system whether the combination `#` is checking is free, once
+    /// for each: it is tried on this window and let go at once.
+    fn probe_check(&mut self) {
+        let Some(typed) = self.state.check().map(str::to_owned) else {
+            self.check = None;
+            return;
+        };
+        if self.check.as_ref().is_some_and(|(done, _)| *done == typed) {
+            return;
+        }
+        let (Some(hotkey), Some(combo)) = (Hotkey::parse(&typed), KeyCombo::parse(&typed)) else {
+            return;
+        };
+        let mut probe = HotkeyManager::new(self.overlay.hwnd());
+        let registered = probe.register(PROBE_ID, hotkey, Fallback::None).is_ok();
+        probe.unregister(PROBE_ID);
+        self.check = Some((typed, keycheck::availability(&combo, registered)));
     }
 
     /// Draws the whole window, in the order the canvas needs: fills, text and
@@ -677,6 +774,9 @@ impl Open {
             focused,
             spec,
             hover,
+            startup,
+            search_hotkey,
+            check,
             ..
         } = self;
         let palette = *palette;
@@ -712,8 +812,8 @@ impl Open {
         let chips: Vec<(String, i32)> = state
             .scopes()
             .iter()
-            .map(|&group| {
-                let name = tree.node(group).name.to_string();
+            .map(|&place| {
+                let name = place.name(tree);
                 let width = fonts.title.measure(&name).0 + 2 * chip_pad_x;
                 (name, width)
             })
@@ -741,7 +841,7 @@ impl Open {
         if typed.is_empty() {
             let placeholder = match (*focused, state.scopes().last()) {
                 (false, _) => PLACEHOLDER_UNFOCUSED.to_owned(),
-                (true, Some(&group)) => format!("Search in {}…", tree.node(group).name),
+                (true, Some(&place)) => format!("Search in {}…", place.name(tree)),
                 (true, None) => PLACEHOLDER.to_owned(),
             };
             canvas.draw_text_ellipsis(
@@ -829,6 +929,18 @@ impl Open {
                 line,
             );
         }
+        let check_text = state.check().map(str::to_owned);
+        let context = LineContext {
+            startup: *startup,
+            search_hotkey: search_hotkey.as_deref(),
+            check: check_text.as_deref().map(|typed| {
+                let answer = check
+                    .as_ref()
+                    .filter(|(done, _)| done == typed)
+                    .map(|(_, availability)| *availability);
+                (typed, answer)
+            }),
+        };
         let rows = state.rows().to_vec();
         let mut painter = ItemPainter {
             palette: &palette,
@@ -867,6 +979,15 @@ impl Open {
                         .flatten();
                     painter.item(canvas, state, placed, hit, is_selected, number)?;
                 }
+                Row::Section(section) => {
+                    let is_selected = state.selected() == Some(placed.index);
+                    painter.section(canvas, placed, &section, is_selected)?;
+                }
+                Row::Line(line_kind) => {
+                    let is_selected = state.selected() == Some(placed.index);
+                    painter.line(canvas, placed, line_kind, &context, is_selected)?;
+                }
+                Row::Prefixes => painter.prefixes(canvas)?,
             }
         }
         if let Some(list) = layout.list
@@ -1079,7 +1200,8 @@ impl ItemPainter<'_> {
 
         // The name, the letters the query matched emphasized. A name too
         // long for its box is cut with an ellipsis instead, unemphasized.
-        let label = node.name.as_ref();
+        let label = plain(&node.name);
+        let label = label.as_str();
         let title_box = RECT {
             left: parts.title.left,
             top: parts.title.top,
@@ -1160,6 +1282,232 @@ impl ItemPainter<'_> {
         // After the text: the plate's corners, toward the panel behind it.
         if background.is_some() {
             canvas.round_rect_corners(plate, scaled(ROW_RADIUS), palette.back);
+        }
+        Ok(())
+    }
+}
+
+impl ItemPainter<'_> {
+    /// A section of the empty box: its icon (a folder, unless the group has one
+    /// of its own), its name, how many apps it holds, and a › — Enter, → or a
+    /// click goes inside.
+    fn section(
+        &mut self,
+        canvas: &mut Canvas,
+        placed: &Placed,
+        section: &SectionRow,
+        selected: bool,
+    ) -> Result<()> {
+        let palette = self.palette;
+        let row = placed.rect;
+        let parts = self.layout.item_parts(row);
+        let scaled = |logical: i32| (logical as f32 * self.scale).round() as i32;
+
+        let (title, detail, background) = if selected {
+            let (back, text) = (palette.selected_back, palette.selected_text);
+            (blend(text, back, 0.22), blend(text, back, 0.35), Some(back))
+        } else {
+            (palette.text, palette.dim, None)
+        };
+        let margin = scaled(ROW_MARGIN);
+        let plate = RECT {
+            left: row.left + margin,
+            top: row.top + scaled(2),
+            right: row.right - margin,
+            bottom: row.bottom - scaled(2),
+        };
+        if let Some(background) = background {
+            canvas.fill_rect(plate, background);
+        }
+
+        // The same icon a group has in the tray menu, loaded once per opening;
+        // the folder glyph only if the system gives none.
+        let (key, node) = match section.place {
+            Place::Menus => (SECTIONS_ICON, None),
+            Place::Group(group) => (SECTION_ICON_BASE | group.as_u32(), Some(group)),
+        };
+        let size = self.icon_size;
+        let (icons, tree) = (&mut *self.icons, self.tree);
+        let pixels = self.pixels.entry(key).or_insert_with(|| {
+            let icon = match node {
+                Some(group) => crate::menu::resolve_icon(icons, tree.node(group)),
+                None => icons.for_directory(),
+            };
+            icon.and_then(|icon| icon.to_pixels(size))
+        });
+        match pixels {
+            Some(pixels) => canvas.blit(parts.icon.left, parts.icon.top, size, size, pixels),
+            None => canvas.draw_text(
+                GLYPH_FOLDER,
+                rect(parts.icon),
+                &self.fonts.glyph,
+                detail,
+                TextAlign::Centre,
+            )?,
+        }
+        // The › at the right end; the texts stop before it.
+        let (arrow_width, _) = self.fonts.glyph.measure(GLYPH_ENTER);
+        let right = parts.title.right;
+        canvas.draw_text(
+            GLYPH_ENTER,
+            RECT {
+                left: right - arrow_width,
+                top: row.top,
+                right,
+                bottom: row.bottom,
+            },
+            &self.fonts.glyph,
+            detail,
+            TextAlign::Right,
+        )?;
+        let text_right = right - arrow_width - scaled(12);
+        canvas.draw_text_ellipsis(
+            &section.place.name(self.tree),
+            RECT {
+                right: text_right,
+                ..rect(parts.title)
+            },
+            &self.fonts.title,
+            title,
+            TextAlign::Left,
+        )?;
+        let noun = if section.apps == 1 { "app" } else { "apps" };
+        canvas.draw_text_ellipsis(
+            &format!("{} {noun}", section.apps),
+            RECT {
+                right: text_right,
+                ..rect(parts.subtitle)
+            },
+            &self.fonts.small,
+            detail,
+            TextAlign::Left,
+        )?;
+
+        if background.is_some() {
+            canvas.round_rect_corners(plate, scaled(ROW_RADIUS), palette.back);
+        }
+        Ok(())
+    }
+}
+
+/// The text of a chip of the line of prefixes: `> commands`.
+fn chip_label(prefix: char, name: &str) -> String {
+    format!("{prefix}  {name}")
+}
+
+impl ItemPainter<'_> {
+    /// A row of a prefixed list: a glyph, the title, the second line and, at
+    /// the right end, a state or a hotkey.
+    fn line(
+        &self,
+        canvas: &mut Canvas,
+        placed: &Placed,
+        line: Line,
+        context: &LineContext,
+        selected: bool,
+    ) -> Result<()> {
+        let palette = self.palette;
+        let row = placed.rect;
+        let parts = self.layout.item_parts(row);
+        let scaled = |logical: i32| (logical as f32 * self.scale).round() as i32;
+        let words = display::line_text(line, context);
+        let glyph = match line {
+            Line::Command(_) => "\u{E756}",
+            Line::Prefix(_) => "\u{E8D5}",
+            Line::SearchHotkey => "\u{E765}",
+            Line::Check => match context.check {
+                Some((_, Some(Availability::Free))) => "\u{E73E}",
+                Some((_, Some(_))) => "\u{E711}",
+                _ => "\u{E946}",
+            },
+        };
+
+        let (title, detail, background) = if selected {
+            let (back, text) = (palette.selected_back, palette.selected_text);
+            (blend(text, back, 0.22), blend(text, back, 0.35), Some(back))
+        } else {
+            (palette.text, palette.dim, None)
+        };
+        let margin = scaled(ROW_MARGIN);
+        let plate = RECT {
+            left: row.left + margin,
+            top: row.top + scaled(2),
+            right: row.right - margin,
+            bottom: row.bottom - scaled(2),
+        };
+        if let Some(background) = background {
+            canvas.fill_rect(plate, background);
+        }
+
+        canvas.draw_text(
+            glyph,
+            rect(parts.icon),
+            &self.fonts.glyph,
+            detail,
+            TextAlign::Centre,
+        )?;
+        let mut right = parts.title.right;
+        if let Some(trailing) = &words.trailing {
+            let (width, _) = self.fonts.small.measure(trailing);
+            canvas.draw_text(
+                trailing,
+                RECT {
+                    left: right - width,
+                    top: row.top,
+                    right,
+                    bottom: row.bottom,
+                },
+                &self.fonts.small,
+                detail,
+                TextAlign::Right,
+            )?;
+            right -= width + scaled(12);
+        }
+        canvas.draw_text_ellipsis(
+            &words.title,
+            RECT {
+                right,
+                ..rect(parts.title)
+            },
+            &self.fonts.title,
+            title,
+            TextAlign::Left,
+        )?;
+        canvas.draw_text_ellipsis(
+            &words.subtitle,
+            RECT {
+                right: parts.subtitle.right,
+                ..rect(parts.subtitle)
+            },
+            &self.fonts.small,
+            detail,
+            TextAlign::Left,
+        )?;
+        if background.is_some() {
+            canvas.round_rect_corners(plate, scaled(ROW_RADIUS), palette.back);
+        }
+        Ok(())
+    }
+
+    /// The line of prefixes under the sections: a chip for each, clickable.
+    fn prefixes(&self, canvas: &mut Canvas) -> Result<()> {
+        let palette = self.palette;
+        let scaled = |logical: i32| (logical as f32 * self.scale).round() as i32;
+        for (n, (chip, info)) in self.layout.prefix_chips.iter().zip(PREFIXES).enumerate() {
+            let lit = !self.menu_open && self.hover == Some(Hit::Prefix(n));
+            let cell = rect(*chip);
+            canvas.fill_rect(
+                cell,
+                blend(palette.back, palette.text, if lit { 0.16 } else { 0.07 }),
+            );
+            canvas.draw_text(
+                &chip_label(info.prefix, info.name),
+                cell,
+                &self.fonts.small,
+                if lit { palette.text } else { palette.dim },
+                TextAlign::Centre,
+            )?;
+            canvas.round_rect_corners(cell, scaled(4), palette.back);
         }
         Ok(())
     }
