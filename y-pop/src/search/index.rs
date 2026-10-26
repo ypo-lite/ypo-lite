@@ -45,12 +45,28 @@ pub struct Entry {
     /// The groups it sits in, outermost first. Empty for a tray icon's own
     /// group or app.
     pub ancestors: Vec<NodeId>,
+    /// What the entry is made of, for deciding which actions apply to it.
+    pub facts: Facts,
     name: Box<str>,
     keywords: Box<str>,
     exe: Box<str>,
     path: Box<str>,
     tooltip: Box<str>,
     hotkeys: Vec<KeyCombo>,
+}
+
+/// What an entry is made of, beyond its kind: enough to say which actions
+/// make sense for it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct Facts {
+    /// A program that already launches elevated (`elevate="true"`), so
+    /// "run as administrator" has nothing to add.
+    pub elevated: bool,
+    /// There is a file or folder behind it: Explorer can show it, and it has a
+    /// path to copy.
+    pub file: bool,
+    /// A Store app, launched by its identity rather than a file.
+    pub store: bool,
 }
 
 /// Which field of an entry a query matched, for the second line of a result
@@ -87,6 +103,7 @@ impl Entry {
             kind,
             id,
             ancestors: Vec::new(),
+            facts: Facts::default(),
             name: fold(name).into(),
             keywords: "".into(),
             exe: "".into(),
@@ -200,6 +217,13 @@ impl Index {
             && let Some(exe) = &app.exe
         {
             entry = entry.with_exe(exe);
+        }
+        if let NodeKind::App(app) = &data.kind {
+            entry.facts = Facts {
+                elevated: app.elevate,
+                file: app.exe.is_some() && app.app_id.is_none(),
+                store: app.app_id.is_some(),
+            };
         }
         for binding in &data.hotkeys {
             // `Display` writes what `KeyCombo::parse` reads back.

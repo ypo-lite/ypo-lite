@@ -71,11 +71,20 @@ pub struct Hit {
 pub struct Searcher {
     matcher: Matcher,
     hits: Vec<Hit>,
+    /// Added to an entry's score, by position in the index: what history
+    /// makes of it. Empty means none. Set once per opening, so the order of
+    /// results does not shift between keystrokes.
+    bonuses: Vec<u32>,
 }
 
 impl Searcher {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// What history adds to each entry's score, by position in the index.
+    pub fn set_bonuses(&mut self, bonuses: Vec<u32>) {
+        self.bonuses = bonuses;
     }
 
     /// The hits for `query`, best first. Empty for an empty query: what the
@@ -92,6 +101,7 @@ impl Searcher {
                 continue;
             }
             if let Some((score, matched)) = self.score(entry, query) {
+                let score = score + self.bonuses.get(position).copied().unwrap_or(0);
                 self.hits.push(Hit {
                     entry: position as u32,
                     score,
@@ -299,6 +309,31 @@ mod tests {
         assert_eq!(editors[0].0, "editor");
         assert_eq!(editors[1].0, "editor");
         assert!(editors[0].1 < editors[1].1);
+    }
+
+    #[test]
+    fn history_breaks_a_tie_in_favour_of_what_was_launched() {
+        let index = Index::from_tree(&tree());
+        let mut searcher = Searcher::new();
+        let first = |searcher: &mut Searcher| {
+            let hits = searcher.search(&index, &Query::new("editor"), Scope::All);
+            hits[0].entry
+        };
+        let before = first(&mut searcher);
+
+        // The second "Editor" is the one launched.
+        let editors: Vec<u32> = index
+            .entries()
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| entry.name() == "editor")
+            .map(|(position, _)| position as u32)
+            .collect();
+        let mut bonuses = vec![0; index.len()];
+        bonuses[editors[1] as usize] = 30;
+        searcher.set_bonuses(bonuses);
+        assert_eq!(before, editors[0]);
+        assert_eq!(first(&mut searcher), editors[1]);
     }
 
     #[test]

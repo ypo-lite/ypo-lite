@@ -10,10 +10,11 @@
 use y_core::xml::Element;
 
 use crate::model::{
-    App, Browse, Builder, ConfigTree, Defaults, EventMask, HotkeyBinding, IconSource, MAX_DEPTH,
-    MenusBrowse, NodeData, NodeFlags, NodeId, NodeKind, OpenFolder, PluginSection, PopupMode,
-    PresenterStyle, ResultsLayout, SearchConfig, Section,
+    ActionBinding, ActionId, ActionsConfig, App, Browse, Builder, ConfigTree, Defaults, EventMask,
+    HotkeyBinding, IconSource, MAX_DEPTH, MenusBrowse, NodeData, NodeFlags, NodeId, NodeKind,
+    OpenFolder, PluginSection, PopupMode, PresenterStyle, ResultsLayout, SearchConfig, Section,
 };
+use crate::search::keys::Chord;
 use crate::variables::{self, Lookup, Pool, Variable};
 
 use std::fmt;
@@ -335,6 +336,7 @@ impl<'b> Reader<'b> {
 
         let mut sections = Vec::new();
         let (mut seen_recent, mut seen_menus, mut seen_start) = (false, false, false);
+        let mut actions = None;
         self.in_search = true;
         for child in element.children() {
             let section = match child.name() {
@@ -365,6 +367,15 @@ impl<'b> Reader<'b> {
                 "group" => Some(Section::Group(self.read_group(child))),
                 "app" => self.read_search_folder(child),
                 "plugin" => self.read_plugin(child),
+                // Not a section: how results are acted on.
+                "actions" => {
+                    if actions.is_none() {
+                        actions = Some(self.read_actions(child));
+                    } else {
+                        self.warn(child, "a second <actions> is ignored");
+                    }
+                    None
+                }
                 other => {
                     self.warn(child, format!("unknown element <{other}>, skipping"));
                     None
@@ -374,7 +385,8 @@ impl<'b> Reader<'b> {
         }
         self.in_search = false;
 
-        if element.children().next().is_none() {
+        // `<actions>` alone leaves the sections as if nothing was written.
+        if element.children().all(|child| child.name() == "actions") {
             sections = SearchConfig::default_sections();
         } else if !seen_menus {
             let at = sections
@@ -397,7 +409,93 @@ impl<'b> Reader<'b> {
             row_actions: element.attr_bool("row-actions").unwrap_or(true),
             history: element.attr_bool("history").unwrap_or(true),
             sections,
+            actions: actions.unwrap_or_default(),
         })
+    }
+
+    /// `<actions>`: exactly the actions listed (in menu order), with `open`
+    /// always among them. A shortcut that cannot work is a warning and the
+    /// action keeps living without it.
+    fn read_actions(&mut self, element: Element<'_>) -> ActionsConfig {
+        self.check(element, &["menu-key", "quick-pick"]);
+        let mut config = ActionsConfig {
+            actions: Vec::new(),
+            quick_pick: element.attr_bool("quick-pick").unwrap_or(true),
+            ..ActionsConfig::default()
+        };
+        if let Some(text) = element.attr("menu-key") {
+            match Chord::parse(text) {
+                Ok(chord) => config.menu_key = chord,
+                Err(error) => self.warn(element, format!("menu-key={text:?} {error}")),
+            }
+        }
+
+        let mut taken = vec![config.menu_key];
+        for child in element.children() {
+            if child.name() != "action" {
+                let tag = child.name();
+                self.warn(child, format!("unknown element <{tag}>, skipping"));
+                continue;
+            }
+            self.check(child, &["do", "key", "button"]);
+
+            let Some(name) = child.attr("do") else {
+                self.warn(child, "an <action> needs a do attribute");
+                continue;
+            };
+            let Some(id) = ActionId::parse(name) else {
+                self.warn(child, format!("unknown action {name:?}"));
+                continue;
+            };
+            if config.actions.iter().any(|binding| binding.id == id) {
+                self.warn(
+                    child,
+                    format!("{name:?} is listed twice, the first is kept"),
+                );
+                continue;
+            }
+
+            let key = child.attr("key").and_then(|text| match Chord::parse(text) {
+                Ok(chord) if taken.contains(&chord) => {
+                    self.warn(
+                        child,
+                        format!("key={text:?} is already another action's, ignored"),
+                    );
+                    None
+                }
+                Ok(chord) => {
+                    taken.push(chord);
+                    Some(chord)
+                }
+                Err(error) => {
+                    self.warn(child, format!("key={text:?} {error}"));
+                    None
+                }
+            });
+            config.actions.push(ActionBinding {
+                id,
+                key,
+                button: child.attr_bool("button").unwrap_or(false),
+            });
+        }
+
+        // Open is always there: without it Enter would do nothing.
+        if !config
+            .actions
+            .iter()
+            .any(|binding| binding.id == ActionId::Open)
+        {
+            let enter = Chord::parse("Enter").expect("a valid shortcut");
+            config.actions.insert(
+                0,
+                ActionBinding {
+                    id: ActionId::Open,
+                    key: (!taken.contains(&enter)).then_some(enter),
+                    button: false,
+                },
+            );
+        }
+        config
     }
 
     fn read_recent(&mut self, element: Element<'_>) -> Option<Section> {

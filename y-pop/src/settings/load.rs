@@ -18,9 +18,9 @@ use y_core::overlay::Color;
 use y_core::xml::{self, Comment as XmlComment, Document, Element, Node, Writer};
 
 use super::{
-    AppFields, Comment, Entry, Globals, HotkeyEntry, Item, ItemKind, MenusMode, PopupStyle,
-    Renderer, ResultsMode, SearchEntry, SearchSection, SearchSettings, SectionKind, Settings, Skin,
-    Var, VarEntry,
+    ActionEntry, ActionItem, AppFields, Comment, Entry, Globals, HotkeyEntry, Item, ItemKind,
+    MenusMode, PopupStyle, Renderer, ResultsMode, SearchEntry, SearchSection, SearchSettings,
+    SectionKind, Settings, Skin, Var, VarEntry,
 };
 use crate::config::{self, LoadError};
 use crate::model::OpenFolder;
@@ -308,11 +308,18 @@ impl Loader {
     /// anything else, and for one that holds children or comments, which
     /// the model has nowhere to keep.
     fn section(&mut self, element: Element<'_>) -> Option<SearchSection> {
-        if element.children_with_comments().next().is_some() {
+        // Only `<actions>` has anything inside; for the others, children and
+        // comments are something the model has nowhere to keep.
+        if element.name() != "actions" && element.children_with_comments().next().is_some() {
             return None;
         }
         let mut attrs = Attrs::of(element);
         let kind = match element.name() {
+            "actions" => SectionKind::Actions {
+                menu_key: attrs.take("menu-key"),
+                quick_pick: attrs.bool("quick-pick"),
+                entries: action_entries(element)?,
+            },
             "recent" => SectionKind::Recent {
                 count: attrs.parse("count", parse_u32),
             },
@@ -712,4 +719,31 @@ impl Attrs {
     fn rest(self) -> Vec<(String, String)> {
         self.0
     }
+}
+
+/// What is inside an `<actions>`: its `<action>`s and the comments among them.
+/// `None` if there is anything else (the model has nowhere to keep it), which
+/// leaves the whole element as a disabled item.
+fn action_entries(element: Element<'_>) -> Option<Vec<ActionEntry>> {
+    let mut entries = Vec::new();
+    for node in element.children_with_comments() {
+        match node {
+            Node::Comment(comment) => entries.push(ActionEntry::Comment(comment_of(comment))),
+            Node::Element(child) => {
+                if child.name() != "action" || child.children_with_comments().next().is_some() {
+                    return None;
+                }
+                let mut attrs = Attrs::of(child);
+                let mut item = ActionItem {
+                    id: attrs.take("do"),
+                    key: attrs.take("key"),
+                    button: attrs.bool("button"),
+                    extra_attrs: Vec::new(),
+                };
+                item.extra_attrs = attrs.rest();
+                entries.push(ActionEntry::Action(item));
+            }
+        }
+    }
+    Some(entries)
 }

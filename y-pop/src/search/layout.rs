@@ -83,6 +83,22 @@ const ICON: i32 = 32;
 const GAP: i32 = 12;
 /// The input row's search glyph.
 const INPUT_ICON: i32 = 22;
+// The action menu.
+const MENU_WIDTH: i32 = 300;
+const MENU_ITEM_HEIGHT: i32 = 34;
+const MENU_PADDING: i32 = 6;
+/// From the window's right edge.
+const MENU_MARGIN: i32 = 14;
+/// How far the menu tucks under (or over) the row it belongs to.
+const MENU_OVERLAP: i32 = 6;
+
+// The buttons on the selected row.
+const BUTTON_HEIGHT: i32 = 26;
+const BUTTON_GAP: i32 = 4;
+/// Either side of a button's label.
+const BUTTON_PADDING: i32 = 10;
+/// The buttons may take this share of the row's width, no more.
+const BUTTONS_SHARE: f32 = 0.5;
 
 /// What a layout is made from.
 #[derive(Clone, Copy, Debug)]
@@ -137,6 +153,16 @@ pub enum Hit {
     /// checks [`Layout::kind_of`].
     Row(usize),
     Footer,
+    /// The **⌄** of a folded box.
+    Chevron,
+    /// An action button of the selected row, by index into its buttons.
+    Button(usize),
+    /// The **⋯** that ends the selected row.
+    More,
+    /// An item of the action menu, by index.
+    Menu(usize),
+    /// The action menu, between its items.
+    MenuPanel,
     /// The window, but nothing in particular (padding, the list's margins).
     Nothing,
 }
@@ -156,7 +182,33 @@ pub struct Layout {
     /// Rows exist above and below what is visible, for scroll hints.
     pub more_above: bool,
     pub more_below: bool,
+    /// The action menu, when one is open ([`Layout::with_menu`]).
+    pub menu: Option<MenuLayout>,
+    /// The selected row's buttons ([`Layout::with_row_buttons`]).
+    pub buttons: Option<RowButtons>,
+    /// The **⌄** that unfolds a folded box, at the input row's right end
+    /// ([`Layout::with_chevron`]).
+    pub chevron: Option<Rect>,
     scale: f32,
+}
+
+/// Where the selected row's buttons are: its action buttons in order, then
+/// the **⋯**, flush with the row's right padding.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct RowButtons {
+    pub row: usize,
+    /// As many of the action buttons as fit, in order.
+    pub items: Vec<Rect>,
+    pub more: Rect,
+    /// Where the strip starts: the row's texts end a gap before it.
+    pub left: i32,
+}
+
+/// Where the action menu and its items are.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct MenuLayout {
+    pub rect: Rect,
+    pub items: Vec<Rect>,
 }
 
 impl Layout {
@@ -213,8 +265,71 @@ impl Layout {
             end,
             more_above: first > 0,
             more_below: end < rows.len(),
+            menu: None,
+            buttons: None,
+            chevron: None,
             scale,
         }
+    }
+
+    /// This layout with the **⌄** that unfolds a folded box, ending the input
+    /// row; the text field stops before it.
+    pub fn with_chevron(mut self) -> Self {
+        let px = |logical: i32| scaled(logical, self.scale);
+        let size = px(BUTTON_HEIGHT);
+        let right = self.input.right - px(PADDING);
+        let top = self.input.top + (self.input.height() - size) / 2;
+        self.chevron = Some(Rect::new(right - size, top, right, top + size));
+        self
+    }
+
+    /// This layout with buttons on the row at `row` (an index into the whole
+    /// list, which must be visible): one for each of `widths` — the width of
+    /// each label, in physical pixels — then the **⋯**. When they would take
+    /// more than half the row, the last labelled ones are left out; they stay
+    /// in the action menu.
+    pub fn with_row_buttons(mut self, row: usize, widths: &[i32]) -> Self {
+        let Some(rect) = self.rect_of(row) else {
+            return self;
+        };
+        let px = |logical: i32| scaled(logical, self.scale);
+        let (height, gap) = (px(BUTTON_HEIGHT), px(BUTTON_GAP));
+        let more = height;
+        let budget = (rect.width() as f32 * BUTTONS_SHARE) as i32;
+        let widths: Vec<i32> = widths
+            .iter()
+            .map(|&label| label + 2 * px(BUTTON_PADDING))
+            .collect();
+
+        let mut taken = 0;
+        let mut total = more;
+        for &width in &widths {
+            if total + gap + width > budget {
+                break;
+            }
+            total += gap + width;
+            taken += 1;
+        }
+
+        let right = rect.right - px(PADDING);
+        let top = rect.top + (rect.height() - height) / 2;
+        let left = right - total;
+        let mut x = left;
+        let items = widths[..taken]
+            .iter()
+            .map(|&width| {
+                let button = Rect::new(x, top, x + width, top + height);
+                x += width + gap;
+                button
+            })
+            .collect();
+        self.buttons = Some(RowButtons {
+            row,
+            items,
+            more: Rect::new(x, top, x + more, top + height),
+            left,
+        });
+        self
     }
 
     /// The visible rows' range of the whole list.
@@ -241,11 +356,32 @@ impl Layout {
         if !Rect::new(0, 0, self.size.0, self.size.1).contains(x, y) {
             return None;
         }
+        if let Some(menu) = &self.menu
+            && menu.rect.contains(x, y)
+        {
+            return Some(
+                menu.items
+                    .iter()
+                    .position(|item| item.contains(x, y))
+                    .map_or(Hit::MenuPanel, Hit::Menu),
+            );
+        }
+        if self.chevron.is_some_and(|chevron| chevron.contains(x, y)) {
+            return Some(Hit::Chevron);
+        }
         if self.input.contains(x, y) {
             return Some(Hit::Input);
         }
         if self.footer.is_some_and(|footer| footer.contains(x, y)) {
             return Some(Hit::Footer);
+        }
+        if let Some(buttons) = &self.buttons {
+            if buttons.more.contains(x, y) {
+                return Some(Hit::More);
+            }
+            if let Some(n) = buttons.items.iter().position(|b| b.contains(x, y)) {
+                return Some(Hit::Button(n));
+            }
         }
         Some(
             self.rows
@@ -253,6 +389,39 @@ impl Layout {
                 .find(|placed| placed.rect.contains(x, y))
                 .map_or(Hit::Nothing, |placed| Hit::Row(placed.index)),
         )
+    }
+
+    /// This layout with the action menu of `count` items open on the row at
+    /// `anchor`: a panel at the window's right edge, tucked under the row, or
+    /// over it if it would pass `limit` (the tallest the window can be). The
+    /// window grows to hold it.
+    pub fn with_menu(mut self, anchor: Rect, count: usize, limit: i32) -> Self {
+        let px = |logical: i32| scaled(logical, self.scale);
+        let width = px(MENU_WIDTH).min(self.size.0 - 2 * px(MENU_MARGIN));
+        let height = px(MENU_ITEM_HEIGHT) * count as i32 + 2 * px(MENU_PADDING);
+        let right = self.size.0 - px(MENU_MARGIN);
+
+        let mut top = anchor.bottom - px(MENU_OVERLAP);
+        if top + height > limit {
+            top = anchor.top + px(MENU_OVERLAP) - height;
+        }
+        top = top.min(limit - height).max(self.input.bottom);
+
+        let rect = Rect::new(right - width, top, right, top + height);
+        let items = (0..count as i32)
+            .map(|n| {
+                let item_top = rect.top + px(MENU_PADDING) + n * px(MENU_ITEM_HEIGHT);
+                Rect::new(
+                    rect.left + px(MENU_PADDING),
+                    item_top,
+                    rect.right - px(MENU_PADDING),
+                    item_top + px(MENU_ITEM_HEIGHT),
+                )
+            })
+            .collect();
+        self.size.1 = self.size.1.max(rect.bottom);
+        self.menu = Some(MenuLayout { rect, items });
+        self
     }
 
     /// The parts of an item row.
@@ -300,7 +469,8 @@ impl Layout {
             field: Rect::new(
                 icon.right + gap,
                 self.input.top,
-                self.input.right - padding,
+                self.chevron
+                    .map_or(self.input.right - padding, |chevron| chevron.left - gap),
                 self.input.bottom,
             ),
         }
@@ -474,6 +644,236 @@ mod tests {
         assert_eq!(max_height(&collapsed), tallest - 34);
     }
 
+    #[test]
+    fn the_action_menu_hangs_under_its_row_at_the_right_edge() {
+        let rows = [Header, Item, Item, Item];
+        let spec = spec(1000);
+        let layout = Layout::new(&spec, &rows, 0);
+        let row = layout.rect_of(1).unwrap();
+        let limit = max_height(&spec);
+        let before = layout.size;
+
+        let layout = layout.with_menu(row, 3, limit);
+        let menu = layout.menu.clone().unwrap();
+
+        assert_eq!(menu.rect.right, 640 - 14, "at the right edge");
+        assert_eq!(menu.rect.width(), 300);
+        assert_eq!(menu.rect.top, row.bottom - 6, "tucked under the row");
+        assert_eq!(menu.rect.height(), 3 * 34 + 2 * 6);
+        assert_eq!(menu.items.len(), 3);
+        assert_eq!(menu.items[0].top, menu.rect.top + 6);
+        assert!(
+            menu.items
+                .windows(2)
+                .all(|pair| pair[0].bottom == pair[1].top)
+        );
+        assert!(
+            menu.items
+                .iter()
+                .all(|item| item.left > menu.rect.left && item.right < menu.rect.right)
+        );
+        assert_eq!(layout.size.0, before.0);
+        assert!(
+            layout.size.1 >= menu.rect.bottom,
+            "the window grows to hold it"
+        );
+    }
+
+    #[test]
+    fn near_the_bottom_the_menu_opens_upwards() {
+        let rows = vec![Item; 12];
+        let spec = spec(6 + 5 * 52 + 6);
+        let limit = max_height(&spec);
+        let layout = Layout::new(&spec, &rows, 0);
+        let last = layout.rows.last().unwrap().rect;
+
+        let layout = layout.with_menu(last, 6, limit);
+        let menu = layout.menu.clone().unwrap();
+        assert!(menu.rect.bottom <= limit, "{} > {limit}", menu.rect.bottom);
+        assert!(
+            menu.rect.top >= layout.input.bottom,
+            "never over the input row"
+        );
+        assert!(
+            menu.rect.bottom <= last.top + 6 + 1,
+            "above its row, not over it"
+        );
+        assert!(layout.size.1 <= limit);
+    }
+
+    #[test]
+    fn a_menu_taller_than_the_window_still_fits_inside_it() {
+        let spec = spec(120);
+        let limit = max_height(&spec);
+        let layout = Layout::new(&spec, &[Item], 0);
+        let row = layout.rows[0].rect;
+        let layout = layout.with_menu(row, 12, limit);
+        let menu = layout.menu.unwrap();
+        assert_eq!(menu.rect.top, 56, "pinned under the input row");
+    }
+
+    #[test]
+    fn hit_testing_finds_the_menu_before_what_is_under_it() {
+        let rows = [Header, Item, Item, Item];
+        let spec = spec(1000);
+        let layout = Layout::new(&spec, &rows, 0);
+        let row = layout.rect_of(1).unwrap();
+        let layout = layout.with_menu(row, 3, max_height(&spec));
+        let menu = layout.menu.clone().unwrap();
+
+        let inside = |item: Rect| (item.left + 5, item.top + 5);
+        for (n, item) in menu.items.iter().enumerate() {
+            let (x, y) = inside(*item);
+            assert_eq!(layout.hit_test(x, y), Some(Hit::Menu(n)));
+        }
+        // The panel's own padding is the menu, not the row beneath it.
+        assert_eq!(
+            layout.hit_test(menu.rect.left + 2, menu.rect.top + 2),
+            Some(Hit::MenuPanel)
+        );
+        // Outside it, the window as before.
+        assert_eq!(layout.hit_test(10, 10), Some(Hit::Input));
+        let below_row_one = layout.rect_of(1).unwrap();
+        assert_eq!(
+            layout.hit_test(20, below_row_one.top + 2),
+            Some(Hit::Row(1))
+        );
+    }
+
+    #[test]
+    fn the_menu_scales_with_the_monitor() {
+        let spec = Spec {
+            scale: 2.0,
+            width: 1280,
+            ..spec(2000)
+        };
+        let layout = Layout::new(&spec, &[Item, Item], 0);
+        let row = layout.rows[0].rect;
+        let menu = layout.with_menu(row, 2, max_height(&spec)).menu.unwrap();
+        assert_eq!(menu.rect.width(), 600);
+        assert_eq!(menu.items[0].height(), 68);
+    }
+
+    #[test]
+    fn the_buttons_end_the_selected_row_with_the_more_button_last() {
+        let layout = Layout::new(&spec(1000), &[Header, Item, Item], 0);
+        let row = layout.rect_of(1).unwrap();
+        let layout = layout.with_row_buttons(1, &[40, 60]);
+        let buttons = layout.buttons.clone().unwrap();
+
+        assert_eq!(buttons.row, 1);
+        assert_eq!(buttons.items.len(), 2);
+        assert_eq!(buttons.items[0].width(), 40 + 20);
+        assert_eq!(buttons.items[1].width(), 60 + 20);
+        assert_eq!(buttons.more.width(), 26, "a square");
+        assert_eq!(buttons.more.right, row.right - 16, "flush with the padding");
+        assert_eq!(buttons.items[0].left, buttons.left);
+        assert_eq!(buttons.items[0].right + 4, buttons.items[1].left);
+        assert_eq!(buttons.items[1].right + 4, buttons.more.left);
+        assert_eq!(
+            buttons.more.top - row.top,
+            row.bottom - buttons.more.bottom,
+            "centred vertically"
+        );
+    }
+
+    #[test]
+    fn a_row_with_no_labelled_button_still_gets_the_more_button() {
+        let layout = Layout::new(&spec(1000), &[Item], 0).with_row_buttons(0, &[]);
+        let buttons = layout.buttons.unwrap();
+        assert!(buttons.items.is_empty());
+        assert_eq!(buttons.left, buttons.more.left);
+    }
+
+    #[test]
+    fn buttons_that_would_crowd_the_row_are_left_to_the_menu() {
+        let layout = Layout::new(&spec(1000), &[Item], 0);
+        // Half of 640 is 320: the ⋯ (26), then 4 + 100 each.
+        let buttons = layout
+            .with_row_buttons(0, &[80, 80, 80, 80])
+            .buttons
+            .unwrap();
+        assert_eq!(buttons.items.len(), 2, "the first ones, in order");
+        assert!(640 - buttons.left <= 320 + 16);
+    }
+
+    #[test]
+    fn the_buttons_are_hit_before_the_row_under_them() {
+        let layout = Layout::new(&spec(1000), &[Item, Item], 0).with_row_buttons(0, &[40, 40]);
+        let buttons = layout.buttons.clone().unwrap();
+        let middle = |r: Rect| ((r.left + r.right) / 2, (r.top + r.bottom) / 2);
+
+        for (n, button) in buttons.items.iter().enumerate() {
+            let (x, y) = middle(*button);
+            assert_eq!(layout.hit_test(x, y), Some(Hit::Button(n)));
+        }
+        let (x, y) = middle(buttons.more);
+        assert_eq!(layout.hit_test(x, y), Some(Hit::More));
+        // Between two buttons, and left of the strip: the row.
+        let first = buttons.items[0];
+        assert_eq!(layout.hit_test(first.right + 1, y), Some(Hit::Row(0)));
+        assert_eq!(layout.hit_test(buttons.left - 1, y), Some(Hit::Row(0)));
+        // Only the row that has them.
+        let other = layout.rect_of(1).unwrap();
+        assert_eq!(layout.hit_test(x, other.top + 20), Some(Hit::Row(1)));
+    }
+
+    #[test]
+    fn the_buttons_scale_with_the_monitor() {
+        let spec = Spec {
+            scale: 2.0,
+            width: 1280,
+            ..spec(2000)
+        };
+        let buttons = Layout::new(&spec, &[Item], 0)
+            .with_row_buttons(0, &[40])
+            .buttons
+            .unwrap();
+        assert_eq!(buttons.more.width(), 52);
+        assert_eq!(
+            buttons.items[0].width(),
+            40 + 40,
+            "labels are measured, padding scales"
+        );
+    }
+
+    #[test]
+    fn the_chevron_ends_the_input_row_and_the_field_stops_before_it() {
+        let plain = Layout::new(&spec(1000), &[], 0);
+        let layout = Layout::new(&spec(1000), &[], 0).with_chevron();
+        let chevron = layout.chevron.unwrap();
+
+        assert_eq!(chevron.right, 640 - 16);
+        assert_eq!(chevron.width(), 26);
+        assert_eq!(
+            chevron.top - layout.input.top,
+            layout.input.bottom - chevron.bottom
+        );
+        assert!(layout.input_parts().field.right < plain.input_parts().field.right);
+        assert_eq!(layout.input_parts().field.right, chevron.left - 12);
+
+        let (x, y) = (
+            (chevron.left + chevron.right) / 2,
+            (chevron.top + chevron.bottom) / 2,
+        );
+        assert_eq!(layout.hit_test(x, y), Some(Hit::Chevron));
+        assert_eq!(layout.hit_test(100, y), Some(Hit::Input));
+        assert_eq!(
+            plain.hit_test(x, y),
+            Some(Hit::Input),
+            "none unless asked for"
+        );
+    }
+
+    #[test]
+    fn a_folded_window_is_the_input_row_alone() {
+        let folded = Spec {
+            footer: false,
+            ..spec(1000)
+        };
+        let layout = Layout::new(&folded, &[], 0).with_chevron();
+        assert_eq!(layout.size, (640, 56));
+    }
     #[test]
     fn at_least_one_row_is_placed_however_little_room() {
         let layout = Layout::new(&spec(0), &[Item, Item], 0);

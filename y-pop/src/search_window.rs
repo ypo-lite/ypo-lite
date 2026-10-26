@@ -49,13 +49,14 @@ use std::rc::Rc;
 
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetCapture, GetKeyState, ReleaseCapture, SetCapture, SetFocus, VIRTUAL_KEY, VK_BACK,
-    VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_HOME, VK_LEFT, VK_MENU, VK_NEXT,
+    GetCapture, GetKeyState, ReleaseCapture, SetCapture, SetFocus, VIRTUAL_KEY, VK_APPS, VK_BACK,
+    VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F10, VK_HOME, VK_LEFT, VK_MENU, VK_NEXT,
     VK_PRIOR, VK_RETURN, VK_RIGHT, VK_SHIFT, VK_TAB, VK_UP,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     GetForegroundWindow, PostMessageW, SetForegroundWindow, WM_CHAR, WM_KEYDOWN, WM_KILLFOCUS,
-    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_SETFOCUS, WM_SYSKEYDOWN,
+    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_RBUTTONUP, WM_SETFOCUS,
+    WM_SYSCHAR, WM_SYSKEYDOWN,
 };
 
 use y_core::{
@@ -67,8 +68,9 @@ use y_core::{
     window::WindowHandler,
 };
 
-use y_pop::model::{ConfigTree, NodeId, ResultsLayout};
+use y_pop::model::{ActionId, ActionsConfig, ConfigTree, NodeId, ResultsLayout, Section};
 use y_pop::search::display;
+use y_pop::search::history::{self, History};
 use y_pop::search::index::Index;
 use y_pop::search::layout::{self, Hit, Layout, Placed, Spec};
 use y_pop::search::query;
@@ -103,6 +105,9 @@ pub const WM_SEARCH_CLICK: u32 = WM_APP_FIRST + 0x15;
 /// away from the user (up).
 pub const WM_SEARCH_WHEEL: u32 = WM_APP_FIRST + 0x16;
 
+/// A right click. `lParam` is the window's client position, as for a click.
+pub const WM_SEARCH_CONTEXT: u32 = WM_APP_FIRST + 0x17;
+
 const MOD_CTRL: isize = 1;
 const MOD_SHIFT: isize = 2;
 const MOD_ALT: isize = 4;
@@ -112,6 +117,10 @@ const FONT_FAMILY: &str = "Segoe UI";
 /// Search glyph and the like: the icon font of Windows 10 and 11.
 const GLYPH_FAMILY: &str = "Segoe MDL2 Assets";
 const GLYPH_SEARCH: &str = "\u{E721}";
+/// "More" (⋯): the button that opens the action menu.
+const GLYPH_MORE: &str = "\u{E712}";
+/// "ChevronDown" (⌄): unfolds a collapsed box.
+const GLYPH_CHEVRON: &str = "\u{E70D}";
 // Logical pixels, like the layout's.
 const INPUT_FONT: i32 = 18;
 const TITLE_FONT: i32 = 15;
@@ -135,7 +144,6 @@ const ACCENT: Color = Color::rgb(0x00, 0x78, 0xD4);
 
 const PLACEHOLDER: &str = "Search apps, menus, hotkeys…";
 const PLACEHOLDER_UNFOCUSED: &str = "Click here, then type to search";
-const FOOTER: &str = "↑↓  Move      ↵  Open      Tab  Into group      Esc  Back";
 
 /// What the owner keeps: nothing while closed, the open window otherwise.
 pub struct SearchWindow {
@@ -145,7 +153,7 @@ pub struct SearchWindow {
     generation: usize,
     /// The node the user picked, closed over and waiting for the owner to
     /// act on it ([`SearchWindow::take_activation`]).
-    activation: Option<NodeId>,
+    activation: Option<(NodeId, ActionId)>,
 }
 
 struct Open {
@@ -168,6 +176,12 @@ struct Open {
     /// now, and dropped with the window.
     index: Index,
     state: State,
+    /// What was launched before, plus this opening's launches; written when
+    /// the window closes. Empty, and left alone, with `history="false"`.
+    history: History,
+    history_on: bool,
+    /// The row button under the pointer, if any: a [`Hit::Button`] or [`Hit::More`].
+    hover: Option<Hit>,
     icons: IconCache,
     icon_size: i32,
     /// Icons already loaded, as pixels, by index entry.
@@ -199,12 +213,13 @@ impl SearchWindow {
         self.open.is_some()
     }
 
-    /// The node the user chose with Enter or a click, once, after the window
-    /// has closed. The owner runs it like any other pick from a menu: an app
-    /// is launched, `<quit/>` quits, `<settings/>` opens the settings.
-    /// Closing first matters for launching: the window gives the foreground
-    /// back to what had it, which the new program can then take.
-    pub fn take_activation(&mut self) -> Option<NodeId> {
+    /// The node the user chose, and what to do with it, once, after the
+    /// window has closed. The owner opens it like any other pick from a menu
+    /// (an app is launched, `<quit/>` quits, `<settings/>` opens the
+    /// settings), or runs it elevated, or shows it in Explorer. Closing first
+    /// matters for launching: the window gives the foreground back to what
+    /// had it, which the new program can then take.
+    pub fn take_activation(&mut self) -> Option<(NodeId, ActionId)> {
         self.activation.take()
     }
 
@@ -235,7 +250,9 @@ impl SearchWindow {
             width: layout::width_for(area_width, monitor.scale()),
             scale: monitor.scale(),
             max_list_height: (area_height as f32 * MAX_HEIGHT_SHARE) as i32,
-            footer: !search.is_some_and(|search| search.collapsed),
+            // Always, here: the surface is made for the tallest the window gets,
+            // and `relayout` drops the footer while the list is folded.
+            footer: true,
         };
         let layout = Layout::new(&spec, &[], 0);
         let visible = Rc::new(Cell::new(layout.size));
@@ -255,6 +272,40 @@ impl SearchWindow {
         let design = skins::resolve_design(tree.defaults.theme, tree.defaults.theme_overrides);
         let scaled = |logical: i32| monitor.scaled(logical);
         let icon_size = scaled(ICON_SIZE);
+        // What was launched before: it orders the results and fills Recent.
+        let index = Index::from_tree(tree);
+        let history_on = search.is_some_and(|search| search.history);
+        let mut history = if history_on {
+            history::load()
+        } else {
+            History::default()
+        };
+        let live = history::live_keys(tree, index.entries());
+        history.prune(|key| live.contains(key));
+        let recent_count = search
+            .filter(|_| history_on)
+            .and_then(|search| {
+                search.sections.iter().find_map(|section| match section {
+                    Section::Recent { count } => Some(*count as usize),
+                    _ => None,
+                })
+            })
+            .unwrap_or(0);
+        let (recent, bonuses) = history::listing(
+            tree,
+            index.entries(),
+            &history,
+            recent_count,
+            history::now(),
+        );
+        let mut state = State::new(
+            search.map_or(ResultsLayout::Sections, |search| search.results),
+            search.map_or_else(ActionsConfig::default, |search| search.actions.clone()),
+        )
+        .with_row_actions(search.is_none_or(|search| search.row_actions))
+        .with_collapsed(search.is_some_and(|search| search.collapsed));
+        state.start(&index, recent, bonuses);
+
         let mut open = Open {
             palette: Palette::of(design.as_ref()),
             radius: scaled(
@@ -281,8 +332,11 @@ impl SearchWindow {
             scroll: 0,
             visible,
             focused: true,
-            index: Index::from_tree(tree),
-            state: State::new(search.map_or(ResultsLayout::Sections, |search| search.results)),
+            index,
+            state,
+            history,
+            history_on,
+            hover: None,
             icons: IconCache::with_size(icon_size),
             icon_size,
             pixels: HashMap::new(),
@@ -291,13 +345,14 @@ impl SearchWindow {
 
         // The upper part of the monitor, centred. Placed for the tallest the
         // window gets, so that it can grow without leaving the screen.
+        open.relayout(false);
         let size = open.layout.size;
         let position = monitor.keep_inside(
             POINT {
                 x: area.left + (area_width - size.0) / 2,
                 y: area.top + (area_height as f32 * TOP_SHARE) as i32,
             },
-            (size.0, layout::max_height(&open.spec)),
+            (size.0, open.tallest()),
         );
 
         open.paint(tree)?;
@@ -319,6 +374,11 @@ impl SearchWindow {
 
     /// Closes the window without acting. Safe when already closed.
     pub fn close(&mut self) {
+        if let Some(open) = &self.open
+            && open.history_on
+        {
+            history::save(&open.history);
+        }
         // Dropping the overlay destroys its window and frees its pixels.
         self.open = None;
     }
@@ -332,7 +392,7 @@ impl SearchWindow {
         lparam: LPARAM,
         tree: &ConfigTree,
     ) -> bool {
-        if !(WM_SEARCH_CLOSE..=WM_SEARCH_WHEEL).contains(&msg) {
+        if !(WM_SEARCH_CLOSE..=WM_SEARCH_CONTEXT).contains(&msg) {
             return false;
         }
         // A message from a window that is already gone.
@@ -366,35 +426,84 @@ impl SearchWindow {
                     shift: bits & MOD_SHIFT != 0,
                     alt: bits & MOD_ALT != 0,
                 };
-                if let Some(key) = key_of(lparam.0 as u16) {
+                let code = lparam.0 as u16;
+                // Shift+F10 is the keyboard's "context menu", like the Menu key.
+                let key = if code == VK_F10.0 && mods.shift {
+                    Some(Key::ContextMenu)
+                } else {
+                    key_of(code)
+                };
+                if let Some(key) = key {
                     self.event(tree, Event::Key(key, mods));
                 }
             }
             WM_SEARCH_MOVE => {
-                if let Some(open) = self.open.as_mut()
-                    && let Some(Hit::Row(row)) = open.hit(lparam)
-                    && open.state.select_row(row)
-                {
-                    // Hover must not scroll the list under the pointer.
-                    self.redraw(tree, false);
+                if let Some(open) = self.open.as_mut() {
+                    let hit = open.hit(lparam);
+                    let changed = if open.state.menu().is_some() {
+                        // With the menu open, the pointer lights its lines
+                        // and leaves the list and the buttons alone.
+                        matches!(hit, Some(Hit::Menu(item)) if open.state.menu_select(item))
+                    } else {
+                        let button = hit.filter(|hit| matches!(hit, Hit::Button(_) | Hit::More));
+                        let lit = std::mem::replace(&mut open.hover, button) != button;
+                        matches!(hit, Some(Hit::Row(row)) if open.state.select_row(row)) || lit
+                    };
+                    if changed {
+                        // Hover must not scroll the list under the pointer.
+                        self.redraw(tree, false);
+                    }
                 }
             }
             WM_SEARCH_CLICK => {
-                let outcome = self.open.as_mut().and_then(|open| match open.hit(lparam) {
-                    Some(Hit::Row(row)) => Some(open.state.click_row(&open.index, row)),
-                    _ => None,
+                let outcome = self.open.as_mut().and_then(|open| {
+                    let hit = open.hit(lparam);
+                    if open.state.menu().is_some() {
+                        return match hit {
+                            Some(Hit::Menu(item)) => Some(open.state.menu_click(&open.index, item)),
+                            // Between its lines: nothing; anywhere else, away
+                            // with it, and the click is spent doing that.
+                            Some(Hit::MenuPanel) => None,
+                            _ => {
+                                open.state.close_menu();
+                                Some(Outcome::Redraw)
+                            }
+                        };
+                    }
+                    match hit {
+                        Some(Hit::Row(row)) => Some(open.state.click_row(&open.index, row)),
+                        Some(Hit::Button(n)) => Some(open.state.button_click(&open.index, n)),
+                        Some(Hit::Chevron) => Some(open.state.unfold(&open.index)),
+                        Some(Hit::More) => Some(open.state.open_menu(&open.index)),
+                        _ => None,
+                    }
                 });
                 if let Some(outcome) = outcome {
                     self.act(tree, outcome, false);
                 }
             }
+            WM_SEARCH_CONTEXT => {
+                let outcome = self.open.as_mut().map(|open| match open.hit(lparam) {
+                    Some(Hit::Row(row)) => open.state.open_menu_at(&open.index, row),
+                    // A right click on anything else puts an open menu away.
+                    _ if open.state.close_menu() => Outcome::Redraw,
+                    _ => Outcome::Nothing,
+                });
+                if let Some(outcome) = outcome {
+                    self.act(tree, outcome, true);
+                }
+            }
             WM_SEARCH_WHEEL => {
                 if let Some(open) = self.open.as_mut() {
+                    // The menu hangs from a row; scrolling would leave it
+                    // hanging from nothing.
+                    let closed = open.state.close_menu();
                     let notches = lparam.0 as i32 / 120;
                     let last = open.state.rows().len().saturating_sub(1) as i32;
                     let scroll = (open.scroll as i32 - notches * WHEEL_ROWS).clamp(0, last);
-                    if scroll as usize != open.scroll {
-                        open.scroll = scroll as usize;
+                    let scrolled = scroll as usize != open.scroll;
+                    open.scroll = scroll as usize;
+                    if closed || scrolled {
                         self.redraw(tree, false);
                     }
                 }
@@ -409,6 +518,7 @@ impl SearchWindow {
             return;
         };
         let before = open.state.input().text().to_owned();
+        open.hover = None;
         let outcome = open.state.handle(&open.index, event);
         if open.state.input().text() != before {
             // A new search starts at the top.
@@ -423,9 +533,37 @@ impl SearchWindow {
             Outcome::Nothing => {}
             Outcome::Redraw => self.redraw(tree, follow),
             Outcome::Close => self.close(),
-            Outcome::Activate(hit) => {
-                if let Some(open) = self.open.as_ref() {
-                    self.activation = Some(open.index.entries()[hit.entry as usize].id);
+            Outcome::Activate(hit, ActionId::Forget) => {
+                if let Some(open) = self.open.as_mut() {
+                    let entry = &open.index.entries()[hit.entry as usize];
+                    if let Some(key) = history::key_of(tree, entry) {
+                        open.history.forget(&key);
+                    }
+                    open.state.remove_recent(&open.index, hit.entry);
+                }
+                self.redraw(tree, true);
+            }
+            Outcome::Activate(hit, action) => {
+                if let Some(open) = self.open.as_mut() {
+                    let entry = &open.index.entries()[hit.entry as usize];
+                    // Launching is what history remembers; copying a path or
+                    // showing a file is not.
+                    if open.history_on
+                        && matches!(action, ActionId::Open | ActionId::RunAsAdmin)
+                        && let Some(key) = history::key_of(tree, entry)
+                    {
+                        open.history.record(&key, history::now());
+                    }
+                    match action {
+                        // Done here: the clipboard needs only a window of
+                        // ours, and the tree says what the path is.
+                        ActionId::CopyPath => {
+                            if let Some(path) = display::target(tree, entry) {
+                                clipboard::set_text(self.owner, &path);
+                            }
+                        }
+                        _ => self.activation = Some((entry.id, action)),
+                    }
                 }
                 self.close();
             }
@@ -475,16 +613,48 @@ impl Open {
         self.layout.hit_test(x, y)
     }
 
+    /// The tallest the window gets: the footer shown, the list full.
+    fn tallest(&self) -> i32 {
+        layout::max_height(&Spec {
+            footer: true,
+            ..self.spec
+        })
+    }
+
     /// Lays the rows out again for the state as it is. `follow` scrolls the
     /// list to keep the selected row in view (after typing or a key, not
     /// after the wheel or hover).
     fn relayout(&mut self, follow: bool) {
+        self.spec.footer = !self.state.folded();
         let kinds = self.state.row_kinds();
         if follow && let Some(selected) = self.state.selected() {
             self.scroll = layout::scroll_to_show(&self.spec, &kinds, self.scroll, selected);
         }
-        self.layout = Layout::new(&self.spec, &kinds, self.scroll);
-        self.scroll = self.layout.first;
+        let mut layout = Layout::new(&self.spec, &kinds, self.scroll);
+        self.scroll = layout.first;
+        if self.state.folded() && self.state.collapsible() {
+            layout = layout.with_chevron();
+        }
+        // The selected row's buttons, each as wide as its label.
+        if let Some(selected) = self.state.selected()
+            && self.state.has_row_buttons(&self.index)
+        {
+            let widths: Vec<i32> = self
+                .state
+                .row_buttons(&self.index)
+                .iter()
+                .map(|id| self.fonts.small.measure(id.short_label()).0)
+                .collect();
+            layout = layout.with_row_buttons(selected, &widths);
+        }
+        // An open action menu hangs from its row, and the window grows to hold it.
+        self.layout = match self.state.menu() {
+            Some(menu) => match layout.rect_of(menu.row) {
+                Some(anchor) => layout.with_menu(anchor, menu.items.len(), self.tallest()),
+                None => layout,
+            },
+            None => layout,
+        };
         self.visible.set(self.layout.size);
     }
 
@@ -506,6 +676,7 @@ impl Open {
             caret_width,
             focused,
             spec,
+            hover,
             ..
         } = self;
         let palette = *palette;
@@ -632,6 +803,16 @@ impl Open {
             chip_left += width + chip_gap;
         }
 
+        if let Some(chevron) = layout.chevron {
+            canvas.draw_text(
+                GLYPH_CHEVRON,
+                rect(chevron),
+                &fonts.glyph,
+                dim,
+                TextAlign::Centre,
+            )?;
+        }
+
         if *focused {
             canvas.draw_caret(origin + caret_x, text_top, text_height, *caret_width, text);
         }
@@ -659,6 +840,8 @@ impl Open {
             pixels,
             icon_size: *icon_size,
             scale: spec.scale,
+            hover: *hover,
+            menu_open: state.menu().is_some(),
         };
         for placed in &layout.rows {
             match rows[placed.index] {
@@ -678,7 +861,11 @@ impl Open {
                 }
                 Row::Result(hit) => {
                     let is_selected = state.selected() == Some(placed.index);
-                    painter.item(canvas, state, placed, hit, is_selected)?;
+                    let number = state
+                        .quick_pick()
+                        .then(|| state.result_number(placed.index))
+                        .flatten();
+                    painter.item(canvas, state, placed, hit, is_selected, number)?;
                 }
             }
         }
@@ -698,13 +885,79 @@ impl Open {
                 },
                 line,
             );
+            let hints = if state.menu().is_some() {
+                "↑↓  Choose        ↵  Do it        Esc  Close the menu".to_owned()
+            } else {
+                format!(
+                    "↑↓  Move      ↵  Open      {}  Actions      Tab  Into group      Esc  Back",
+                    state.menu_key()
+                )
+            };
             canvas.draw_text_ellipsis(
-                FOOTER,
+                &hints,
                 rect(footer.inset(padding, 0)),
                 &fonts.small,
                 dim,
                 TextAlign::Left,
             )?;
+        }
+
+        // --- The action menu, over the rest ----------------------------
+        if let (Some(menu_layout), Some(menu)) = (&layout.menu, state.menu()) {
+            let panel = blend(back, text, 0.06);
+            canvas.fill_rect(rect(menu_layout.rect), panel);
+            canvas.stroke_rect(rect(menu_layout.rect), line);
+
+            let pad = scaled(10);
+            for (n, (item_rect, item)) in menu_layout.items.iter().zip(&menu.items).enumerate() {
+                let lit = n == menu.selected;
+                let (name_color, hint_color, plate) = if lit {
+                    (
+                        palette.selected_text,
+                        blend(palette.selected_text, palette.selected_back, 0.35),
+                        Some(palette.selected_back),
+                    )
+                } else {
+                    (text, dim, None)
+                };
+                let cell = rect(*item_rect);
+                if let Some(plate) = plate {
+                    canvas.fill_rect(cell, plate);
+                }
+
+                // The shortcut, right aligned; the name ends before it.
+                let mut name_right = cell.right - pad;
+                if let Some(chord) = item.key {
+                    let hint = chord.to_string();
+                    let (width, _) = fonts.small.measure(&hint);
+                    canvas.draw_text(
+                        &hint,
+                        RECT {
+                            left: name_right - width,
+                            right: name_right,
+                            ..cell
+                        },
+                        &fonts.small,
+                        hint_color,
+                        TextAlign::Right,
+                    )?;
+                    name_right -= width + pad;
+                }
+                canvas.draw_text_ellipsis(
+                    item.id.label(),
+                    RECT {
+                        left: cell.left + pad,
+                        right: name_right,
+                        ..cell
+                    },
+                    &fonts.title,
+                    name_color,
+                    TextAlign::Left,
+                )?;
+                if lit {
+                    canvas.round_rect_corners(cell, scaled(4), panel);
+                }
+            }
         }
 
         // --- Border and corners, last ----------------------------------
@@ -732,6 +985,10 @@ struct ItemPainter<'a> {
     pixels: &'a mut HashMap<u32, Option<Vec<u32>>>,
     icon_size: i32,
     scale: f32,
+    /// The row button under the pointer.
+    hover: Option<Hit>,
+    /// While the action menu is open the buttons are shown but do not light.
+    menu_open: bool,
 }
 
 impl ItemPainter<'_> {
@@ -742,13 +999,27 @@ impl ItemPainter<'_> {
         placed: &Placed,
         hit: query::Hit,
         selected: bool,
+        number: Option<usize>,
     ) -> Result<()> {
         let palette = self.palette;
         let entry = &self.index.entries()[hit.entry as usize];
         let node = self.tree.node(entry.id);
         let row = placed.rect;
-        let parts = self.layout.item_parts(row);
+        let mut parts = self.layout.item_parts(row);
         let scaled = |logical: i32| (logical as f32 * self.scale).round() as i32;
+
+        // The buttons of the selected row take the room at its right end; the
+        // texts end before them.
+        let buttons = self
+            .layout
+            .buttons
+            .as_ref()
+            .filter(|buttons| selected && buttons.row == placed.index);
+        if let Some(buttons) = buttons {
+            let limit = buttons.left - scaled(12);
+            parts.title.right = parts.title.right.min(limit);
+            parts.subtitle.right = parts.subtitle.right.min(limit);
+        }
 
         // On the selected row the name is a little dimmer than its matched
         // letters, which keep the full text colour.
@@ -786,7 +1057,10 @@ impl ItemPainter<'_> {
 
         // The hotkey, right aligned; the texts end before it.
         let mut right = parts.title.right;
-        if let Some(shortcut) = crate::menu::shortcut_text(&self.tree.defaults, node) {
+        // The hotkey that opens it or, failing one, the key that picks it.
+        let trailing = crate::menu::shortcut_text(&self.tree.defaults, node)
+            .or_else(|| number.filter(|&n| n <= 9).map(|n| format!("Alt+{n}")));
+        if let Some(shortcut) = trailing {
             let (width, _) = self.fonts.small.measure(&shortcut);
             canvas.draw_text(
                 &shortcut,
@@ -839,9 +1113,14 @@ impl ItemPainter<'_> {
             )?;
         }
 
-        // The second line.
+        // The second line; under Recent, led by when it was launched.
+        let mut subtitle = display::subtitle(self.tree, entry, hit.matched);
+        if let Some(last) = state.last_launch(hit) {
+            let since = history::now().saturating_sub(last);
+            subtitle = format!("{} · {subtitle}", display::ago(since));
+        }
         canvas.draw_text_ellipsis(
-            &display::subtitle(self.tree, entry, hit.matched),
+            &subtitle,
             RECT {
                 left: parts.subtitle.left,
                 top: parts.subtitle.top,
@@ -852,6 +1131,31 @@ impl ItemPainter<'_> {
             detail,
             TextAlign::Left,
         )?;
+
+        // The buttons: a pill for each action, then the ⋯ that opens the menu.
+        if let Some(buttons) = buttons {
+            let (back, text) = (palette.selected_back, palette.selected_text);
+            let lit = |button: Hit| !self.menu_open && self.hover == Some(button);
+            let pill = |hovered: bool| blend(back, text, if hovered { 0.30 } else { 0.14 });
+            let radius = scaled(4);
+            let ids = state.row_buttons(self.index);
+            for (n, (cell, id)) in buttons.items.iter().zip(&ids).enumerate() {
+                let cell = rect(*cell);
+                canvas.fill_rect(cell, pill(lit(Hit::Button(n))));
+                canvas.draw_text(
+                    id.short_label(),
+                    cell,
+                    &self.fonts.small,
+                    text,
+                    TextAlign::Centre,
+                )?;
+                canvas.round_rect_corners(cell, radius, back);
+            }
+            let cell = rect(buttons.more);
+            canvas.fill_rect(cell, pill(lit(Hit::More)));
+            canvas.draw_text(GLYPH_MORE, cell, &self.fonts.glyph, text, TextAlign::Centre)?;
+            canvas.round_rect_corners(cell, radius, back);
+        }
 
         // After the text: the plate's corners, toward the panel behind it.
         if background.is_some() {
@@ -925,8 +1229,13 @@ fn key_of(code: u16) -> Option<Key> {
         c if c == VK_RETURN.0 => Key::Enter,
         c if c == VK_ESCAPE.0 => Key::Escape,
         c if c == VK_TAB.0 => Key::Tab,
+        c if c == VK_APPS.0 => Key::ContextMenu,
         c if c == VK_BACK.0 => Key::Backspace,
         c if c == VK_DELETE.0 => Key::Delete,
+        // The number row: `Alt+1…9` picks a result.
+        digit @ 0x30..=0x39 => Key::Digit((digit - 0x30) as u8),
+        // F1…F12.
+        function @ 0x70..=0x7B => Key::Function((function - 0x6F) as u8),
         // Letters have the code of their upper-case ASCII.
         letter @ 0x41..=0x5A => Key::Letter(letter as u8 as char),
         _ => return None,
@@ -1051,6 +1360,9 @@ impl WindowHandler for Forwarder {
                 );
                 Some(LRESULT(0))
             }
+            // Alt+letter has no menu to open here; swallowing the character it
+            // makes spares a beep.
+            WM_SYSCHAR => Some(LRESULT(0)),
             // Alt held: also ours to read, but not to swallow — Alt+F4 and
             // the like still have their system meaning.
             WM_SYSKEYDOWN => {
@@ -1106,6 +1418,10 @@ impl WindowHandler for Forwarder {
                     return Some(LRESULT(0));
                 }
                 self.post(WM_SEARCH_CLICK, lparam.0);
+                Some(LRESULT(0))
+            }
+            WM_RBUTTONUP => {
+                self.post(WM_SEARCH_CONTEXT, lparam.0);
                 Some(LRESULT(0))
             }
             WM_MOUSEWHEEL => {

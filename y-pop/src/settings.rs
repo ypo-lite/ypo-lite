@@ -329,6 +329,29 @@ pub enum SectionKind {
     },
     /// Every attribute stays in `extra_attrs`: plugins have no editor yet.
     Plugin,
+    /// `<actions>`, with its `<action>`s and the comments among them.
+    Actions {
+        menu_key: Option<String>,
+        quick_pick: Option<bool>,
+        entries: Vec<ActionEntry>,
+    },
+}
+
+/// One thing inside `<actions>`.
+#[derive(Clone, PartialEq, Debug)]
+pub enum ActionEntry {
+    Action(ActionItem),
+    Comment(Comment),
+}
+
+/// `<action do="" key="" button=""/>`, raw: a value the reader would not
+/// understand is kept as it was written.
+#[derive(Clone, PartialEq, Debug, Default)]
+pub struct ActionItem {
+    pub id: Option<String>,
+    pub key: Option<String>,
+    pub button: Option<bool>,
+    pub extra_attrs: Vec<(String, String)>,
 }
 
 impl SectionKind {
@@ -339,6 +362,7 @@ impl SectionKind {
             Self::Menus { .. } => "menus",
             Self::StartMenu { .. } => "start-menu",
             Self::Plugin => "plugin",
+            Self::Actions { .. } => "actions",
         }
     }
 }

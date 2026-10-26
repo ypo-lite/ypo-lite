@@ -6,12 +6,12 @@
 //! The owner window must forward the `TaskbarCreated` broadcast to
 //! [`TrayIcon::restore`]; [`crate::app::TrayApp`] does it for you.
 
-use windows::Win32::Foundation::{HWND, LPARAM, POINT, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, POINT, RECT, WPARAM};
 use windows::Win32::UI::Shell::{
     NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIIF_ERROR, NIIF_INFO, NIIF_LARGE_ICON,
     NIIF_NONE, NIIF_NOSOUND, NIIF_RESPECT_QUIET_TIME, NIIF_USER, NIIF_WARNING, NIM_ADD, NIM_DELETE,
     NIM_MODIFY, NIM_SETVERSION, NIN_SELECT, NOTIFY_ICON_INFOTIP_FLAGS, NOTIFYICON_VERSION_4,
-    NOTIFYICONDATAW, Shell_NotifyIconW,
+    NOTIFYICONDATAW, NOTIFYICONIDENTIFIER, Shell_NotifyIconGetRect, Shell_NotifyIconW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     HICON, WM_CONTEXTMENU, WM_LBUTTONDBLCLK, WM_LBUTTONUP, WM_RBUTTONUP,
@@ -86,6 +86,20 @@ impl TrayIcon {
         // The previous instance is already gone with the old taskbar; a stale
         // NIM_DELETE would fail harmlessly, so go straight to NIM_ADD.
         self.register()
+    }
+
+    /// Where the icon is on screen, if the shell says (it does not for an
+    /// icon in the hidden overflow area, or in the middle of an Explorer
+    /// restart). For opening something at the icon without a click to take the
+    /// position from.
+    pub fn rect(&self) -> Option<RECT> {
+        let identifier = NOTIFYICONIDENTIFIER {
+            cbSize: size_of::<NOTIFYICONIDENTIFIER>() as u32,
+            hWnd: self.data.hWnd,
+            uID: self.data.uID,
+            ..Default::default()
+        };
+        unsafe { Shell_NotifyIconGetRect(&identifier) }.ok()
     }
 
     /// Updates the tooltip shown when hovering the icon.

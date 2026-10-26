@@ -806,6 +806,269 @@ mod tests {
         );
     }
 
+    fn actions_of(xml: &str) -> (crate::model::ActionsConfig, Vec<String>) {
+        let tree = load_str(xml, &mut builtins()).expect("valid");
+        let actions = tree.search.expect("a <search>").actions;
+        (actions, tree.warnings)
+    }
+
+    fn bindings(
+        actions: &crate::model::ActionsConfig,
+    ) -> Vec<(&'static str, Option<String>, bool)> {
+        actions
+            .actions
+            .iter()
+            .map(|a| (a.id.name(), a.key.map(|key| key.to_string()), a.button))
+            .collect()
+    }
+
+    #[test]
+    fn without_actions_the_defaults_apply() {
+        let (actions, warnings) = actions_of(r#"<y-pop><search/></y-pop>"#);
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(actions, crate::model::ActionsConfig::default());
+        assert_eq!(actions.menu_key.to_string(), "Alt+Enter");
+        assert!(actions.quick_pick);
+        assert_eq!(
+            bindings(&actions)
+                .iter()
+                .filter_map(|(id, key, _)| key.as_ref().map(|key| (*id, key.as_str())))
+                .collect::<Vec<_>>(),
+            [
+                ("open", "Enter"),
+                ("reveal", "Ctrl+R"),
+                ("edit", "Ctrl+E"),
+                ("forget", "Ctrl+Del")
+            ],
+            "the rest are in the menu only"
+        );
+    }
+
+    #[test]
+    fn actions_list_exactly_what_exists_and_in_order() {
+        let (actions, warnings) = actions_of(
+            r#"<y-pop><search>
+                <actions menu-key="Ctrl+K" quick-pick="false">
+                    <action do="edit" key="Ctrl+E" button="true"/>
+                    <action do="open" key="Enter"/>
+                    <action do="copy-path"/>
+                </actions>
+            </search></y-pop>"#,
+        );
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(actions.menu_key.to_string(), "Ctrl+K");
+        assert!(!actions.quick_pick);
+        assert_eq!(
+            bindings(&actions),
+            [
+                ("edit", Some("Ctrl+E".into()), true),
+                ("open", Some("Enter".into()), false),
+                ("copy-path", None, false),
+            ]
+        );
+        assert_eq!(
+            actions
+                .key_of(crate::model::ActionId::Edit)
+                .map(|k| k.to_string()),
+            Some("Ctrl+E".into())
+        );
+        assert_eq!(
+            actions.key_of(crate::model::ActionId::Reveal),
+            None,
+            "not listed"
+        );
+    }
+
+    #[test]
+    fn open_is_always_there_and_empty_actions_keep_only_it() {
+        let (actions, warnings) = actions_of(
+            r#"<y-pop><search><actions><action do="edit" key="Ctrl+E"/></actions></search></y-pop>"#,
+        );
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(
+            bindings(&actions),
+            [
+                ("open", Some("Enter".into()), false),
+                ("edit", Some("Ctrl+E".into()), false)
+            ]
+        );
+
+        let (empty, _) = actions_of(r#"<y-pop><search><actions/></search></y-pop>"#);
+        assert_eq!(bindings(&empty), [("open", Some("Enter".into()), false)]);
+
+        // If Enter is another action's, Open simply has no key.
+        let (taken, _) = actions_of(
+            r#"<y-pop><search><actions><action do="edit" key="Enter"/></actions></search></y-pop>"#,
+        );
+        assert_eq!(
+            bindings(&taken),
+            [("open", None, false), ("edit", Some("Enter".into()), false)]
+        );
+    }
+
+    #[test]
+    fn actions_alone_leave_the_default_sections() {
+        let tree = load_str(
+            r#"<y-pop><search><actions/></search></y-pop>"#,
+            &mut builtins(),
+        )
+        .expect("valid");
+        assert_eq!(
+            tree.search.unwrap().sections.len(),
+            crate::model::SearchConfig::default_sections().len(),
+            "Recent, Menus and Start menu, as for a bare <search/>"
+        );
+    }
+
+    #[test]
+    fn action_warnings() {
+        let warnings = |xml: &str| actions_of(xml).1.join("\n");
+
+        assert!(
+            warnings(r#"<y-pop><search><actions><action do="fly"/></actions></search></y-pop>"#)
+                .contains("unknown action \"fly\"")
+        );
+        assert!(
+            warnings(
+                r#"<y-pop><search><actions><action key="Ctrl+E"/></actions></search></y-pop>"#
+            )
+            .contains("needs a do attribute")
+        );
+        assert!(
+            warnings(r#"<y-pop><search><actions><widget/></actions></search></y-pop>"#)
+                .contains("unknown element <widget>")
+        );
+        assert!(
+            warnings(r#"<y-pop><search><actions typo="1"/></search></y-pop>"#)
+                .contains("no typo attribute")
+        );
+        assert!(
+            warnings(r#"<y-pop><search><actions menu-key="Esc"/></search></y-pop>"#)
+                .contains("menu-key=\"Esc\"")
+        );
+        assert!(
+            warnings(
+                r#"<y-pop><search><actions><action do="edit"/><action do="edit"/></actions></search></y-pop>"#
+            )
+            .contains("listed twice")
+        );
+        assert!(
+            warnings(r#"<y-pop><search><actions/><actions/></search></y-pop>"#)
+                .contains("a second <actions>")
+        );
+    }
+
+    #[test]
+    fn a_shortcut_that_cannot_work_is_dropped_but_the_action_stays() {
+        let (actions, warnings) = actions_of(
+            r#"<y-pop><search><actions>
+                <action do="edit" key="E"/>
+                <action do="copy-path" key="Ctrl+C"/>
+                <action do="reveal" key="Alt+3"/>
+                <action do="forget" key="Ctrl+Nonsense"/>
+            </actions></search></y-pop>"#,
+        );
+        assert_eq!(warnings.len(), 4, "{warnings:?}");
+        assert!(warnings.iter().any(|w| w.contains("or it would be typing")));
+        assert!(warnings.iter().any(|w| w.contains("it edits the text")));
+        assert!(warnings.iter().any(|w| w.contains("Alt+1…9")));
+        let ids: Vec<_> = bindings(&actions).iter().map(|b| b.0).collect();
+        assert_eq!(ids, ["open", "edit", "copy-path", "reveal", "forget"]);
+        assert!(actions.actions.iter().skip(1).all(|a| a.key.is_none()));
+    }
+
+    #[test]
+    fn two_actions_on_one_shortcut_the_second_loses_it() {
+        let (actions, warnings) = actions_of(
+            r#"<y-pop><search><actions menu-key="Ctrl+K">
+                <action do="edit" key="Ctrl+E"/>
+                <action do="reveal" key="Ctrl+E"/>
+                <action do="forget" key="Ctrl+K"/>
+            </actions></search></y-pop>"#,
+        );
+        assert_eq!(warnings.len(), 2, "{warnings:?}");
+        let key = |id| actions.key_of(id).map(|k| k.to_string());
+        assert_eq!(key(crate::model::ActionId::Edit), Some("Ctrl+E".into()));
+        assert_eq!(key(crate::model::ActionId::Reveal), None);
+        assert_eq!(key(crate::model::ActionId::Forget), None, "the menu key's");
+    }
+
+    #[test]
+    fn every_action_has_a_name_that_parses_back() {
+        for id in crate::model::ActionId::ALL {
+            assert_eq!(crate::model::ActionId::parse(id.name()), Some(id));
+            assert!(!id.label().is_empty());
+        }
+        assert_eq!(crate::model::ActionId::parse("nope"), None);
+    }
+
+    fn extras(xml: &str) -> crate::model::TrayExtras {
+        let tree = load_str(xml, &mut builtins()).expect("valid");
+        assert!(tree.warnings.is_empty(), "{:?}", tree.warnings);
+        tree.tray_extras(tree.roots[0])
+    }
+
+    #[test]
+    fn a_right_click_adds_search_about_and_quit_to_a_plain_menu() {
+        let all = extras(
+            r#"<y-pop><search/><group name="Work"><app name="A" exe="a.exe"/></group></y-pop>"#,
+        );
+        assert_eq!(
+            (all.search, all.about, all.quit),
+            (true, true, true),
+            "{all:?}"
+        );
+    }
+
+    #[test]
+    fn search_is_offered_only_when_the_file_has_one() {
+        let none =
+            extras(r#"<y-pop><group name="Work"><app name="A" exe="a.exe"/></group></y-pop>"#);
+        assert!(!none.search);
+        assert!(none.about && none.quit);
+    }
+
+    #[test]
+    fn a_menu_that_holds_about_or_quit_does_not_get_another() {
+        let quit =
+            extras(r#"<y-pop><group name="W"><app name="A" exe="a.exe"/><quit/></group></y-pop>"#);
+        assert_eq!((quit.about, quit.quit), (true, false));
+
+        let about = extras(r#"<y-pop><group name="W"><about/></group></y-pop>"#);
+        assert_eq!((about.about, about.quit), (false, true));
+
+        // Only the top level counts: one in a submenu is not what a right
+        // click would show, so the entry is still added.
+        let nested = extras(
+            r#"<y-pop><group name="W"><group name="y-pop"><about/><quit/></group></group></y-pop>"#,
+        );
+        assert_eq!((nested.about, nested.quit), (true, true));
+    }
+
+    #[test]
+    fn only_the_menu_of_that_icon_counts() {
+        let tree = load_str(
+            r#"<y-pop><group name="One"><quit/></group><group name="Two"><app name="A" exe="a.exe"/></group></y-pop>"#,
+            &mut builtins(),
+        )
+        .expect("valid");
+        assert!(!tree.tray_extras(tree.roots[0]).quit);
+        assert!(
+            tree.tray_extras(tree.roots[1]).quit,
+            "Two has none of its own"
+        );
+    }
+
+    #[test]
+    fn an_icon_that_is_an_app_or_a_quit_button_still_gets_the_rest() {
+        let app = extras(r#"<y-pop><app name="A" exe="a.exe"/></y-pop>"#);
+        assert!(app.about && app.quit, "an app has no menu to hold them");
+
+        let quit = extras(r#"<y-pop><quit/></y-pop>"#);
+        assert!(quit.about);
+        assert!(!quit.quit, "it is one");
+    }
+
     #[test]
     fn an_explicit_empty_name_is_not_defaulted() {
         let tree = load_str(r#"<y-pop><quit name=""/></y-pop>"#, &mut builtins()).expect("valid");

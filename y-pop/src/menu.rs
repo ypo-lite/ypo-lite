@@ -92,12 +92,27 @@ use y_core::menu::{self, MenuDesign, MenuSelect, PopupMenu};
 
 use y_pop::model::{
     App, Browse, ConfigTree, Defaults, EventMask, NodeData, NodeId, NodeKind, OpenFolder,
+    TrayExtras,
 };
 
 use y_pop::skins::resolve_design;
 
 /// First id handed to a discovered (browsed) file — see the module doc.
 const DISCOVERED_ID_BASE: u32 = 1_000_000;
+
+/// Command ids of the entries a right click adds ([`build_with`]): just
+/// below the discovered files', far above any node's `IDM_FIRST + index`.
+const EXTRA_SEARCH: u32 = DISCOVERED_ID_BASE - 3;
+const EXTRA_ABOUT: u32 = DISCOVERED_ID_BASE - 2;
+const EXTRA_QUIT: u32 = DISCOVERED_ID_BASE - 1;
+
+/// One of the built-in entries of a tray icon's right-click menu.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Extra {
+    Search,
+    About,
+    Quit,
+}
 
 /// Extra runtime state for one open popup — the parts a `ConfigTree` alone
 /// can't answer, because they only exist once a `browse` folder is actually
@@ -279,6 +294,8 @@ pub enum Selection {
     Node(NodeId),
     /// A file discovered while browsing — nothing to look up, launch it.
     Launch(App),
+    /// A built-in entry of the right-click menu.
+    Extra(Extra),
 }
 
 /// Recovers what a native menu's `track()` returned, checking `session`'s
@@ -289,6 +306,12 @@ pub enum Selection {
 /// `WM_COMMAND` from somewhere else is exactly the case worth failing
 /// softly on rather than panicking.
 pub fn resolve_selection(id: u32, session: &mut Session) -> Option<Selection> {
+    match id {
+        EXTRA_SEARCH => return Some(Selection::Extra(Extra::Search)),
+        EXTRA_ABOUT => return Some(Selection::Extra(Extra::About)),
+        EXTRA_QUIT => return Some(Selection::Extra(Extra::Quit)),
+        _ => {}
+    }
     if let Some(app) = session.discovered.remove(&id) {
         return Some(Selection::Launch(app));
     }
@@ -297,13 +320,117 @@ pub fn resolve_selection(id: u32, session: &mut Session) -> Option<Selection> {
         .map(Selection::Node)
 }
 
-/// Builds a popup for `group`'s children.
+/// A key press that walks an open tray menu toward an item.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Step {
+    /// Highlight the next item.
+    Down,
+    /// Open the highlighted submenu (which highlights its first item).
+    Right,
+}
+
+/// Where **Reveal in menu** goes: the tray icon whose menu holds `node`, and
+/// the keys that walk that menu down to it (task 5.6). `None` for what no tray
+/// menu reaches.
+///
+/// `TrackPopupMenu` cannot preselect a row, but a menu answers the keyboard:
+/// the first `Down` highlights the first item, `Right` opens a submenu and
+/// highlights its first item. So the steps are, for each level, `Down` once for
+/// each item above the target, then `Right` to go in. They are plain counting,
+/// so they hold only while the menu is what [`build_with`] makes: separators
+/// are skipped by the keyboard (a titled one in a native menu is a greyed item,
+/// which is not), and breaks add nothing.
+pub fn reveal_steps(tree: &ConfigTree, node: NodeId) -> Option<(NodeId, Vec<Step>)> {
+    let path = tree.path_to(node)?;
+    let themed = resolve_design(tree.defaults.theme, tree.defaults.theme_overrides).is_some();
+
+    let mut steps = Vec::new();
+    for (depth, pair) in path.windows(2).enumerate() {
+        let [parent, child] = [pair[0], pair[1]];
+        let above = tree
+            .children(parent)
+            .take_while(|&sibling| sibling != child)
+            .filter(|&sibling| match tree.node(sibling).kind {
+                NodeKind::Break => false,
+                NodeKind::Separator => !themed && !tree.node(sibling).name.is_empty(),
+                _ => true,
+            })
+            .count();
+        // Nothing is highlighted yet in the first menu: one more to get on it.
+        let downs = above + usize::from(depth == 0);
+        steps.extend(std::iter::repeat_n(Step::Down, downs));
+        if depth + 2 < path.len() {
+            steps.push(Step::Right);
+        }
+    }
+    Some((path[0], steps))
+}
+
+/// Builds a popup for `group`'s children, with nothing added — what the
+/// tests that are not about the right-click menu build.
+#[cfg(test)]
 pub fn build(tree: &ConfigTree, group: NodeId) -> (PopupMenu, Session) {
+    build_with(tree, Some(group), None)
+}
+
+/// [`build`], for a tray icon's right click: `group`'s children (none, for an
+/// icon that is not a group) followed by `extras` — **Open Search**, **About**
+/// and **Quit**, whichever [`ConfigTree::tray_extras`] says are wanted — set
+/// apart by a rule when there is anything above them.
+pub fn build_with(
+    tree: &ConfigTree,
+    group: Option<NodeId>,
+    extras: Option<TrayExtras>,
+) -> (PopupMenu, Session) {
     let design = resolve_design(tree.defaults.theme, tree.defaults.theme_overrides);
     let mut menu = PopupMenu::new_maybe_themed(design).expect("CreatePopupMenu");
     let mut session = Session::with_design(design);
-    append_children(tree, group, &mut menu, &mut session);
+    if let Some(group) = group {
+        append_children(tree, group, &mut menu, &mut session);
+    }
+    if let Some(extras) = extras {
+        append_extras(tree, extras, &mut menu, &mut session);
+    }
     (menu, session)
+}
+
+fn append_extras(
+    tree: &ConfigTree,
+    extras: TrayExtras,
+    menu: &mut PopupMenu,
+    session: &mut Session,
+) {
+    if !(extras.search || extras.about || extras.quit) {
+        return;
+    }
+    if menu.item_count() > 0 {
+        let _ = menu.add_titled_separator("");
+    }
+
+    let mut add = |id: u32, label: &str, stock: StockIcon, shortcut: Option<&str>| {
+        let icon = session.icons.for_stock(stock);
+        let _ = menu.add_item_with_shortcut(id, label, shortcut);
+        session.attach_icon(icon, |bitmap| menu.set_item_icon(id, bitmap));
+    };
+    if extras.search {
+        // The hotkey that opens it, as any other entry shows its own.
+        let hotkey = tree
+            .search_hotkey()
+            .filter(|_| tree.defaults.show_shortcuts)
+            .map(|(_, binding)| binding.hotkey.to_string());
+        add(
+            EXTRA_SEARCH,
+            "Open Search",
+            StockIcon::Find,
+            hotkey.as_deref(),
+        );
+    }
+    if extras.about {
+        add(EXTRA_ABOUT, "About", StockIcon::Info, None);
+    }
+    if extras.quit {
+        add(EXTRA_QUIT, "Quit", StockIcon::Delete, None);
+    }
 }
 
 fn append_children(tree: &ConfigTree, parent: NodeId, menu: &mut PopupMenu, session: &mut Session) {
@@ -617,6 +744,97 @@ mod tests {
         String::from_utf16_lossy(&buffer[..len.max(0) as usize])
     }
 
+    fn tree_from(xml: &str) -> ConfigTree {
+        let tree = config::load_str(xml, &mut Vec::<Variable>::new()).expect("valid XML");
+        assert!(tree.warnings.is_empty(), "{:?}", tree.warnings);
+        tree
+    }
+
+    fn all_items(menu: HMENU) -> Vec<String> {
+        (0..item_count(menu) as u32)
+            .map(|index| item_text(menu, index))
+            .collect()
+    }
+
+    #[test]
+    fn a_right_click_menu_is_the_menu_then_a_rule_then_search_about_and_quit() {
+        let _guard = serialized();
+        let tree = tree_from(
+            r#"<y-pop><search/><group name="Work"><app name="A" exe="a.exe"/></group></y-pop>"#,
+        );
+        let root = tree.roots[0];
+        let extras = tree.tray_extras(root);
+
+        let (popup, mut session) = build_with(&tree, Some(root), Some(extras));
+        let texts = all_items(popup.handle());
+        assert_eq!(texts.len(), 5, "{texts:?}");
+        assert_eq!(texts[0], "A");
+        assert_eq!(texts[1], "", "the rule");
+        assert_eq!(texts[2], "Open Search");
+        assert_eq!(texts[3], "About");
+        assert_eq!(texts[4], "Quit");
+
+        // And each one resolves to what it says.
+        for (position, expected) in [(2, Extra::Search), (3, Extra::About), (4, Extra::Quit)] {
+            let id = unsafe { GetMenuItemID(popup.handle(), position) };
+            assert!(
+                matches!(
+                    resolve_selection(id, &mut session),
+                    Some(Selection::Extra(found)) if found == expected
+                ),
+                "item {position}"
+            );
+        }
+    }
+
+    #[test]
+    fn what_the_menu_already_holds_is_not_added_again() {
+        let _guard = serialized();
+        let tree = tree_from(
+            r#"<y-pop><group name="Work"><app name="A" exe="a.exe"/><quit/></group></y-pop>"#,
+        );
+        let root = tree.roots[0];
+        let (popup, _session) = build_with(&tree, Some(root), Some(tree.tray_extras(root)));
+        // Its own Quit, then the rule, then About — no second Quit and, with
+        // no <search>, no Open Search.
+        let texts = all_items(popup.handle());
+        assert_eq!(texts, ["A", "Quit", "", "About"], "{texts:?}");
+    }
+
+    #[test]
+    fn an_icon_with_no_menu_gets_the_extras_without_a_rule() {
+        let _guard = serialized();
+        let tree = tree_from(r#"<y-pop><search/><app name="A" exe="a.exe"/></y-pop>"#);
+        let root = tree.roots[0];
+        let (popup, _session) = build_with(&tree, None, Some(tree.tray_extras(root)));
+        let texts = all_items(popup.handle());
+        assert_eq!(texts, ["Open Search", "About", "Quit"], "{texts:?}");
+    }
+
+    #[test]
+    fn without_extras_nothing_is_added() {
+        let _guard = serialized();
+        let tree =
+            tree_from(r#"<y-pop><group name="Work"><app name="A" exe="a.exe"/></group></y-pop>"#);
+        let (popup, _session) = build_with(&tree, Some(tree.roots[0]), None);
+        assert_eq!(all_items(popup.handle()), ["A"]);
+    }
+
+    #[test]
+    fn the_search_entry_shows_the_search_hotkey() {
+        let _guard = serialized();
+        let tree = tree_from(
+            r#"<y-pop><search hotkey="Alt+Space"/><group name="Work"><app name="A" exe="a.exe"/></group></y-pop>"#,
+        );
+        let root = tree.roots[0];
+        let (popup, _session) = build_with(&tree, Some(root), Some(tree.tray_extras(root)));
+        let texts = all_items(popup.handle());
+        assert!(
+            texts[2].starts_with("Open Search") && texts[2].contains("Alt+Space"),
+            "{texts:?}"
+        );
+    }
+
     fn item_has_icon(menu: HMENU, id: u32) -> bool {
         has_icon(menu, id, false)
     }
@@ -743,7 +961,9 @@ mod tests {
                 );
                 assert!(app.exe.unwrap().ends_with("notes.txt"));
             }
-            Selection::Node(_) => panic!("expected a discovered file, not a tree node"),
+            Selection::Node(_) | Selection::Extra(_) => {
+                panic!("expected a discovered file, not a tree node")
+            }
         }
     }
 
@@ -812,7 +1032,9 @@ mod tests {
                 assert!(app.shell, "a directory can only be launched via the shell");
                 assert!(app.exe.unwrap().ends_with("SubSub"));
             }
-            Selection::Node(_) => panic!("expected a discovered folder, not a tree node"),
+            Selection::Node(_) | Selection::Extra(_) => {
+                panic!("expected a discovered folder, not a tree node")
+            }
         }
     }
 
@@ -869,7 +1091,9 @@ mod tests {
                 assert!(app.shell);
                 assert!(app.exe.unwrap().ends_with("open-folder-all"));
             }
-            Selection::Node(_) => panic!("expected the discovered open-folder entry"),
+            Selection::Node(_) | Selection::Extra(_) => {
+                panic!("expected the discovered open-folder entry")
+            }
         }
     }
 
@@ -1062,6 +1286,80 @@ mod tests {
         let (popup, _session) = build(&tree, root);
         assert_eq!(item_count(popup.handle()), 1);
         assert!(!item_starts_new_column(popup.handle(), 0));
+    }
+
+    fn named(tree: &ConfigTree, name: &str) -> NodeId {
+        tree.all_nodes()
+            .find(|&id| tree.node(id).name.as_ref() == name)
+            .unwrap_or_else(|| panic!("no node named {name:?}"))
+    }
+
+    const TREE: &str = r#"<y-pop theme="native">
+        <group name="Work">
+            <app name="First" exe="a.exe"/>
+            <separator/>
+            <separator name="Tools"/>
+            <break/>
+            <group name="Dev">
+                <app name="Editor" exe="e.exe"/>
+                <group name="Deep"><app name="Target" exe="t.exe"/></group>
+            </group>
+        </group>
+        <app name="Alone" exe="x.exe"/>
+        <search><group name="Hidden"><app name="Lost" exe="l.exe"/></group></search>
+    </y-pop>"#;
+
+    #[test]
+    fn revealing_an_item_counts_the_items_above_it_and_goes_down_the_submenus() {
+        use Step::{Down, Right};
+        let tree = tree_from(TREE);
+        let work = tree.roots[0];
+
+        // The first item: one Down gets on it.
+        assert_eq!(
+            reveal_steps(&tree, named(&tree, "First")),
+            Some((work, vec![Down]))
+        );
+        // Dev: First, the rule (skipped), Tools (a greyed item in a native
+        // menu, so counted), the break (nothing) — two above it, one more to
+        // start. Then into it.
+        assert_eq!(
+            reveal_steps(&tree, named(&tree, "Dev")),
+            Some((work, vec![Down, Down, Down]))
+        );
+        // Through Dev (Right, and its first item is already lit), past Editor
+        // to Deep, in, and the first item there is Target.
+        assert_eq!(
+            reveal_steps(&tree, named(&tree, "Target")),
+            Some((work, vec![Down, Down, Down, Right, Down, Right]))
+        );
+    }
+
+    #[test]
+    fn a_themed_menus_titled_separators_are_skipped_too() {
+        use Step::Down;
+        let tree = tree_from(&TREE.replace(r#"theme="native""#, r#"theme="dark""#));
+        assert_eq!(
+            reveal_steps(&tree, named(&tree, "Dev")).map(|(_, steps)| steps),
+            Some(vec![Down, Down]),
+            "only First is above it"
+        );
+    }
+
+    #[test]
+    fn a_tray_icon_is_revealed_by_opening_its_menu() {
+        let tree = tree_from(TREE);
+        let work = tree.roots[0];
+        assert_eq!(reveal_steps(&tree, work), Some((work, vec![])));
+        let alone = named(&tree, "Alone");
+        assert_eq!(reveal_steps(&tree, alone), Some((alone, vec![])));
+    }
+
+    #[test]
+    fn what_no_tray_menu_holds_cannot_be_revealed() {
+        let tree = tree_from(TREE);
+        assert_eq!(reveal_steps(&tree, named(&tree, "Lost")), None);
+        assert_eq!(reveal_steps(&tree, named(&tree, "Hidden")), None);
     }
 
     // `resolve_design` and the three built-in skins have their own test

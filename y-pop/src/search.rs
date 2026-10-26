@@ -8,20 +8,26 @@
 //!
 //! * [`matcher`]: fuzzy subsequence scoring of one query word against one
 //!   piece of text.
+//! * [`actions`]: which actions apply to which result.
 //! * [`display`]: the text of a result row (matched runs, headings, second line).
+//! * [`history`]: what was launched and when, for Recent and a ranking bonus.
 //! * [`hotkey`]: a key combination as a set, for queries like `shift+ctrl+esc`.
 //! * [`index`]: the flat list of everything searchable, built from a
 //!   [`crate::model::ConfigTree`] at load and reload, never per keystroke.
 //! * [`input`]: the text box's state machine (text, caret, selection, keys).
+//! * [`keys`]: keys and shortcuts (`Ctrl+Shift+Enter`), parsed and checked.
 //! * [`layout`]: where the window's parts go (pure geometry, hit-testing).
 //! * [`query`]: running a typed query over the index.
 //! * [`state`]: the box's behaviour — events in, outcomes out.
 //! * [`results`]: the Top hit / groups layout of a result list.
 
+pub mod actions;
 pub mod display;
+pub mod history;
 pub mod hotkey;
 pub mod index;
 pub mod input;
+pub mod keys;
 pub mod layout;
 pub mod matcher;
 pub mod query;

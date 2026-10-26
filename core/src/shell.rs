@@ -2,11 +2,12 @@
 //! applications need for "open this file/folder/program", kept here so an
 //! application crate that forbids `unsafe` (the config apps) can still do it.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
+use windows::Win32::Storage::FileSystem::SearchPathW;
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
-use windows::core::{HSTRING, w};
+use windows::core::{HSTRING, PCWSTR, w};
 
 /// `ShellExecute`'s "open" on `path`: runs an executable, opens a folder in
 /// Explorer, or opens a file with whatever is registered for it. Fire and
@@ -16,6 +17,44 @@ pub fn open(path: &Path) {
     // SAFETY: every argument is a valid, NUL-terminated wide string or null,
     // and the call does not retain any of them.
     unsafe { ShellExecuteW(None, w!("open"), &file, None, None, SW_SHOWNORMAL) };
+}
+
+/// Opens Explorer on the folder holding `path`, with `path` selected — "show
+/// me where this is". Fire and forget, like [`open`].
+pub fn reveal(path: &Path) {
+    let argument = HSTRING::from(format!("/select,\"{}\"", path.display()));
+    // SAFETY: as in `open`.
+    unsafe {
+        ShellExecuteW(
+            None,
+            w!("open"),
+            w!("explorer.exe"),
+            &argument,
+            None,
+            SW_SHOWNORMAL,
+        )
+    };
+}
+
+/// Where the program called `name` (`notepad.exe`, `services.msc`) is, found
+/// the way a launch would: the application's folder, the system folders, then
+/// `PATH`. `None` if it is not found, or if `name` is too long for a path.
+pub fn find_program(name: &str) -> Option<PathBuf> {
+    let name = HSTRING::from(name);
+    let mut buffer = [0u16; 520];
+    // SAFETY: `name` is a valid wide string; the buffer is ours and its length
+    // is passed with it.
+    let length = unsafe {
+        SearchPathW(
+            PCWSTR::null(),
+            &name,
+            PCWSTR::null(),
+            Some(&mut buffer),
+            None,
+        )
+    } as usize;
+    (length > 0 && length < buffer.len())
+        .then(|| PathBuf::from(String::from_utf16_lossy(&buffer[..length])))
 }
 
 /// Keeps what the user copies from outliving a WinUI window the wrong way.
@@ -61,5 +100,23 @@ impl Drop for ClipboardFlusher {
     fn drop(&mut self) {
         use windows::ApplicationModel::DataTransfer::Clipboard;
         let _ = Clipboard::RemoveContentChanged(self.token);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::find_program;
+
+    #[test]
+    fn a_system_program_is_found_by_its_bare_name() {
+        let found = find_program("notepad.exe").expect("notepad is on every Windows");
+        assert!(found.is_absolute(), "{found:?}");
+        assert!(found.ends_with("notepad.exe"), "{found:?}");
+        assert!(found.is_file());
+    }
+
+    #[test]
+    fn a_program_that_does_not_exist_is_not_found() {
+        assert_eq!(find_program("no-such-program-ypo-lite.exe"), None);
     }
 }

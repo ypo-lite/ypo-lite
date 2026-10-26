@@ -16,9 +16,9 @@ use y_core::overlay::Color;
 use y_core::xml::Writer;
 
 use super::{
-    Comment, Entry, Globals, HotkeyEntry, Item, ItemKind, MenusMode, PopupStyle, Renderer,
-    ResultsMode, SearchEntry, SearchSection, SearchSettings, SectionKind, Settings, Skin, Var,
-    VarEntry,
+    ActionEntry, Comment, Entry, Globals, HotkeyEntry, Item, ItemKind, MenusMode, PopupStyle,
+    Renderer, ResultsMode, SearchEntry, SearchSection, SearchSettings, SectionKind, Settings, Skin,
+    Var, VarEntry,
 };
 use crate::model::OpenFolder;
 use crate::theme::{EdgeRule, GradientDirection, GradientOverride, Theme};
@@ -329,8 +329,33 @@ fn write_section(writer: &mut Writer, section: &SearchSection) {
         }
         SectionKind::StartMenu { exclude } => attributes.text("exclude", exclude.as_deref()),
         SectionKind::Plugin => {}
+        SectionKind::Actions {
+            menu_key,
+            quick_pick,
+            ..
+        } => {
+            attributes.text("menu-key", menu_key.as_deref());
+            attributes.bool("quick-pick", *quick_pick);
+        }
     }
     attributes.extras(&section.extra_attrs);
+
+    if let SectionKind::Actions { entries, .. } = &section.kind {
+        for entry in entries {
+            match entry {
+                ActionEntry::Comment(comment) => write_comment(writer, comment),
+                ActionEntry::Action(item) => {
+                    writer.open("action");
+                    let mut attributes = Attributes::new(writer);
+                    attributes.text("do", item.id.as_deref());
+                    attributes.text("key", item.key.as_deref());
+                    attributes.bool("button", item.button);
+                    attributes.extras(&item.extra_attrs);
+                    writer.close();
+                }
+            }
+        }
+    }
     writer.close();
 }
 

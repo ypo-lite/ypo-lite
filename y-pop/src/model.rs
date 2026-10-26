@@ -14,6 +14,7 @@ use std::sync::Arc;
 
 use y_core::hotkey::Hotkey;
 
+use crate::search::keys::Chord;
 use crate::theme::{Theme, ThemeOverrides};
 
 /// Index into a [`ConfigTree`]'s node arena. `u32` rather than `usize`: half
@@ -120,6 +121,148 @@ pub enum PresenterStyle {
     Radial,
 }
 
+/// The built-in entries a right click on a tray icon adds after its menu —
+/// see [`ConfigTree::tray_extras`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct TrayExtras {
+    pub search: bool,
+    pub about: bool,
+    pub quit: bool,
+}
+
+/// What can be done to a result — the built-in actions of the search box,
+/// configured by `<actions>` (`docs/overlay-modes.md` §2.9).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+pub enum ActionId {
+    /// Launch it; on a group, go inside it.
+    Open,
+    /// Launch it elevated, this once.
+    RunAsAdmin,
+    /// Show the file in Explorer.
+    ShowInFolder,
+    /// Put its path on the clipboard.
+    CopyPath,
+    /// Show where it is in its tray menu.
+    Reveal,
+    /// Edit it in `y-pop-config`.
+    Edit,
+    /// Make a tray-menu entry of a Start-menu item.
+    AddToMenu,
+    /// Remove it from the history.
+    Forget,
+}
+
+impl ActionId {
+    /// Every action, in the order of the default menu.
+    pub const ALL: [ActionId; 8] = [
+        Self::Open,
+        Self::RunAsAdmin,
+        Self::ShowInFolder,
+        Self::CopyPath,
+        Self::Reveal,
+        Self::Edit,
+        Self::AddToMenu,
+        Self::Forget,
+    ];
+
+    /// The `do=""` name.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Open => "open",
+            Self::RunAsAdmin => "run-as-admin",
+            Self::ShowInFolder => "show-in-folder",
+            Self::CopyPath => "copy-path",
+            Self::Reveal => "reveal",
+            Self::Edit => "edit",
+            Self::AddToMenu => "add-to-menu",
+            Self::Forget => "forget",
+        }
+    }
+
+    /// What the action menu calls it.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Open => "Open",
+            Self::RunAsAdmin => "Run as administrator",
+            Self::ShowInFolder => "Show in folder",
+            Self::CopyPath => "Copy path",
+            Self::Reveal => "Reveal in menu",
+            Self::Edit => "Edit in settings",
+            Self::AddToMenu => "Add to a menu",
+            Self::Forget => "Forget",
+        }
+    }
+
+    /// What a row button calls it: short, since several share the row.
+    pub fn short_label(self) -> &'static str {
+        match self {
+            Self::Open => "Open",
+            Self::RunAsAdmin => "Admin",
+            Self::ShowInFolder => "Folder",
+            Self::CopyPath => "Copy",
+            Self::Reveal => "Reveal",
+            Self::Edit => "Edit",
+            Self::AddToMenu => "Add",
+            Self::Forget => "Forget",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|id| id.name() == name)
+    }
+}
+
+/// One entry of `<actions>`: an action, its shortcut if it has one, and
+/// whether the selected row shows it as a button.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ActionBinding {
+    pub id: ActionId,
+    pub key: Option<Chord>,
+    pub button: bool,
+}
+
+/// `<actions>`: which actions exist, in menu order, and how they are reached.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct ActionsConfig {
+    /// Opens the action menu on the selected result (besides a right click
+    /// and `Shift+F10`).
+    pub menu_key: Chord,
+    /// `Alt+1…9` open the n-th result, and the rows say so.
+    pub quick_pick: bool,
+    /// Always holds [`ActionId::Open`].
+    pub actions: Vec<ActionBinding>,
+}
+
+impl ActionsConfig {
+    /// The shortcut of `id`, if it is configured and has one.
+    pub fn key_of(&self, id: ActionId) -> Option<Chord> {
+        self.actions.iter().find(|a| a.id == id)?.key
+    }
+}
+
+impl Default for ActionsConfig {
+    /// What `<search>` without `<actions>` means: `Enter` opens, `Ctrl+R`
+    /// reveals, `Ctrl+E` edits, `Ctrl+Del` forgets, the rest in the menu only.
+    fn default() -> Self {
+        let chord = |text: &str| Some(Chord::parse(text).expect("a valid default shortcut"));
+        let bind = |id, key: Option<Chord>, button| ActionBinding { id, key, button };
+        Self {
+            menu_key: Chord::parse("Alt+Enter").expect("a valid default shortcut"),
+            quick_pick: true,
+            actions: vec![
+                bind(ActionId::Open, chord("Enter"), false),
+                bind(ActionId::RunAsAdmin, None, false),
+                bind(ActionId::ShowInFolder, None, false),
+                bind(ActionId::CopyPath, None, false),
+                bind(ActionId::Reveal, chord("Ctrl+R"), true),
+                bind(ActionId::Edit, chord("Ctrl+E"), true),
+                bind(ActionId::AddToMenu, None, true),
+                bind(ActionId::Forget, chord("Ctrl+Del"), true),
+            ],
+        }
+    }
+}
+
 /// `<search>` — see `docs/overlay-modes.md` §2.
 #[derive(Clone, Debug)]
 pub struct SearchConfig {
@@ -136,6 +279,8 @@ pub struct SearchConfig {
     /// In the order the empty box lists them; always contains a
     /// [`Section::Menus`].
     pub sections: Vec<Section>,
+    /// What can be done to a result, and how.
+    pub actions: ActionsConfig,
 }
 
 impl SearchConfig {
@@ -484,6 +629,50 @@ impl ConfigTree {
             stack.extend(self.children(id));
             Some(id)
         })
+    }
+
+    /// The chain of nodes from a tray icon's root down to `node`, both
+    /// included. `None` for what no tray menu reaches (search-only groups).
+    pub fn path_to(&self, node: NodeId) -> Option<Vec<NodeId>> {
+        fn walk(tree: &ConfigTree, at: NodeId, target: NodeId, path: &mut Vec<NodeId>) -> bool {
+            path.push(at);
+            if at == target
+                || tree
+                    .children(at)
+                    .any(|child| walk(tree, child, target, path))
+            {
+                return true;
+            }
+            path.pop();
+            false
+        }
+        let mut path = Vec::new();
+        self.roots
+            .iter()
+            .any(|&root| walk(self, root, node, &mut path))
+            .then_some(path)
+    }
+
+    /// What a right click on the tray icon of `root` adds to its menu, after
+    /// the menu itself: **Open Search** if the file has a `<search>`, and
+    /// **About** and **Quit** unless the menu already holds one at its top
+    /// level (or `root` is one itself): the user placed it where they want
+    /// it, and a second copy right next to it would only be noise. One in a
+    /// submenu does not count — it is not what a right click would show.
+    pub fn tray_extras(&self, root: NodeId) -> TrayExtras {
+        let (mut about, mut quit) = (true, true);
+        for id in std::iter::once(root).chain(self.children(root)) {
+            match self.node(id).kind {
+                NodeKind::About => about = false,
+                NodeKind::Quit => quit = false,
+                _ => {}
+            }
+        }
+        TrayExtras {
+            search: self.search.is_some(),
+            about,
+            quit,
+        }
     }
 
     /// The node a registered hotkey id belongs to, or `None` if the id is

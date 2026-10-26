@@ -20,8 +20,8 @@ runs it and reports; sessions don't drive the desktop themselves)
 | 1 `<search>` in the configuration | 👁 |
 | 2 Search core: matcher and index | ✅ |
 | 3 Text input and canvas primitives | 👁 |
-| 4 The search window, first usable version | 🔨 |
-| 5 Result actions | ⬜ |
+| 4 The search window, first usable version | 👁 |
+| 5 Result actions | 🔨 |
 | 6 History, Recent, sections, collapsed mode | ⬜ |
 | 7 Browsing the tray menus | ⬜ |
 | 8 Prefixes and the hotkey check | ⬜ |
@@ -30,7 +30,7 @@ runs it and reports; sessions don't drive the desktop themselves)
 | 11 `y-pop-config` support | ⬜ |
 | later | Search layer in the boards; plugins |
 
-**Resume here:** phase 4, tasks 4.6 and 4.7 (small: reload while open is already handled; trim the working set on close), then 4.8 (tray right click). Open 👁 checks: typing, the list, hover, click, wheel, Enter launching, Tab into a group and Backspace/Shift+Tab/Esc back (4.3–4.5), the start-up balloon and the search hotkey (phase 1), icon quality at 32 and 48 px and `y-snap`'s overlays unchanged (phase 3). Task 1.9 (`tray="true"`) is for later.
+**Resume here:** phase 6: 6.4 (the sections list), 6.5 (prefix line), 6.7 (Clear history) remain; 6.1–6.3 and 6.6 are built (awaiting a live look). The user manual is `docs/user-manual.md`: update it with each feature. Still to look at (👁): all of phase 4 (checklist under its "Done when"), the action menu, the row buttons, Reveal and the configured shortcuts of 5.2–5.6, the start-up balloon and the search hotkey (phase 1), icon quality at 32 and 48 px and `y-snap`'s overlays unchanged (phase 3). Task 1.9 (`tray="true"`) is for later.
 
 ---
 
@@ -218,13 +218,31 @@ from the tray menus, Enter launches, Esc closes.
 | 4.3 | Keyboard: `WM_CHAR` into `input`, `WM_KEYDOWN` for navigation (↑ ↓ PgUp PgDn Enter Esc Tab Shift+Tab). Mouse: hover selects, click opens, wheel scrolls. | 👁 |
 | 4.4 | Rendering: input row (icon, chip for the scope, text, caret, placeholder), result rows (icon, highlighted matched characters, second line, hotkey or Alt+n on the right), section headers, footer of key hints. Colours from the active skin (`MenuDesign`, like `tooltip.rs`); `panel-alpha`/`tile-radius` skin additions can wait. | 👁 |
 | 4.5 | Enter: launch through `launch::launch`; on a group: Tab-style scope into it (chip), Backspace on empty / Shift+Tab goes back. Icons loaded synchronously for the visible rows only (async is `y-pop-plan.md` step 7, not needed yet). | 👁 |
-| 4.6 | Reload while open: close the window, then swap the tree (same rule as `reload_pending` for the native popup). | ⬜ |
-| 4.7 | Working set: trim after close, like after the native popup. | ⬜ |
-| 4.8 | Tray right click: the menu plus a separator and **Open Search** (if `<search>`), **About**, **Quit**; left click unchanged. Needs `TrayEvent::ContextMenu` told apart from `Select`, and the extras handled in `menu::build` without disturbing the menu's own command ids. Also the click of the `tray="true"` icon (1.9). | ⬜ |
+| 4.6 | Reload while open: close the window, then swap the tree (same rule as `reload_pending` for the native popup). | ✅ (done with 4.2) |
+| 4.7 | Working set: trim after close, like after the native popup. | ✅ decided: no trim |
+| 4.8 | Tray right click: the menu plus a separator and **Open Search** (if `<search>`), **About**, **Quit**; left click unchanged. Needs `TrayEvent::ContextMenu` told apart from `Select`, and the extras handled in `menu::build` without disturbing the menu's own command ids. Also the click of the `tray="true"` icon (1.9). | 👁 |
 
 **Done when:** 👁 the user opens search with the hotkey, finds and launches
 items from every tray menu, and it closes cleanly; the empty box simply
 shows nothing yet (phase 6 fills it).
+
+**What to look at for that 👁** (everything phase 4 built, none of it seen
+running yet except the frame of 4.2):
+
+1. Hotkey opens the window; the hotkey again, Esc on an empty box, a click
+   outside and Alt+Tab close it.
+2. Typing shows the text, caret and selection (Shift+arrows, Ctrl+A);
+   Ctrl+C/X/V work; the window grows with the results and shrinks back.
+3. Rows: icon, name with the matched letters coloured, second line, hotkey on
+   the right; hover selects; the wheel scrolls; ↑ ↓ PgUp PgDn walk the
+   results and keep the selection in view.
+4. Enter and a click launch an app; Enter on a group goes inside it as a
+   chip; Backspace on an empty box, Shift+Tab and Esc come back out.
+5. Right click on a tray icon: the menu, a rule, Open Search (with its
+   hotkey), About, Quit — and no second About/Quit when the menu has its own;
+   left click unchanged; right click on an icon that is a single app shows
+   just the three.
+6. The look in each skin (`default`, `flat`, `dark`, `native` light and dark).
 
 **4.2 built and looked at (2026-10-26).** `y-pop/src/search_window.rs`, in
 the binary like `tooltip.rs` (the library stays Win32-free). The handler only
@@ -275,7 +293,7 @@ posts private messages carrying the opening's generation to the tray window.
   panel without a skin; rounded. The input row has a search glyph
   (`Segoe MDL2 Assets`, Windows 10/11).
 - Names too long for their box are cut with an ellipsis, without emphasis.
-- Not yet: the `Alt+n` hint on the right (task 5.1).
+- Not yet: the `Alt+n` hint on the right (done in 5.1).
 
 **4.5 built (2026-10-26).** Mostly in `State` (7 new tests, 18 in all):
 
@@ -298,20 +316,181 @@ posts private messages carrying the opening's generation to the tray window.
 - Not done: a chip's own × to click; History (phase 6) will record the pick
   here.
 
+**4.8 built (2026-10-26).** `ConfigTree::tray_extras(root)` (pure, 5 tests in
+`config.rs`) decides what a right click adds; `menu::build_with` appends it
+(5 tests in `menu.rs`); `YPop::on_message` tells `TrayEvent::ContextMenu` from
+the rest.
+
+- The extras follow the menu, set apart by a rule if the menu has anything:
+  **Open Search** (only if the file has `<search>`, showing its hotkey),
+  **About**, **Quit**.
+- **"Already holds" means at the top level of that icon's menu** (or the icon
+  is itself a `<quit/>`/`<about/>`). One in a submenu does not count, so the
+  right click still offers it. Each icon is judged on its own menu.
+- An icon that is a single `<app>` has no menu; its right click shows just the
+  extras, which gives it a way to quit.
+- Left click and double click are `YPop::run`, as before; hotkeys never show
+  the extras.
+- Command ids of the extras sit just below the discovered files' base, far
+  from any node's.
+
+**4.6 (reload while open) was already done by 4.2.** `YPop::reload` closes
+the search window after the new file has loaded and before the tree is
+swapped, so a file that does not load leaves an open window alone. Anything
+the closed window had already posted is ignored: its generation is stale, or
+there is no window to act on.
+
+**4.7 (working set): decided against.** The plan assumed the native popup
+trims after closing; it does not (`y-pop` trims once, at start-up, in
+`y_core::app::run`). And `y_core::memory` explains why not to do it per use:
+trimming frees nothing, the pages come back by page fault on the next touch,
+so trimming after every close only slows the next opening. What gives memory
+back is dropping what the window held, which a close does: the overlay and its
+canvas, the index, the icon pixels and cache, the fonts. To see what an
+opening costs, look at Task Manager's *Memory* column before and after
+(measured properly in task 9.6, once the Start menu makes the index large).
+
 ---
 
 ## Phase 5 — Result actions
 
-Spec §2.9.
+Spec §2.9 (rev. 2026-10-26: actions are configured, with an action menu).
 
 | | Task | Status |
 |---|---|---|
-| 5.1 | Ctrl+Enter (run as administrator), Shift+Enter (containing folder), Ctrl+C (path, `%vars%` expanded), Alt+1…9. | ⬜ |
-| 5.2 | Row buttons on the selected row (`row-actions`), with hit-testing in `layout`. | ⬜ |
-| 5.3 | **Reveal** (Ctrl+R) with the native popup: open the item's tray menu at the tray icon and open the submenu chain down to it (best effort; `TrackPopupMenu` can't preselect a row; spec §2.9). If opening nested submenus programmatically proves unreliable, open the tray menu and say which submenu holds it, and note the simplification in the doc comment. | ⬜ |
-| 5.4 | **Edit** (Ctrl+E): `y-pop-config --select "<path in tree>"`. Needs phase 11.1; until then, Edit opens `y-pop-config` without selecting. | ⬜ |
+| 5.1 | **The first cut of the keyboard actions** (Ctrl+Enter, Shift+Enter, Ctrl+C, Alt+n) with fixed keys. Superseded by 5.2–5.4: its pieces (the actions, `shell::reveal`, `find_program`, `display::target`, `Key::Digit`) are the engine. | ✅ then reworked |
+| 5.2 | **Configuration**: `Chord` (a shortcut, parsed and validated), `ActionId`, `<actions>` in the reader (`menu-key`, `quick-pick`, `<action do key button>`, defaults, every warning), `SearchConfig::actions`, `y_pop::settings` keeping `<actions>` with its comments. Tests. | ✅ |
+| 5.3 | **The engine in `State`**: the fixed keys go; bindings come from the configuration. Applicability per entry (admin not for `elevate="true"` programs, Store apps; show-in-folder and copy-path need a file; reveal only for tray-menu items…). `State::actions_for_selected`. Quick pick on/off. Tests. | ✅ |
+| 5.4 | **The action menu**: `Alt+Enter` / right click / `Shift+F10` and the Menu key; a list on the selected row with each action's shortcut; ↑↓ Enter, click, the shortcuts, Esc; closes on any other focus change. Drawn by the window, hit-tested by `layout`. | 👁 |
+| 5.5 | **Row buttons**: the actions with `button="true"` and a **⋯** on the selected row (`row-actions`), with hit-testing in `layout`. | 👁 |
+| 5.6 | **Reveal** (`reveal`, default Ctrl+R) with the native popup: open the item's tray menu at the tray icon and open the submenu chain down to it (best effort; `TrackPopupMenu` can't preselect a row; spec §2.9). If opening nested submenus programmatically proves unreliable, open the tray menu and say which submenu holds it, and note the simplification in the doc comment. | 👁 |
+| 5.7 | **Edit** (`edit`, default Ctrl+E): `y-pop-config --select "<path in tree>"`. Needs phase 11.1; until then, Edit opens `y-pop-config` without selecting. | ✅ (the part that can be done now) |
 
-**Done when:** 👁 each action from a result row and from its key.
+**Done when:** 👁 each action from the menu, from its shortcut and from its
+button; a `<actions>` that removes or rebinds some.
+
+**5.2 and 5.3 built (2026-10-26)** — the actions are configured (spec §2.9):
+
+- `search::keys::Chord` (a shortcut, 5 tests): `Ctrl+Shift+Enter` and the
+  like, validated. Refused, with a reason: a bare letter/digit/`Del` (it would
+  type), `Ctrl+A/C/V/X` (they edit), `Alt+1…9` (quick pick), `Alt+F4`, and
+  keys like `Esc` or the arrows. Usable: Ctrl/Alt + letter or digit, Enter
+  with any modifiers, F1–F12, Ctrl/Alt + Del. `Key` gained `Function(n)` and
+  `Digit(0..9)`; `Key`/`Mods` moved out of `state.rs`.
+- `model::{ActionId, ActionBinding, ActionsConfig}`; `<actions menu-key=""
+  quick-pick="">` with `<action do key button>` in the reader (10 tests):
+  exactly what is listed, in that order; `open` always present (on `Enter`
+  unless another action has it); every bad shortcut a warning that keeps the
+  action without it; two on one shortcut, or one on the menu key, the second
+  loses it; `<actions>` alone does not disable the default sections. The
+  defaults are in `ActionsConfig::default`: `Enter` opens, `Ctrl+R` reveals,
+  `Ctrl+E` edits, `Ctrl+Del` forgets, menu key `Alt+Enter`; admin,
+  show-in-folder, copy-path (and add-to-menu) in the menu only.
+- `y_pop::settings` keeps `<actions>` as elements with their comments, bad
+  values included (4 tests, byte for byte).
+- `search::actions::applies` (7 tests): admin not for `elevate="true"`
+  programs nor Store apps or groups; show-in-folder and copy-path need a file
+  (copy also takes a Store app's address); reveal only for tray-menu items;
+  edit for tray-menu and search-only ones; add-to-menu Start-menu items;
+  forget never yet. `Entry::facts` carries what that needs.
+- `State` now takes the `ActionsConfig`: a shortcut runs its action if it
+  applies, otherwise nothing. The fixed keys of 5.1 are gone (`Ctrl+Enter`,
+  `Shift+Enter`, `Ctrl+C`), and **Ctrl+C is text only** again.
+  `available_actions` gives the menu's lines; `quick_pick`/`menu_key` expose
+  the two switches. `Alt+n` follows `quick-pick`.
+- In the app: `Edit` opens `y-pop-config` (not yet on the entry, 5.7);
+  `Reveal` only logs (5.6). The menu itself is 5.4.
+
+**5.4 built (2026-10-26)** — the action menu:
+
+- **Opening**: the configured `menu-key` (default `Alt+Enter`), a right click
+  on a result row (it selects that row first), `Shift+F10` and the Menu key
+  (`Key::ContextMenu`). Nothing opens with no result selected or when no
+  action applies.
+- **In it** (`State::menu_keypress`, pure): `↑` `↓` wrap, `Home` `End`, `Enter`
+  chooses the lit line (whatever `Enter` is bound to outside), `Esc` or the
+  key that opened it closes it, and an action's own shortcut works if that
+  action is in the menu. Typing waits. Hover lights a line; a click chooses
+  it; a click anywhere else only puts the menu away; the wheel closes it.
+  Choosing closes it, then does the action; `Open` on a group goes inside it.
+- **Looks** (`layout::with_menu`, 5 tests): a 300 px panel (scaled) at the
+  window's right edge, tucked under its row, or above it if it would pass the
+  tallest the window can be, never over the input row; the window grows to
+  hold it. Lines are the action's label and its shortcut on the right; the lit
+  line in the skin's selection colours. The footer now names the menu key
+  and, while the menu is open, its own keys.
+- 9 new `State` tests, 5 new `layout` tests. Painting and the mouse routing
+  are the window's, so 👁.
+
+**5.5 built (2026-10-26)** — the row buttons:
+
+- **Which**: on the selected row only, the actions with `button="true"` that
+  apply to it (`State::row_buttons`), in the configured order, then a **⋯**
+  (Segoe MDL2 `E712`) that opens the action menu. `row-actions="false"`
+  (`State::with_row_actions`) removes all of them, the **⋯** too; the menu
+  stays reachable by key and right click. A button is a pill labelled with
+  `ActionId::short_label` (Admin, Folder, Copy, Reveal, Edit, Add, Forget):
+  the menu keeps the long labels, since several buttons share one row.
+- **Layout** (`Layout::with_row_buttons`, 5 tests): flush with the row's right
+  padding, each as wide as its label plus padding. They may take half the
+  row at most; past that the *last* labelled ones are left out (the menu still
+  has them) and the **⋯** always stays. `hit_test` finds `Hit::Button(n)` /
+  `Hit::More` before the row under them. The row's title, subtitle and hotkey
+  end a gap before the strip.
+- **Mouse**: hovering a button lights it without touching the selection; a
+  click does the action (`State::button_click`) or opens the menu. While the
+  menu is open the buttons stay drawn but do not light.
+- 3 new `State` tests. Painting and the routing are the window's, so 👁.
+- Simplifications: no keyboard focus on the buttons (their actions have
+  shortcuts and the menu); a right click on a button does nothing.
+
+**5.6 built (2026-10-26)** — Reveal in menu:
+
+- `menu::reveal_steps(tree, node)` (pure, 4 tests) returns the tray icon whose
+  menu holds the node and the keys that walk it there: `Down` once per item
+  above the target (one more in the first menu, where nothing is lit yet),
+  `Right` to open each submenu, which lights its first item. Separators are
+  skipped by the keyboard; a titled separator of a *native* menu is a greyed
+  item and is not (`MF_DISABLED | MF_GRAYED`), a themed one is `MF_SEPARATOR`
+  and is. Breaks add nothing. `ConfigTree::path_to` gives the chain.
+- `YPop::reveal` opens the root's popup at its tray icon
+  (`TrayIcon::rect`, new in `y-core`: `Shell_NotifyIconGetRect`; top of the icon,
+  centred, falling back to the cursor) after queuing the keys with
+  `PostMessageW` of `WM_KEYDOWN`/`WM_KEYUP` to the owner window **before**
+  `TrackPopupMenu` starts, so `show_menu` hands them to its menu loop. Posted,
+  not `SendInput`: they cannot reach any other window. Nothing happens, with a
+  log line, for an item in no tray menu or under an icon with no menu; a
+  root that is a group has its menu opened with nothing lit.
+- **Not verified live**: that the menu loop takes keys posted to the owner
+  rather than to the menu window, and that it does so queued ahead of the
+  loop. If it does not, the fix is a `WM_TIMER` on the owner that posts them
+  once `WM_INITMENUPOPUP` has been seen, or `SendInput`.
+- This departs from the spec's "can open the submenu but not highlight":
+  the highlight works too, by key presses. Spec §2.9 should be corrected after 👁.
+
+**5.1 (the first cut) built (2026-10-26),** kept for what it left behind: `state::Action` (`Open`, `RunAsAdmin`,
+`ContainingFolder`, `CopyPath`) rides on `Outcome::Activate(hit, action)`;
+`Key::Digit` for the number row. 7 new `State` tests, 2 for `display`, 2 for
+`y_core::shell`.
+
+- **Ctrl+Enter** runs the program elevated this once (a copy of the `App` with
+  `elevate` set), apps only. **Shift+Enter** shows the file in Explorer
+  (`y_core::shell::reveal`: `explorer /select,`); a bare `notepad.exe` is
+  looked up with `find_program` (`SearchPathW`) first; apps and folders, not
+  Store apps (no file). **Ctrl+C** copies the path: the program or folder, or
+  `shell:AppsFolder\<id>` for a Store app (`display::target`).
+- **Ctrl+C has two meanings** and the box wins: text selected in the input is
+  copied as text; with none, the selected result's path. (Ctrl+X and Ctrl+V
+  are text only.)
+- **Alt+1…9** opens that result, counting rows from the top whatever group
+  they are under; on a group it goes inside. The rows show `Alt+n` on the
+  right when they have no hotkey of their own (a hotkey, when there is one,
+  takes the place). The characters Alt+key would type are swallowed, so no
+  beep.
+- Copying and the actions that need nothing from the app are done by the
+  window; the rest are handed to `YPop::run_search_pick` after it has closed.
+- Actions that do not apply do nothing (admin on a group, a path of a command),
+  and do not go inside a group either; only Enter and Alt+n do that.
 
 ---
 
@@ -321,16 +500,72 @@ Spec §2.4, §2.10. After this phase the empty box looks like the mockup.
 
 | | Task | Status |
 |---|---|---|
-| 6.1 | `history` (pure + file): `y-pop.history` next to the config; lines `key \t count \t last-launch`; keys `menu:<path>`, `start:<target>`, `folder:<path>`; cap 200; written when search closes; unknown/vanished keys skipped and dropped on next write. `history="false"` writes nothing. Tests. | ⬜ |
-| 6.2 | Ranking bonus from history, computed once per opening. | ⬜ |
-| 6.3 | Empty box: Recent (`count`, with "2 min ago"), first row selected so hotkey + Enter relaunches; Ctrl+Del forgets one. | ⬜ |
+| 6.1 | `history` (pure + file): `y-pop.history` next to the config; lines `key \t count \t last-launch`; keys `menu:<path>`, `start:<target>`, `folder:<path>`; cap 200; written when search closes; unknown/vanished keys skipped and dropped on next write. `history="false"` writes nothing. Tests. | ✅ |
+| 6.2 | Ranking bonus from history, computed once per opening. | ✅ |
+| 6.3 | Empty box: Recent (`count`, with "2 min ago"), first row selected so hotkey + Enter relaunches; Ctrl+Del forgets one. | 👁 |
 | 6.4 | Sections list (one row per section, count, ›); → / Enter / Tab opens one as a scope chip; ← / Backspace comes back. Each section's "opened" content: menus (phase 7), Start menu (phase 9), search-only (phase 10). Until those exist, only sections that work are shown. | ⬜ |
 | 6.5 | The prefix line under the sections (clickable; phase 8 makes the prefixes work). | ⬜ |
-| 6.6 | **`collapsed="true"`**: open on the input row alone with a ⌄ button; ↓ or ⌄ unfolds, ↑ on the first row folds, erasing the text folds again, Esc order: clear text, leave section, fold, close. Footer hidden while folded. The window resizes (the overlay is recreated or resized: decide by which is simpler with `UpdateLayeredWindow`). | ⬜ |
+| 6.6 | **`collapsed="true"`**: open on the input row alone with a ⌄ button; ↓ or ⌄ unfolds, ↑ on the first row folds, erasing the text folds again, Esc order: clear text, leave section, fold, close. Footer hidden while folded. The window resizes (the overlay is recreated or resized: decide by which is simpler with `UpdateLayeredWindow`). | 👁 |
 | 6.7 | `>Clear search history` (with phase 8's commands, or a temporary tray entry). | ⬜ |
 
 **Done when:** 👁 both opening modes, Recent across restarts, forgetting an
 entry.
+
+**6.1–6.3 built (2026-10-26)** — history and Recent:
+
+- `search::history` (pure but for `load`/`save`, 10 tests): `y-pop.history`
+  next to the config, `key<TAB>count<TAB>last` per line, newest first, 200
+  lines at most. Bad lines are skipped, a key twice keeps the later. Keys are
+  `menu:Work/Servers/Putty` (names of the groups above, then its own) and
+  `search:Admin/Regedit` for search-only items — `start:` waits for phase 9, and
+  a browsed folder's launch is just its `menu:`/`search:` entry. Commands
+  (About, Quit…) are not remembered. Two items with the same path and name
+  share a history line: accepted.
+- **Written when the window closes**, only if something changed. Opening
+  prunes it against the index (a vanished or renamed item is dropped on the
+  next write). Only `open` and `run-as-admin` count as launches. A group's
+  Open enters it, so it is not one. `history="false"`: nothing read, nothing
+  written, no bonus, no Recent.
+- **Bonus** (`history::bonus`, once per opening via `Searcher::set_bonuses`):
+  up to 40 for how often (2 a launch, 20 launches) plus 20 within a day or 10
+  within a week; at most 60 (`MAX_BONUS`) on a 0–1000 score. It moves things
+  inside a band and across a close neighbour, never a scattered match over a
+  prefix.
+- **Recent**: `State::start` receives the rows (`history::listing`, at most
+  `count` of `<recent count>`, only for items that still exist) and shows the
+  empty box: a `RECENT` header and the launches, the newest selected, so hotkey
+  then Enter relaunches it. The second line leads with `display::ago`
+  ("2 min ago · Work › Servers · …"). Typing replaces it; erasing the text
+  brings it back; inside a group it is not shown. No `<recent>` in a `<search>`
+  that lists its sections: no list (but launches are still recorded, for the
+  bonus).
+- **Forget** (`Ctrl+Del`, the menu, a button): applies on a Recent row only —
+  `actions::available(…, forgettable)` — and stays open, the selection keeping
+  its place (`State::remove_recent`). It was `false` everywhere before.
+- 19 new tests. The painting of the header and the time are the window's, so 👁.
+
+**6.6 built (2026-10-26)** — `collapsed="true"`:
+
+- **State** (`State::with_collapsed`, 8 tests): `folded` is true on opening; a
+  folded box has no rows and nothing selected, so `Enter`, the action menu and
+  the shortcuts do nothing. `↓`/`PgDn` or a click on **⌄** unfold it to Recent
+  (or the group entered) with the first row selected. Folds again on: `↑` on the
+  first row of the empty box, `Esc` with nothing typed (the order is text,
+  group, fold, close), and erasing the text with no group entered. Typing
+  unfolds. Leaving a group with `Backspace`/`Shift+Tab` does not fold (you asked
+  to see it). Not collapsed: none of this exists.
+- **Layout**: `Layout::with_chevron` (2 tests) puts a 26 px **⌄** (`Hit::Chevron`)
+  at the input row's right end, and the text field stops before it. It is shown
+  only while folded.
+- **Window**: the overlay is created at the tallest size, footer included
+  (`Open::tallest`; the surface cannot grow), and `relayout` drops the footer
+  while folded, so the window is one row high and grows when unfolded. The
+  window is placed for the tallest size, so unfolding never pushes it off the
+  screen.
+- **Decision**: the spec's "Esc clears the text, then leaves a section, then
+  folds, then closes" has one overlap: clearing the text also folds (the same
+  rule as erasing it), so it is one `Esc`, not two. Written here so it is not a
+  surprise.
 
 ---
 
@@ -396,7 +631,7 @@ Spec §2.5.2, §2.5.3. Parsing exists since phase 1; this is the runtime.
 
 ## Phase 11 — `y-pop-config` support
 
-Can start any time after phase 1; 11.1 and 11.2 unblock 5.4 and 9.5.
+Can start any time after phase 1; 11.1 and 11.2 unblock 5.7 and 9.5.
 
 | | Task | Status |
 |---|---|---|

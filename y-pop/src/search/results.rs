@@ -14,6 +14,8 @@ pub const PER_GROUP: usize = 5;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Heading {
+    /// The last launches, on the empty box.
+    Recent,
     TopHit,
     /// Apps of the tray menus and of search-only groups.
     Apps,

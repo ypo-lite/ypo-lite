@@ -44,6 +44,7 @@ pub fn runs(text: &str, positions: &[usize]) -> Vec<Run> {
 /// The small caption above a group of results.
 pub fn heading(heading: Heading) -> &'static str {
     match heading {
+        Heading::Recent => "RECENT",
         Heading::TopHit => "TOP HIT",
         Heading::Apps => "APPS",
         Heading::StartMenu => "START MENU",
@@ -51,6 +52,46 @@ pub fn heading(heading: Heading) -> &'static str {
         Heading::Folders => "FOLDERS",
         Heading::Commands => "COMMANDS",
         Heading::All => "",
+    }
+}
+
+/// How long ago something was, in a few words: `just now`, `2 min ago`,
+/// `3 h ago`, `yesterday`, `5 days ago`.
+pub fn ago(seconds: u64) -> String {
+    const MINUTE: u64 = 60;
+    const HOUR: u64 = 60 * MINUTE;
+    const DAY: u64 = 24 * HOUR;
+    match seconds {
+        s if s < MINUTE => "just now".to_owned(),
+        s if s < HOUR => format!("{} min ago", s / MINUTE),
+        s if s < DAY => format!("{} h ago", s / HOUR),
+        s if s < 2 * DAY => "yesterday".to_owned(),
+        s => format!("{} days ago", s / DAY),
+    }
+}
+
+/// The path to put on the clipboard for `entry` (Ctrl+C): the program or
+/// folder it runs, `%variables%` already expanded by the reader; for a Store
+/// app, the `shell:AppsFolder\…` address that opens it. `None` for a group or
+/// a command, which have none.
+pub fn target(tree: &ConfigTree, entry: &Entry) -> Option<String> {
+    let NodeKind::App(app) = &tree.node(entry.id).kind else {
+        return None;
+    };
+    match (&app.exe, &app.app_id) {
+        (Some(exe), _) => Some(exe.to_string()),
+        (None, Some(id)) => Some(format!(r"shell:AppsFolder\{id}")),
+        (None, None) => None,
+    }
+}
+
+/// The file or folder `entry` runs, for showing it in Explorer (Shift+Enter).
+/// `None` for a Store app, which is not a file, and for anything that is not
+/// an app.
+pub fn file_of(tree: &ConfigTree, entry: &Entry) -> Option<String> {
+    match &tree.node(entry.id).kind {
+        NodeKind::App(app) => app.exe.as_ref().map(|exe| exe.to_string()),
+        _ => None,
     }
 }
 
@@ -236,6 +277,7 @@ mod tests {
     #[test]
     fn every_heading_but_the_flat_one_has_a_caption() {
         for heading_ in [
+            Heading::Recent,
             Heading::TopHit,
             Heading::Apps,
             Heading::StartMenu,
@@ -246,6 +288,17 @@ mod tests {
             assert!(!heading(heading_).is_empty());
         }
         assert_eq!(heading(Heading::All), "");
+    }
+
+    #[test]
+    fn how_long_ago_is_said_in_a_few_words() {
+        assert_eq!(ago(0), "just now");
+        assert_eq!(ago(59), "just now");
+        assert_eq!(ago(60), "1 min ago");
+        assert_eq!(ago(2 * 60 + 30), "2 min ago");
+        assert_eq!(ago(3 * 3600), "3 h ago");
+        assert_eq!(ago(30 * 3600), "yesterday");
+        assert_eq!(ago(5 * 86_400 + 100), "5 days ago");
     }
 
     #[test]
@@ -281,6 +334,41 @@ mod tests {
             subtitle(&tree, entry(&index, "regedit"), Field::Name),
             r"Only in search · Admin · C:\Windows\regedit.exe"
         );
+    }
+
+    #[test]
+    fn the_path_to_copy_is_the_program_the_folder_or_the_store_address() {
+        let tree = tree();
+        let index = Index::from_tree(&tree);
+
+        assert_eq!(
+            target(&tree, entry(&index, "outlook")).as_deref(),
+            Some(r"C:\Office\OUTLOOK.EXE")
+        );
+        assert_eq!(
+            target(&tree, entry(&index, "store thing")).as_deref(),
+            Some(r"shell:AppsFolder\Pub.App_x!App")
+        );
+        assert_eq!(target(&tree, entry(&index, "work")), None, "a group");
+        assert_eq!(target(&tree, entry(&index, "quit")), None, "a command");
+    }
+
+    #[test]
+    fn only_a_file_can_be_shown_in_explorer() {
+        let tree = tree();
+        let index = Index::from_tree(&tree);
+
+        assert_eq!(
+            file_of(&tree, entry(&index, "outlook")).as_deref(),
+            Some(r"C:\Office\OUTLOOK.EXE")
+        );
+        assert_eq!(
+            file_of(&tree, entry(&index, "remote desktop")).as_deref(),
+            Some("mstsc.exe"),
+            "a bare name: the caller looks it up"
+        );
+        assert_eq!(file_of(&tree, entry(&index, "store thing")), None);
+        assert_eq!(file_of(&tree, entry(&index, "servers")), None);
     }
 
     #[test]

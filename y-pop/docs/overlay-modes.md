@@ -433,21 +433,59 @@ is shown as Top hit; §2.11.
 
 ### 2.9 Result actions
 
-| Action | Key | Button | Applies to | What it does |
-|---|---|---|---|---|
-| Open | `Enter` | | all | Launch; on a menu, group, folder or section: open it in the box. |
-| **Reveal** | `Ctrl+R` | ✓ | tray-menu items | Opens the item's tray menu with the item highlighted, its submenus open. With an overlay `list` this is exact. With the native popup, y-pop can open the right submenu chain but not highlight a row (`TrackPopupMenu` has no "preselect" API), so it opens the submenu that contains the item. |
-| **Edit** | `Ctrl+E` | ✓ | tray-menu and search-only items | Starts `y-pop-config` on that entry (new command-line argument `--select "<path in tree>"`; if it is already running, sent through `y_pop::ipc`). |
-| **Add to a menu** | `Ctrl+P` | ✓ | Start-menu items | §2.5.1. |
-| **Forget** | `Ctrl+Del` | ✓ | recent rows | Removes it from the history (§2.10). |
-| Run as administrator | `Ctrl+Enter` | ✓ | apps, files | `elevate`, for this launch only. |
-| Containing folder | `Shift+Enter` | | apps, files | |
-| Copy | `Ctrl+C` | ✓ | apps, files, plugin results | The path, `%vars%` expanded; a plugin result's copy text. |
-| Quick pick | `Alt+1…9` | | | Launch the n-th result. |
+What can be done to the selected result is **configured**, not fixed: the
+actions are named built-ins, you choose which exist, which have a shortcut and
+which get a button, and the **action menu** lists the ones that apply to the
+selected row with their shortcuts.
 
-Only the selected row shows its buttons, so the list stays calm.
-`row-actions="false"` hides them; the keys still work. Plugin results bring
-their own actions (§2.11).
+| `do=` | Menu label | Applies to | What it does |
+|---|---|---|---|
+| `open` | Open | all | Launch; on a menu, group, folder or section: open it in the box. Always present. |
+| `run-as-admin` | Run as administrator | programs that do not already have `elevate="true"` | The launch with `elevate`, for this once. y-pop already knows which programs need it; this is for the others. |
+| `show-in-folder` | Show in folder | programs with a file, folders, files | Explorer, with the file selected. |
+| `copy-path` | Copy path | programs, folders, files | The path, `%vars%` expanded (a Store app: its `shell:AppsFolder\…` address). |
+| `reveal` | Reveal in menu | tray-menu items | Opens the item's tray menu with the item highlighted, its submenus open. With an overlay `list` this is exact. With the native popup, y-pop can open the right submenu chain but not highlight a row (`TrackPopupMenu` has no "preselect" API), so it opens the submenu that contains the item. |
+| `edit` | Edit in settings | tray-menu and search-only items | Starts `y-pop-config` on that entry (new command-line argument `--select "<path in tree>"`; if it is already running, sent through `y_pop::ipc`). |
+| `add-to-menu` | Add to a menu | Start-menu items | §2.5.1. |
+| `forget` | Forget | recent rows | Removes it from the history (§2.10). |
+
+An action that does not apply to the selected row is not in its menu and its
+shortcut does nothing.
+
+```xml
+<search …>
+  <actions menu-key="Alt+Enter" quick-pick="true">
+    <action do="open" key="Enter"/>
+    <action do="run-as-admin"/>                    <!-- in the menu only -->
+    <action do="reveal" key="Ctrl+R" button="true"/>
+    <action do="edit" key="Ctrl+E" button="true"/>
+  </actions>
+</search>
+```
+
+- **`<actions>` is optional.** Without it, the defaults are: `open` on
+  `Enter`, `run-as-admin`, `show-in-folder` and `copy-path` in the menu only,
+  `reveal` on `Ctrl+R` and `edit` on `Ctrl+E` (both with a button), `forget` on
+  `Ctrl+Del`. Written, it lists **exactly** the actions that exist, in the
+  order of the menu, except that `open` is always there (added first, on
+  `Enter`, if missing).
+- **`key`**: a shortcut in the result list, written like a hotkey
+  (`Ctrl+Shift+Enter`). Usable: a letter or digit with `Ctrl` or `Alt`,
+  `Enter` alone or with any modifiers, a function key, `Ctrl+Del`. Not
+  usable, and a warning: the keys that edit the box (`Ctrl+A`, `Ctrl+C`,
+  `Ctrl+V`, `Ctrl+X`), `Alt+1…9`, plain letters, the arrows and the like. Two
+  actions on one shortcut: the second loses it, with a warning.
+- **`button="true"`** puts the action on the selected row as a small button;
+  `row-actions="false"` on `<search>` hides all buttons. A **⋯** button always
+  ends the row and opens the action menu.
+- **The action menu** opens on `Alt+Enter` (`menu-key` rebinds it), on a right
+  click on a row, and on `Shift+F10` or the Menu key. `↑` `↓` `Enter` and a
+  click choose; the actions' own shortcuts work inside it; `Esc` closes it.
+- **`quick-pick="false"`** turns off `Alt+1…9` (open the n-th result) and the
+  `Alt+n` hints on the rows.
+- Plugin results bring their own actions (§2.11). Custom actions (re-launch the
+  entry with another `param` or elevation, e.g. "run with the clipboard") are
+  not part of the first cut.
 
 ### 2.10 History
 

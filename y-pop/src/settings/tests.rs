@@ -814,3 +814,109 @@ fn renaming_a_variable_reaches_the_search_items() {
     assert!(written.contains(r"%utils%\regedit.exe"), "{written}");
     assert!(written.contains(r"%utils%\Scripts"), "{written}");
 }
+
+const WITH_ACTIONS: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<y-pop>
+	<search hotkey="Alt+Space">
+		<recent count="5"/>
+		<actions menu-key="Ctrl+K" quick-pick="false" extra="kept">
+			<!-- what Enter does -->
+			<action do="open" key="Enter"/>
+			<action do="edit" key="Ctrl+E" button="true"/>
+			<action do="copy-path"/>
+			<!-- not an action yet -->
+			<action do="fly" key="Ctrl+Nonsense" button="maybe" future="1"/>
+			<action key="Ctrl+J"/>
+		</actions>
+	</search>
+	<group name="Work">
+		<app name="Notepad" exe="notepad.exe"/>
+	</group>
+</y-pop>
+"#;
+
+fn actions_of(settings: &Settings) -> (&Option<String>, &Option<bool>, &Vec<ActionEntry>) {
+    let search = settings.search.as_ref().expect("a <search>");
+    for child in &search.children {
+        if let SearchEntry::Section(SearchSection {
+            kind:
+                SectionKind::Actions {
+                    menu_key,
+                    quick_pick,
+                    entries,
+                },
+            ..
+        }) = child
+        {
+            return (menu_key, quick_pick, entries);
+        }
+    }
+    panic!("no <actions> in {:?}", search.children)
+}
+
+#[test]
+fn actions_are_loaded_as_elements_with_their_comments() {
+    let settings = load(WITH_ACTIONS);
+    assert!(
+        !settings
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("kept in the file as a comment")),
+        "{:?}",
+        settings.warnings
+    );
+
+    let (menu_key, quick_pick, entries) = actions_of(&settings);
+    assert_eq!(menu_key.as_deref(), Some("Ctrl+K"));
+    assert_eq!(*quick_pick, Some(false));
+    assert_eq!(entries.len(), 7);
+    assert!(matches!(&entries[0], ActionEntry::Comment(c) if c.text == "what Enter does"));
+    let ActionEntry::Action(edit) = &entries[2] else {
+        panic!("an action")
+    };
+    assert_eq!(
+        (edit.id.as_deref(), edit.key.as_deref(), edit.button),
+        (Some("edit"), Some("Ctrl+E"), Some(true))
+    );
+    let ActionEntry::Action(odd) = &entries[5] else {
+        panic!("an action")
+    };
+    assert_eq!(odd.key.as_deref(), Some("Ctrl+Nonsense"), "kept as written");
+    assert_eq!(odd.button, None, "an unreadable value is not taken…");
+    assert!(
+        odd.extra_attrs.iter().any(|(name, _)| name == "button"),
+        "…but kept"
+    );
+    let ActionEntry::Action(no_id) = &entries[6] else {
+        panic!("an action")
+    };
+    assert_eq!(no_id.id, None);
+}
+
+#[test]
+fn actions_are_written_back_byte_for_byte() {
+    assert_eq!(load(WITH_ACTIONS).to_xml(), WITH_ACTIONS);
+}
+
+#[test]
+fn actions_survive_a_round_trip_through_the_real_reader() {
+    let written = load(WITH_ACTIONS).to_xml();
+    let original = config::load_str(WITH_ACTIONS, &mut builtins()).expect("valid");
+    let again = config::load_str(&written, &mut builtins()).expect("valid");
+    assert_eq!(original.warnings, again.warnings);
+    assert_eq!(
+        original.search.unwrap().actions,
+        again.search.unwrap().actions
+    );
+}
+
+#[test]
+fn an_actions_element_with_something_else_inside_is_kept_as_a_comment() {
+    let settings = load(r#"<y-pop><search><actions><widget/></actions></search></y-pop>"#);
+    let search = settings.search.as_ref().unwrap();
+    assert!(
+        matches!(&search.children[0], SearchEntry::Comment(c) if c.text.contains("<widget/>")),
+        "{:?}",
+        search.children
+    );
+}
