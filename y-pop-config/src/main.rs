@@ -34,6 +34,10 @@ mod menu_edit;
 mod menu_view;
 mod prefs;
 mod roots;
+mod key_edit;
+mod search_edit;
+mod search_only;
+mod search_view;
 mod skin;
 mod skin_preview;
 mod skin_view;
@@ -68,6 +72,10 @@ fn main() {
     let _instance = match single_instance::SingleInstance::acquire(ipc::CONFIG_INSTANCE) {
         Ok(Some(guard)) => Some(guard),
         Ok(None) => {
+            // What this launch was asked to do goes to the open window.
+            if let Some(request) = ipc::Request::from_args(std::env::args().skip(1)) {
+                let _ = ipc::post_request(&request);
+            }
             single_instance::bring_to_front(ipc::CONFIG_TITLE);
             return;
         }
@@ -75,6 +83,10 @@ fn main() {
         // one-window guarantee beats not opening at all.
         Err(_) => None,
     };
+    // A request left for an earlier window is not for this one.
+    if _instance.is_some() {
+        let _ = std::fs::remove_file(ipc::request_path());
+    }
     App::run_component::<ConfigApp>(()).unwrap();
 }
 
@@ -127,8 +139,11 @@ struct ConfigApp {
     drag_over: Option<menu_edit::DropTarget>,
     /// The inspector shows the XML an item is written as.
     show_xml: bool,
-    /// The hotkey picker under an item's hotkey, when one is open.
-    hotkeys: menu_view::HotkeyUi,
+    /// The dialog that chooses a key, when one is open.
+    key_edit: key_edit::KeyEditUi,
+    /// The tray menus whose name can't be written in `<menus include>` yet, with
+    /// the one that is there: mid-rename, or holding a `;`. Kept for the session.
+    include_names: HashMap<ItemId, String>,
     /// What an app's target was before its mode changed, so switching back doesn't
     /// lose what was typed: `(exe, app-id)`. Kept for the session only.
     target_stash: HashMap<ItemId, (Option<String>, Option<String>)>,
@@ -140,6 +155,8 @@ struct ConfigApp {
     icon_picker: icon_picker::IconPickerUi,
     /// The Skin screen: the colour being edited, and its pictures.
     skin_ui: skin::SkinUi,
+    /// The Search screen: the section whose fields are open.
+    search_ui: search_view::SearchUi,
     /// Renders what is copied while the window is alive — see
     /// `y_core::shell::ClipboardFlusher`. Held only for its `Drop`.
     _clipboard: Option<y_core::shell::ClipboardFlusher>,
@@ -169,7 +186,21 @@ enum Screen {
     General,
     Skin,
     Variables,
+    Search,
     Menu(ItemId),
+    /// A group or folder that only the search knows, edited like a tray menu.
+    SearchOnly(ItemId),
+}
+
+impl Screen {
+    /// The top-level item whose tree the screen edits: a tray menu or a
+    /// search-only group or folder.
+    fn menu_root(self) -> Option<ItemId> {
+        match self {
+            Self::Menu(id) | Self::SearchOnly(id) => Some(id),
+            _ => None,
+        }
+    }
 }
 
 /// What a navigation item stands for.
@@ -187,7 +218,9 @@ impl Target {
             Self::Screen(Screen::General) => "general".to_owned(),
             Self::Screen(Screen::Skin) => "skin".to_owned(),
             Self::Screen(Screen::Variables) => "variables".to_owned(),
+            Self::Screen(Screen::Search) => "search".to_owned(),
             Self::Screen(Screen::Menu(id)) => format!("menu:{}", id.get()),
+            Self::Screen(Screen::SearchOnly(id)) => format!("only:{}", id.get()),
             Self::NewMenu => "new".to_owned(),
         }
     }
@@ -199,7 +232,14 @@ impl Target {
             "general" => Some(Self::Screen(Screen::General)),
             "skin" => Some(Self::Screen(Screen::Skin)),
             "variables" => Some(Self::Screen(Screen::Variables)),
+            "search" => Some(Self::Screen(Screen::Search)),
             "new" => Some(Self::NewMenu),
+            other if other.starts_with("only:") => {
+                let id = search_only::roots(settings)
+                    .map(|item| item.id)
+                    .find(|id| format!("only:{}", id.get()) == other)?;
+                Some(Self::Screen(Screen::SearchOnly(id)))
+            }
             other => {
                 let id = roots::menus(settings)
                     .map(|item| item.id)
@@ -239,6 +279,10 @@ enum Msg {
     /// A control reported "nothing chosen": not an edit.
     Ignored,
 
+    /// Another launch asked this window to do something (`--select`,
+    /// `--new-app`), see [`ConfigApp::watch_requests`].
+    Requested(ipc::Request),
+
     /// An item's icon came back from the thread pool (PNG bytes, or none found).
     IconLoaded(app_icons::IconSpec, Option<Vec<u8>>),
     /// A Store logo that failed has waited long enough: ask for it again.
@@ -249,9 +293,14 @@ enum Msg {
     RunningScanned(Vec<start_menu::StartEntry>),
     /// The icon picker.
     Icon(icon_picker::IconMsg),
+    /// The dialog that chooses a key.
+    Key(key_edit::KeyMsg),
 
     // Skin
     Skin(skin::SkinMsg),
+
+    // Search
+    Search(search_view::SearchMsg),
 
     // Variables
     VarNameChanged(usize, String),
@@ -300,6 +349,11 @@ impl Component for ConfigApp {
             }
             (_, LastScreen::Skin) => Screen::Skin,
             (_, LastScreen::Variables) => Screen::Variables,
+            (_, LastScreen::Search) => Screen::Search,
+            (Ok(settings), LastScreen::SearchOnly(position)) => {
+                search_only::at_position(settings, position)
+                    .map_or(Screen::Search, Screen::SearchOnly)
+            }
             _ => Screen::General,
         };
 
@@ -329,16 +383,23 @@ impl Component for ConfigApp {
             origin: None,
             drag_over: None,
             show_xml: false,
-            hotkeys: menu_view::HotkeyUi::default(),
+            key_edit: key_edit::KeyEditUi::default(),
+            include_names: HashMap::new(),
             target_stash: HashMap::new(),
             run_status: None,
             icons: app_icons::IconStore::default(),
             icon_picker: icon_picker::IconPickerUi::default(),
             skin_ui: skin::SkinUi::default(),
+            search_ui: search_view::SearchUi::default(),
             _clipboard: y_core::shell::ClipboardFlusher::start(),
             notes_ready: false,
             window_width: shell::INITIAL_WINDOW.0,
         };
+        // Whatever started this launch, and what a later one will ask.
+        if let Some(request) = ipc::Request::from_args(std::env::args().skip(1)) {
+            app.apply_request(request);
+        }
+        app.watch_requests(context);
         app.request_icons(context);
         app
     }
@@ -373,14 +434,21 @@ impl Component for ConfigApp {
                     self.settings = Ok(undo.settings);
                     self.dirty = true;
                     self.variables_ui = VariablesUi::default();
-                    self.hotkeys = menu_view::HotkeyUi::default();
+                    self.key_edit = key_edit::KeyEditUi::default();
+                    self.include_names.clear();
                     self.skin_ui.editing = None;
+                    self.search_ui = search_view::SearchUi::default();
                     self.leave_missing_menu();
                 }
             }
 
             Msg::Menu(message) => self.edit_menu(message),
+            Msg::Key(message) => self.edit_key(message),
             Msg::Ignored => {}
+            Msg::Requested(request) => {
+                self.apply_request(request);
+                self.watch_requests(context);
+            }
             Msg::IconLoaded(spec, png) => {
                 self.icons.finish(spec, png);
                 self.schedule_icon_retry(context);
@@ -399,6 +467,7 @@ impl Component for ConfigApp {
             }
             Msg::Icon(message) => self.edit_icon(message),
             Msg::Skin(message) => self.edit_skin(message),
+            Msg::Search(message) => self.edit_search(message),
 
             other => self.edit(other),
         }
@@ -451,6 +520,9 @@ impl Component for ConfigApp {
                 general::general_view(settings, &self.path, self.notes_ready, viewport, context)
             }
             Screen::Skin => skin_view::skin_view(settings, &self.skin_ui, viewport, context),
+            Screen::Search => {
+                search_view::search_view(settings, &self.search_ui, viewport, context)
+            }
             Screen::Variables => variables::variables_view(
                 settings,
                 &mut *self.builtins.borrow_mut(),
@@ -459,7 +531,7 @@ impl Component for ConfigApp {
                 viewport,
                 context,
             ),
-            Screen::Menu(id) => menu_view::menu_view(
+            Screen::Menu(id) | Screen::SearchOnly(id) => menu_view::menu_view(
                 settings,
                 &MenuUi {
                     root: id,
@@ -495,7 +567,9 @@ impl Component for ConfigApp {
         // A tray menu shown as two panes scrolls them itself: the page stays
         // put, and gives the screen the window's height.
         let pinned =
-            matches!(self.screen, Screen::Menu(id) if menu_view::is_pinned(settings, id, viewport));
+            self.screen
+            .menu_root()
+            .is_some_and(|id| menu_view::is_pinned(settings, id, viewport));
         let page: View = if pinned {
             let screen = Grid::new()
                 .rows([GridLength::Auto, GridLength::STAR])
@@ -548,7 +622,7 @@ impl Component for ConfigApp {
             .keyed_children([("nav", nav), ("bar", bar)]);
         // A picker covers the whole window, bar included.
         let window = Viewport::new(self.window_width);
-        let modal = inspector::hotkey_modal(settings, &self.hotkeys, window, context)
+        let modal = key_edit::key_modal(settings, &self.key_edit, window, context)
             .or_else(|| {
                 icon_picker::icon_modal(
                     settings,
@@ -559,8 +633,8 @@ impl Component for ConfigApp {
                     context,
                 )
             })
-            .or_else(|| match self.screen {
-                Screen::Menu(root) if self.start_open => Some(menu_view::start_modal(
+            .or_else(|| match self.screen.menu_root() {
+                Some(root) if self.start_open => Some(menu_view::start_modal(
                     settings,
                     &menu_view::StartUi {
                         root,
@@ -636,7 +710,7 @@ impl ConfigApp {
         let wanted: Vec<app_icons::IconSpec> = {
             let mut builtins = self.builtins.borrow_mut();
             let mut wanted: Vec<_> = settings
-                .items()
+                .all_items()
                 .filter_map(|item| app_icons::spec_for(settings, item, &mut *builtins))
                 .collect();
             wanted.extend(self.icon_picker.visible());
@@ -672,6 +746,21 @@ impl ConfigApp {
         }
     }
 
+    /// Waits, on the thread pool, for a request left by a second launch
+    /// (`ipc::post_request`) and returns it as a [`Msg::Requested`]; asked
+    /// again after each one. A file polled twice a second: nothing here owns
+    /// the window procedure, and this costs one `stat` while the window is open.
+    fn watch_requests(&self, context: &ComponentContext<Self>) {
+        context.spawn_background(|_| {
+            loop {
+                if let Some(request) = ipc::take_request() {
+                    return Msg::Requested(request);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+        });
+    }
+
     /// Changes screen and remembers it for the next run.
     fn go(&mut self, screen: Screen) {
         if screen != self.screen {
@@ -679,8 +768,10 @@ impl ConfigApp {
         }
         self.screen = screen;
         self.confirming_delete = None;
-        self.hotkeys = menu_view::HotkeyUi::default();
+        self.key_edit = key_edit::KeyEditUi::default();
+        self.include_names.clear();
         self.skin_ui.editing = None;
+        self.search_ui = search_view::SearchUi::default();
         self.run_status = None;
         self.remember_screen();
     }
@@ -688,8 +779,8 @@ impl ConfigApp {
     /// After the settings were swapped for another version (Undo): a menu that
     /// is not in them is a screen that is not there.
     fn leave_missing_menu(&mut self) {
-        if let (Ok(settings), Screen::Menu(id)) = (&self.settings, self.screen)
-            && roots::find(settings, id).is_none()
+        if let (Ok(settings), Some(id)) = (&self.settings, self.screen.menu_root())
+            && tree::item(settings, id).is_none()
         {
             self.go(Screen::General);
         }
@@ -701,9 +792,12 @@ impl ConfigApp {
             Screen::General => LastScreen::General,
             Screen::Skin => LastScreen::Skin,
             Screen::Variables => LastScreen::Variables,
+            Screen::Search => LastScreen::Search,
             Screen::Menu(id) => {
                 roots::position(settings, id).map_or(LastScreen::General, LastScreen::Menu)
             }
+            Screen::SearchOnly(id) => search_only::position(settings, id)
+                .map_or(LastScreen::Search, LastScreen::SearchOnly),
         };
         self.prefs.save(&prefs::path_for(&self.path));
     }
@@ -856,22 +950,33 @@ impl ConfigApp {
 
     fn delete_menu(&mut self, id: ItemId) {
         self.confirming_delete = None;
-        self.hotkeys = menu_view::HotkeyUi::default();
+        self.key_edit = key_edit::KeyEditUi::default();
         self.run_status = None;
         let Ok(settings) = &mut self.settings else {
             return;
         };
 
         let before = settings.clone();
-        let Some(removed) = roots::delete(settings, id) else {
+        let listed = self.include_names.remove(&id);
+        let removed = if tree::is_search_only(settings, id) {
+            search_only::delete(settings, id)
+        } else {
+            roots::delete(settings, id)
+        };
+        let Some(removed) = removed else {
             return;
         };
+        // In the same Undo step: y-pop leaves every tray menu out when
+        // `<menus include>` lists only menus that don't exist.
+        if let Some(name) = listed.or_else(|| removed.name.clone()) {
+            search_edit::drop_from_include(settings, &name);
+        }
         self.undo = Some(Undo {
             label: format!("Deleted {}", roots::label(&removed)),
             settings: before,
         });
         self.dirty = true;
-        if self.screen == Screen::Menu(id) {
+        if self.screen.menu_root() == Some(id) {
             self.go(Screen::General);
         }
     }
@@ -905,13 +1010,14 @@ impl ConfigApp {
         self.applied = None;
         self.confirming_reload = false;
         self.confirming_delete = None;
-        self.hotkeys = menu_view::HotkeyUi::default();
+        self.key_edit = key_edit::KeyEditUi::default();
         self.skin_ui.editing = None;
+        self.search_ui = search_view::SearchUi::default();
         self.run_status = None;
         self.undo = None;
         // A menu that is gone from the file is a screen that is gone.
-        if let (Ok(settings), Screen::Menu(id)) = (&self.settings, self.screen)
-            && roots::find(settings, id).is_none()
+        if let (Ok(settings), Some(id)) = (&self.settings, self.screen.menu_root())
+            && tree::item(settings, id).is_none()
         {
             self.screen = Screen::General;
         }
@@ -956,6 +1062,7 @@ impl ConfigApp {
             (Screen::General, Symbol::Setting, "General"),
             (Screen::Skin, Symbol::FontColor, "Skin"),
             (Screen::Variables, Symbol::Tag, "Variables"),
+            (Screen::Search, Symbol::Find, "Search"),
         ];
         let general: Vec<(String, View)> = general
             .into_iter()
@@ -983,6 +1090,20 @@ impl ConfigApp {
             })
             .collect();
 
+        let only: Vec<(String, View)> = search_only::roots(settings)
+            .map(|item| {
+                let target = Target::Screen(Screen::SearchOnly(item.id));
+                (
+                    target.tag(),
+                    entry(
+                        target,
+                        menu_view::symbol_of(&item.kind),
+                        text::body(roots::label(item)).into(),
+                    ),
+                )
+            })
+            .collect();
+
         let new_menu: View = NavigationViewItem::new().tag(Target::NewMenu.tag()).slots([
             SlotView::new(
                 NavigationViewItemSlot::Icon,
@@ -991,7 +1112,7 @@ impl ConfigApp {
             SlotView::new(NavigationViewItemSlot::Content, "New tray menu"),
         ]);
 
-        vec![
+        let mut items = vec![
             (
                 "settings".to_owned(),
                 group("group-settings", "Settings", Symbol::Setting, general),
@@ -1001,7 +1122,15 @@ impl ConfigApp {
                 group("group-menus", "Tray menus", Symbol::Home, menus),
             ),
             ("new".to_owned(), new_menu),
-        ]
+        ];
+        // Under the tray menus and their "New": they are not tray icons.
+        if !only.is_empty() {
+            items.push((
+                "only".to_owned(),
+                group("group-only", "Only in search", Symbol::Find, only),
+            ));
+        }
+        items
     }
 
     /// The status line, and whether it's good news.
@@ -1026,7 +1155,7 @@ impl ConfigApp {
     /// The "show comments" toggle, on the screens that have comments to show.
     fn bar_tools(&self, settings: &Settings, context: &ViewContext<Self>) -> Option<View> {
         let count = match self.screen {
-            Screen::Menu(id) => tree::count_comments(settings, id),
+            Screen::Menu(id) | Screen::SearchOnly(id) => tree::count_comments(settings, id),
             Screen::Variables => variables::count_comments(settings),
             _ => return None,
         };
@@ -1132,7 +1261,7 @@ fn summary(settings: &Settings) -> String {
     format!(
         "{menus} tray menu{} · {} items",
         if menus == 1 { "" } else { "s" },
-        settings.items().count()
+        settings.all_items().count()
     )
 }
 
@@ -1185,12 +1314,14 @@ fn test_app(settings: Settings) -> ConfigApp {
         origin: None,
         drag_over: None,
         show_xml: false,
-        hotkeys: menu_view::HotkeyUi::default(),
+        key_edit: key_edit::KeyEditUi::default(),
+        include_names: HashMap::new(),
         target_stash: HashMap::new(),
         run_status: None,
         icons: app_icons::IconStore::default(),
         icon_picker: icon_picker::IconPickerUi::default(),
         skin_ui: skin::SkinUi::default(),
+        search_ui: search_view::SearchUi::default(),
         _clipboard: None,
         notes_ready: true,
         window_width: 1000.0,

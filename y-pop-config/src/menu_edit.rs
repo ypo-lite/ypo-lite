@@ -9,21 +9,24 @@
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::Input::KeyboardAndMouse::{HOT_KEY_MODIFIERS, VIRTUAL_KEY};
 use y_core::hotkey::Hotkey;
+use y_pop::ipc;
 use y_pop::model::OpenFolder;
-use y_pop::settings::{AppFields, HotkeyEntry, ItemId, ItemKind, Renderer};
+use y_pop::settings::{AppFields, ItemId, ItemKind, Renderer};
 
-use crate::menu_view::HotkeyUi;
+use crate::key_edit::KeyEditUi;
 use crate::roots;
+use crate::search_edit::{self, Rename};
 use crate::start_menu::Source;
 use crate::tree::{self, MoveDir, NewKind};
-use crate::ui::key_picker::{KeyPickerUi, MODIFIERS};
-use crate::ui::keys::{self, KeyCategory};
+use crate::ui::key_picker::MODIFIERS;
 use crate::{ConfigApp, Screen, Undo};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TextField {
     Name,
     Tooltip,
+    /// Extra words search matches an item by.
+    Keywords,
     Icon,
     /// An app's program, file or folder.
     Target,
@@ -41,6 +44,8 @@ pub enum FlagField {
     /// A tray menu that opens when the pointer rests on its icon.
     OpenOnHover,
     Elevate,
+    /// A browsed folder is listed for `/` search even on a network share.
+    Index,
     OnStart,
     OnExit,
 }
@@ -191,22 +196,10 @@ pub enum MenuMsg {
     /// Adds `%name%` to the end of a text.
     InsertVariable(ItemId, TextField, String),
 
-    // Hotkeys: `(item, position among its hotkeys)` addresses one.
-    HotkeyAdd(ItemId),
-    /// Opens the picker dialog on that hotkey.
-    HotkeyEdit(ItemId, usize),
-    /// The dialog closed: OK keeps the edit, anything else restores the
-    /// hotkey as it was (and drops one that was just added).
-    HotkeyClosed {
-        accepted: bool,
-    },
+    // Hotkeys: `(item, position among its hotkeys)` addresses one. Choosing
+    // the key is `key_edit`'s.
     HotkeyRemove(ItemId, usize),
     HotkeyOverride(ItemId, usize, bool),
-    HotkeyKey(ItemId, usize, VIRTUAL_KEY),
-    HotkeyModifier(ItemId, usize, HOT_KEY_MODIFIERS),
-    HotkeySearchChosen(ItemId, usize, String),
-    HotkeyCategory(KeyCategory),
-    HotkeySearch(String),
 }
 
 /// A hotkey as written in the file, as the picker shows it: the modifiers it
@@ -253,10 +246,7 @@ pub(crate) fn canonical_hotkey(raw: &str) -> Option<String> {
 impl ConfigApp {
     /// The tray menu being edited, if a menu screen is open.
     pub(crate) fn open_root(&self) -> Option<ItemId> {
-        match self.screen {
-            Screen::Menu(id) => Some(id),
-            _ => None,
-        }
+        self.screen.menu_root()
     }
 
     /// What is selected in the tray menu `root`: the menu's own item when
@@ -272,15 +262,88 @@ impl ConfigApp {
             .unwrap_or(root)
     }
 
-    /// The text of one hotkey, if it exists.
-    fn hotkey_text(&self, id: ItemId, index: usize) -> Option<String> {
-        let settings = self.settings.as_ref().ok()?;
-        tree::item(settings, id)?
-            .hotkeys
-            .get(index)
-            .map(|entry| entry.key.clone())
+    /// Does what a second launch (or this one's command line) asked for.
+    /// Nothing happens while the file isn't loaded: there is nothing to show
+    /// an item of, or to add an app to.
+    pub(crate) fn apply_request(&mut self, request: ipc::Request) {
+        if self.settings.is_err() {
+            return;
+        }
+        match request {
+            ipc::Request::Select(path) => self.select_path(&path),
+            ipc::Request::NewApp(app) => self.new_app(app),
+        }
     }
 
+    /// Opens the tray menu (or search-only group) `path` is in with that item
+    /// selected and in view, or the Search page for `search`.
+    fn select_path(&mut self, path: &str) {
+        let Ok(settings) = &self.settings else { return };
+        // The Search page itself.
+        if path.trim() == "search" {
+            self.go(Screen::Search);
+            return;
+        }
+        let Some((root, id)) = roots::resolve_path(settings, path) else {
+            self.run_status = Some(("That item is no longer in the file".to_owned(), false));
+            return;
+        };
+        // Unfold what it is in; folding is how the outline looks, not the file.
+        self.collapsed
+            .retain(|&group| group == id || !tree::is_inside(settings, group, id));
+        self.selection.insert(root, id);
+        self.origin = None;
+        self.app_picker = false;
+        self.more_open = false;
+        let screen = if tree::is_search_only(settings, root) {
+            Screen::SearchOnly(root)
+        } else {
+            Screen::Menu(root)
+        };
+        self.go(screen);
+    }
+
+    /// Adds an app with `fields` filled in, as the toolbar's Manual would add
+    /// an empty one: to the open tray menu, else the first, else a new one.
+    fn new_app(&mut self, fields: ipc::NewApp) {
+        // An app for the tray goes to a tray menu, not a search-only group.
+        let open = self.open_root().filter(|&root| {
+            self.settings
+                .as_ref()
+                .is_ok_and(|settings| !tree::is_search_only(settings, root))
+        });
+        let root = open.or_else(|| {
+            let settings = self.settings.as_ref().ok()?;
+            roots::menus(settings)
+                .find(|item| matches!(item.kind, ItemKind::Group))
+                .map(|item| item.id)
+        });
+        let root = match root {
+            Some(root) => root,
+            None => {
+                self.add_menu();
+                let Some(root) = self.open_root() else { return };
+                root
+            }
+        };
+        self.go(Screen::Menu(root));
+        self.edit_menu(MenuMsg::Add(NewKind::App));
+
+        let id = self.selected(root);
+        for (field, text) in [
+            (TextField::Name, fields.name),
+            (TextField::Target, fields.target),
+            (TextField::Param, fields.args),
+            (TextField::Icon, fields.icon),
+            (TextField::StartIn, fields.dir),
+        ] {
+            if let Some(text) = text {
+                self.edit_menu(MenuMsg::Text(id, field, text));
+            }
+        }
+    }
+
+    /// The text of one hotkey, if it exists.
     /// Asks for the target of the app `id` — a file, or a folder in Folder
     /// mode — opening where the current one is. `None` if cancelled.
     fn browse_target(&self, id: ItemId) -> Option<String> {
@@ -498,25 +561,6 @@ impl ConfigApp {
                 self.run_now(id);
                 return;
             }
-            MenuMsg::HotkeyEdit(id, index) => {
-                let raw = self.hotkey_text(id, index);
-                self.hotkeys = HotkeyUi {
-                    open: raw.is_some().then_some((id, index)),
-                    picker: KeyPickerUi::opening_on(
-                        raw.as_deref().and_then(|raw| split_hotkey(raw).1),
-                    ),
-                    original: raw.unwrap_or_default(),
-                };
-                return;
-            }
-            MenuMsg::HotkeyCategory(category) => {
-                self.hotkeys.picker.category = category;
-                return;
-            }
-            MenuMsg::HotkeySearch(text) => {
-                self.hotkeys.picker.search = text;
-                return;
-            }
             _ => {}
         }
 
@@ -699,8 +743,26 @@ impl ConfigApp {
             }
 
             MenuMsg::Text(id, field, text) => {
+                let menu_name = field == TextField::Name && id == root && !tree::is_search_only(settings, id);
+                // What `<menus include>` knows it as: the name before this
+                // edit, or the last it could write.
+                let listed = menu_name
+                    .then(|| {
+                        self.include_names.get(&id).cloned().or_else(|| {
+                            tree::item(settings, id).and_then(|item| item.name.clone())
+                        })
+                    })
+                    .flatten();
                 if let Some(item) = tree::item_mut(settings, id) {
-                    changed = set_text(item, field, text);
+                    changed = set_text(item, field, text.clone());
+                }
+                // A tray menu named in `<menus include>` keeps being counted.
+                if changed && let Some(old) = listed {
+                    if search_edit::rename_in_include(settings, &old, &text) == Rename::Waiting {
+                        self.include_names.insert(id, old);
+                    } else {
+                        self.include_names.remove(&id);
+                    }
                 }
             }
             MenuMsg::Flag(id, field, on) => {
@@ -709,6 +771,7 @@ impl ConfigApp {
                         (FlagField::Default, _) => Some(&mut item.default),
                         (FlagField::OpenOnHover, _) => Some(&mut item.auto_open),
                         (FlagField::Elevate, ItemKind::App(app)) => Some(&mut app.elevate),
+                        (FlagField::Index, ItemKind::App(app)) => Some(&mut app.index),
                         (FlagField::OnStart, ItemKind::App(app)) => Some(&mut app.on_start),
                         (FlagField::OnExit, ItemKind::App(app)) => Some(&mut app.on_exit),
                         _ => None,
@@ -813,36 +876,6 @@ impl ConfigApp {
                 }
             }
 
-            MenuMsg::HotkeyClosed { accepted } => {
-                let open = self.hotkeys.open.take();
-                let item = open
-                    .filter(|_| !accepted)
-                    .and_then(|(id, index)| tree::item_mut(settings, id).map(|item| (item, index)))
-                    .filter(|(item, index)| *index < item.hotkeys.len());
-                if let Some((item, index)) = item {
-                    if self.hotkeys.original.is_empty() {
-                        item.hotkeys.remove(index);
-                    } else {
-                        item.hotkeys[index].key = std::mem::take(&mut self.hotkeys.original);
-                    }
-                    changed = true;
-                }
-                self.hotkeys = HotkeyUi::default();
-            }
-            MenuMsg::HotkeyAdd(id) => {
-                if let Some(item) = tree::item_mut(settings, id) {
-                    item.hotkeys.push(HotkeyEntry {
-                        key: String::new(),
-                        can_override: false,
-                        extra_attrs: Vec::new(),
-                    });
-                    self.hotkeys = HotkeyUi {
-                        open: Some((id, item.hotkeys.len() - 1)),
-                        ..HotkeyUi::default()
-                    };
-                    changed = true;
-                }
-            }
             MenuMsg::HotkeyRemove(id, index) => {
                 let before = settings.clone();
                 if let Some(item) =
@@ -858,7 +891,7 @@ impl ConfigApp {
                         label: format!("Removed {shown}"),
                         settings: before,
                     });
-                    self.hotkeys = HotkeyUi::default();
+                    self.key_edit = KeyEditUi::default();
                     changed = true;
                 }
             }
@@ -870,21 +903,6 @@ impl ConfigApp {
                     entry.can_override = on;
                 }
             }
-            MenuMsg::HotkeyKey(id, index, key) => {
-                changed = set_hotkey(settings, id, index, |m, _| (m, Some(key)))
-            }
-            MenuMsg::HotkeyModifier(id, index, modifier) => {
-                changed = set_hotkey(settings, id, index, |m, key| {
-                    (HOT_KEY_MODIFIERS(m.0 ^ modifier.0), key)
-                });
-            }
-            MenuMsg::HotkeySearchChosen(id, index, suggestion) => {
-                if let Some(key) = keys::from_suggestion(&suggestion) {
-                    self.hotkeys.picker = KeyPickerUi::opening_on(Some(key));
-                    changed = set_hotkey(settings, id, index, |m, _| (m, Some(key)));
-                }
-            }
-
             // Settled above.
             MenuMsg::OriginDismiss
             | MenuMsg::DragOver(_)
@@ -900,11 +918,8 @@ impl ConfigApp {
             | MenuMsg::StartToggle(_)
             | MenuMsg::StartAdd
             | MenuMsg::XmlToggled
-            | MenuMsg::HotkeyEdit(..)
             | MenuMsg::RunNow(_)
-            | MenuMsg::Browse(_)
-            | MenuMsg::HotkeyCategory(_)
-            | MenuMsg::HotkeySearch(_) => {}
+            | MenuMsg::Browse(_) => {}
         }
 
         if changed {
@@ -918,7 +933,11 @@ impl ConfigApp {
             self.origin = None;
         }
         if let Some((menu, item)) = navigate {
-            self.go(Screen::Menu(menu));
+            let screen = match &self.settings {
+                Ok(settings) if tree::is_search_only(settings, menu) => Screen::SearchOnly(menu),
+                _ => Screen::Menu(menu),
+            };
+            self.go(screen);
             self.selection.insert(menu, item);
         }
     }
@@ -926,27 +945,6 @@ impl ConfigApp {
 
 /// Rewrites one hotkey through `change(modifiers, key)`. The other attributes
 /// of the `<hotkey>` stay as they were. Returns whether the text changed.
-fn set_hotkey(
-    settings: &mut y_pop::settings::Settings,
-    id: ItemId,
-    index: usize,
-    change: impl FnOnce(
-        HOT_KEY_MODIFIERS,
-        Option<VIRTUAL_KEY>,
-    ) -> (HOT_KEY_MODIFIERS, Option<VIRTUAL_KEY>),
-) -> bool {
-    let Some(entry) = tree::item_mut(settings, id).and_then(|item| item.hotkeys.get_mut(index))
-    else {
-        return false;
-    };
-    let (modifiers, key) = split_hotkey(&entry.key);
-    let (modifiers, key) = change(modifiers, key);
-    let text = join_hotkey(modifiers, key);
-    let changed = entry.key != text;
-    entry.key = text;
-    changed
-}
-
 /// The raw text of one of `item`'s text fields ("" when absent).
 pub(crate) fn text_of(item: &y_pop::settings::Item, field: TextField) -> String {
     let app = match &item.kind {
@@ -956,6 +954,7 @@ pub(crate) fn text_of(item: &y_pop::settings::Item, field: TextField) -> String 
     let text = match field {
         TextField::Name => item.name.as_deref(),
         TextField::Tooltip => item.tooltip.as_deref(),
+        TextField::Keywords => item.keywords.as_deref(),
         TextField::Icon => item.icon.as_deref(),
         TextField::Target => app.and_then(|app| app.exe.as_deref()),
         TextField::AppId => app.and_then(|app| app.app_id.as_deref()),
@@ -988,6 +987,7 @@ pub(crate) fn set_text(item: &mut y_pop::settings::Item, field: TextField, text:
         }
         TextField::Name => put(&mut item.name, absent_when_empty(text)),
         TextField::Tooltip => put(&mut item.tooltip, absent_when_empty(text)),
+        TextField::Keywords => put(&mut item.keywords, absent_when_empty(text)),
         TextField::Icon => put(&mut item.icon, absent_when_empty(text)),
         // The target and the Store id are always present on an app, even empty.
         TextField::Target

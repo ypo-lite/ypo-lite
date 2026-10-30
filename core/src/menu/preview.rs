@@ -336,7 +336,9 @@ fn blend(text: Color, back: Color) -> Color {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::menu::{Border, ColorPair, Fill};
+    use crate::menu::{
+        Border, ColorPair, EdgeRule, Fill, Gradient, GradientDirection, SeparatorSpan,
+    };
 
     fn design() -> MenuDesign {
         MenuDesign {
@@ -358,6 +360,7 @@ mod tests {
             padding: 0,
             margin: 0,
             edge: None,
+            separator: SeparatorSpan::AfterIcons,
             icon_backdrop: None,
         }
     }
@@ -402,6 +405,79 @@ mod tests {
         let hovered = pixel(&menu, x, menu.row_tops[1] as u32 + 2);
         assert_eq!(idle, [255, 255, 255, 255]);
         assert_eq!(hovered, [0, 0, 255, 255]);
+    }
+
+    /// A menu with a separator as its second row, and the leftmost x inside
+    /// the frame where that row has anything but the white of the menu.
+    fn separator_start(design: MenuDesign, title: &str) -> u32 {
+        let menu = render_menu(
+            design,
+            &[
+                PreviewRow::item("A name long enough for any title"),
+                PreviewRow::separator(title),
+                PreviewRow::item("Two"),
+            ],
+        )
+        .expect("drawn");
+        let rows = menu.row_tops[1] as u32..menu.row_tops[2] as u32;
+        (2..menu.image.width - 2)
+            .find(|&x| {
+                rows.clone()
+                    .any(|y| pixel(&menu, x, y) != [255, 255, 255, 255])
+            })
+            .expect("a line")
+    }
+
+    #[test]
+    fn an_untitled_separator_starts_past_the_icon_column_and_a_titled_one_does_not() {
+        let untitled = separator_start(design(), "");
+        // The frame, then 8 + 16 + 8: the rule's place, and one more.
+        assert_eq!(untitled, 1 + 32 + 1);
+        assert!(separator_start(design(), "T") < untitled);
+    }
+
+    #[test]
+    fn the_line_follows_the_column_of_rows_a_skin_pushes_right() {
+        let mut pushed = design();
+        pushed.padding = 3;
+        pushed.margin = 2;
+        pushed.border.size = 1;
+        assert_eq!(separator_start(pushed, ""), separator_start(design(), "") + 6);
+    }
+
+    #[test]
+    fn the_icon_columns_rule_and_backdrop_run_through_an_untitled_separator() {
+        let mut ruled = design();
+        ruled.edge = Some(EdgeRule::Always);
+        assert_eq!(separator_start(ruled, ""), separator_start(design(), "") - 1);
+
+        let mut backed = design();
+        let red = Color::rgb(255, 0, 0);
+        backed.icon_backdrop = Some(Gradient {
+            direction: GradientDirection::Horizontal,
+            start: red,
+            end: red,
+        });
+        assert_eq!(separator_start(backed, ""), 2, "from the row's left edge");
+        assert!(separator_start(backed, "T") > 2, "a title spans the row");
+    }
+
+    #[test]
+    fn a_full_separator_crosses_the_icon_column_and_stops_it() {
+        let mut full = design();
+        full.separator = SeparatorSpan::Full;
+        let before = separator_start(full, "");
+        assert!(before < separator_start(design(), ""));
+
+        full.edge = Some(EdgeRule::Always);
+        assert_eq!(separator_start(full, ""), before, "no rule through it");
+        let red = Color::rgb(255, 0, 0);
+        full.icon_backdrop = Some(Gradient {
+            direction: GradientDirection::Horizontal,
+            start: red,
+            end: red,
+        });
+        assert_eq!(separator_start(full, ""), before, "no backdrop either");
     }
 
     #[test]

@@ -32,7 +32,7 @@ BEGIN
     BEGIN
         BLOCK "040904b0"   // US English, Unicode
         BEGIN
-            VALUE "CompanyName",      "guipro"
+            VALUE "CompanyName",      "ypo-lite"
             VALUE "FileDescription",  "y-pop-config"
             VALUE "FileVersion",      "0.1.0.0"
             VALUE "InternalName",     "y-pop-config"

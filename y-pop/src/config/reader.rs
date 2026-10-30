@@ -323,6 +323,7 @@ impl<'b> Reader<'b> {
                 "results",
                 "row-actions",
                 "history",
+                "theme",
             ],
         );
 
@@ -381,6 +382,8 @@ impl<'b> Reader<'b> {
                 "group" => Some(Section::Group(self.read_group(child))),
                 "app" => self.read_search_folder(child),
                 "plugin" => self.read_plugin(child),
+                // Not a section: the window's own colours, read below.
+                "skin" => None,
                 // Not a section: how results are acted on.
                 "actions" => {
                     if actions.is_none() {
@@ -400,7 +403,10 @@ impl<'b> Reader<'b> {
         self.in_search = false;
 
         // `<actions>` alone leaves the sections as if nothing was written.
-        if element.children().all(|child| child.name() == "actions") {
+        if element
+            .children()
+            .all(|child| matches!(child.name(), "actions" | "skin"))
+        {
             sections = SearchConfig::default_sections();
         } else if !seen_menus {
             let at = sections
@@ -424,6 +430,18 @@ impl<'b> Reader<'b> {
             history: element.attr_bool("history").unwrap_or(true),
             sections,
             actions: actions.unwrap_or_default(),
+            theme: self.theme(element),
+            skin: element.child("skin").map(|skin| {
+                let overrides = self.theme_overrides(element);
+                let ignored = overrides.ignored_by_search();
+                if !ignored.is_empty() {
+                    self.warn(
+                        skin,
+                        format!("the search window ignores {}", ignored.join(", ")),
+                    );
+                }
+                overrides
+            }),
         })
     }
 

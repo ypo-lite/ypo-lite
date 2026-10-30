@@ -16,6 +16,7 @@ pub fn menus(settings: &Settings) -> impl Iterator<Item = &Item> {
     })
 }
 
+#[cfg(test)]
 pub fn find(settings: &Settings, id: ItemId) -> Option<&Item> {
     menus(settings).find(|item| item.id == id)
 }
@@ -28,6 +29,37 @@ pub fn position(settings: &Settings, id: ItemId) -> Option<usize> {
 
 pub fn at_position(settings: &Settings, position: usize) -> Option<ItemId> {
     menus(settings).nth(position).map(|item| item.id)
+}
+
+/// The item `--select` names (see `y_pop::ipc::path_of`): positions among
+/// the items — comments don't count — from a tray menu down. Returns the tray
+/// menu it is in and the item. `None` when the path leads nowhere, which is
+/// what a file edited since y-pop read it looks like.
+pub fn resolve_path(settings: &Settings, path: &str) -> Option<(ItemId, ItemId)> {
+    // `s/…`: a search-only group or folder, counted among those.
+    let (only, path) = match path.strip_prefix("s/") {
+        Some(rest) => (true, rest),
+        None => (false, path),
+    };
+    let mut steps = path.split('/').map(|step| step.trim().parse::<usize>().ok());
+    let first = steps.next()??;
+    let root = if only {
+        crate::search_only::roots(settings).nth(first)?
+    } else {
+        menus(settings).nth(first)?
+    };
+    let mut item = root;
+    for step in steps {
+        item = item
+            .children
+            .iter()
+            .filter_map(|entry| match entry {
+                Entry::Item(child) => Some(child),
+                Entry::Comment(_) => None,
+            })
+            .nth(step?)?;
+    }
+    Some((root.id, item.id))
 }
 
 /// A menu name as it will read in the menu: `&F` is the mnemonic F, shown
@@ -147,6 +179,44 @@ mod tests {
         assert_eq!(position(&settings, b), Some(1));
         assert_eq!(at_position(&settings, 1), Some(b));
         assert_eq!(at_position(&settings, 2), None);
+    }
+
+    #[test]
+    fn a_path_leads_to_an_item_counting_items_not_comments() {
+        let settings = load(
+            r#"<y-pop><group name="A"/><!-- c --><group name="B"><!-- c --><app name="x" exe="x.exe"/><group name="G"><app name="y" exe="y.exe"/></group></group></y-pop>"#,
+        );
+        let name = |path: &str| {
+            let (_, id) = resolve_path(&settings, path)?;
+            crate::tree::item(&settings, id)?.name.clone()
+        };
+        assert_eq!(name("1").as_deref(), Some("B"));
+        assert_eq!(name("1/1/0").as_deref(), Some("y"));
+        let (root, _) = resolve_path(&settings, "1/1/0").expect("there");
+        assert_eq!(position(&settings, root), Some(1));
+
+        assert_eq!(name("2"), None);
+        assert_eq!(name("1/5"), None);
+        assert_eq!(name("1/x"), None);
+        assert_eq!(name(""), None);
+    }
+
+    #[test]
+    fn an_s_path_leads_into_the_search_only_items() {
+        let settings = load(
+            r#"<y-pop><search><recent/><group name="G"><app name="a" exe="a.exe"/></group></search><group name="T"/></y-pop>"#,
+        );
+        let (root, item) = resolve_path(&settings, "s/0/0").expect("there");
+        assert_eq!(
+            crate::tree::item(&settings, item).and_then(|i| i.name.as_deref()),
+            Some("a")
+        );
+        assert_eq!(
+            crate::tree::item(&settings, root).and_then(|i| i.name.as_deref()),
+            Some("G")
+        );
+        assert!(resolve_path(&settings, "s/1").is_none());
+        assert!(resolve_path(&settings, "s/x").is_none());
     }
 
     #[test]

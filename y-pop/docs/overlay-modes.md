@@ -450,7 +450,7 @@ selected row with their shortcuts.
 | `show-in-folder` | Show in folder | programs with a file, folders, files | Explorer, with the file selected. |
 | `copy-path` | Copy path | programs, folders, files | The path, `%vars%` expanded (a Store app: its `shell:AppsFolder\…` address). |
 | `reveal` | Reveal in menu | tray-menu items | Opens the item's tray menu with the item highlighted, its submenus open. With an overlay `list` this is exact. With the native popup, y-pop can open the right submenu chain but not highlight a row (`TrackPopupMenu` has no "preselect" API), so it opens the submenu that contains the item. |
-| `edit` | Edit in settings | tray-menu and search-only items | Starts `y-pop-config` on that entry (new command-line argument `--select "<path in tree>"`; if it is already running, sent through `y_pop::ipc`). |
+| `edit` | Edit in settings | tray-menu and search-only items | Starts `y-pop-config` on that entry (command-line argument `--select <path>`, the positions down the tree such as `2/0/5`; if it is already running, handed over through a request file, see `y_pop::ipc`). |
 | `add-to-menu` | Add to a menu | Start-menu items | §2.5.1. |
 | `forget` | Forget | recent rows | Removes it from the history (§2.10). |
 
@@ -916,7 +916,10 @@ wrong value (`slot="up"`, `cell="a,b"`) is a non-fatal warning.
 
 Boards and search use the active theme and `<skin>`: `back`/`text` for the
 panel, `hover-*` for selection, the `disabled-text-color` slot for second
-lines and headers, `<border>` for the outline. Proposed additions on
+lines and headers, `<border>` for the outline. **Search takes only those**
+(`ThemeOverrides::for_search`): the row spacing, edge rule, separator and
+gradients of a `<skin>` are about menu rows, and in the `<skin>` of `<search>`
+they warn. Proposed additions on
 `<skin>`: `tile-radius` (default from `<border round>`) and `panel-alpha`
 (0–255). A blurred background is not proposed: blur doesn't combine with
 `UpdateLayeredWindow`.

@@ -152,7 +152,7 @@ fn for_each_item_mut(entries: &mut [Entry], f: &mut impl FnMut(&mut Item)) {
 }
 
 /// Every item under `<search>`: its groups and folders, and what is in them.
-fn search_items(search: &SearchSettings) -> Vec<&Item> {
+pub(super) fn search_items(search: &SearchSettings) -> Vec<&Item> {
     fn walk<'a>(entries: &'a [Entry], out: &mut Vec<&'a Item>) {
         for entry in entries {
             if let Entry::Item(item) = entry {

@@ -12,24 +12,24 @@
 
 #![windows_subsystem = "windows"]
 
+mod about;
 mod menu;
 mod search_window;
 mod tooltip;
 
 use windows::Win32::UI::Input::KeyboardAndMouse::{VK_DOWN, VK_RIGHT};
 use windows::Win32::UI::WindowsAndMessaging::{
-    HMENU, MB_ICONINFORMATION, MB_OK, MessageBoxW, PostMessageW, WM_DRAWITEM, WM_HOTKEY,
-    WM_INITMENUPOPUP, WM_KEYDOWN, WM_KEYUP, WM_MEASUREITEM, WM_MENUCHAR, WM_MENUSELECT, WM_TIMER,
+    HMENU, PostMessageW, WM_DRAWITEM, WM_HOTKEY, WM_INITMENUPOPUP, WM_KEYDOWN, WM_KEYUP,
+    WM_MEASUREITEM, WM_MENUCHAR, WM_MENUSELECT, WM_TIMER,
 };
-use windows::core::{HSTRING, PCWSTR};
 
 use y_core::{
     app::TrayApp,
     hotkey::{Fallback, HotkeyManager},
     ids::{TRAY_ICON_ID, WM_TRAY_CALLBACK},
-    monitor,
+    memory, monitor,
     prelude::*,
-    resources::{IconSize, app_icon_or_stock},
+    resources::{IconSize, app_icon_or_stock, product_version},
     tray::{Notification, Notify, TrayEvent},
     window,
 };
@@ -76,6 +76,9 @@ struct YPop {
     /// The keys a Reveal queues for the popup it is about to open; taken by
     /// `show_menu`.
     reveal_steps: Vec<menu::Step>,
+    /// Whether the live balloon is the *About* one, so that a click on it
+    /// opens the settings app. Only one balloon is live at a time.
+    balloon_is_about: bool,
 }
 
 impl YPop {
@@ -103,6 +106,7 @@ impl YPop {
             tooltip: tooltip::Tooltip::default(),
             search: None,
             reveal_steps: Vec::new(),
+            balloon_is_about: false,
         }
     }
 
@@ -128,7 +132,7 @@ impl YPop {
             NodeKind::Group => self.show_menu(hwnd, Some(node), position, None),
             NodeKind::App(app) => launch_and_report(hwnd, app, self.usage()),
             NodeKind::Quit => window::quit(0),
-            NodeKind::About => show_about(),
+            NodeKind::About => self.show_about(),
             NodeKind::Settings => self.open_settings(),
             // Never reached: a menu never assigns a command id to one of
             // these (see `menu::append_children`), and neither does a
@@ -156,9 +160,12 @@ impl YPop {
                 let position = monitor::cursor_position().unwrap_or(POINT { x: 0, y: 0 });
                 self.run(hwnd, node, position);
             }
-            // Until the `y-pop-config --select` of task 5.7, the settings app
-            // opens without the entry selected.
-            ActionId::Edit => self.open_settings(),
+            // An item outside the tray menus (search-only) has no path yet:
+            // the settings app opens without it selected.
+            ActionId::Edit => {
+                let request = ipc::path_of(&self.tree, node).map(ipc::Request::Select);
+                self.open_settings_with(request.as_ref());
+            }
             ActionId::Reveal => self.reveal(hwnd, node),
             _ => {
                 if let NodeKind::App(app) = &self.tree.node(node).kind {
@@ -276,7 +283,7 @@ impl YPop {
                     y_core::log::line(format_args!("start with Windows: {error}"));
                 }
             }
-            Command::About => show_about(),
+            Command::About => self.show_about(),
             Command::Quit => window::quit(0),
         }
     }
@@ -320,7 +327,7 @@ impl YPop {
                     y_core::log::line(format_args!("search could not open: {error}"));
                 }
             }
-            menu::Extra::About => show_about(),
+            menu::Extra::About => self.show_about(),
             menu::Extra::Quit => window::quit(0),
         }
     }
@@ -390,6 +397,10 @@ impl YPop {
         if std::mem::take(&mut self.reload_pending) {
             self.reload(hwnd);
         }
+
+        // The popup, its icons and its fonts were the burst; hand the pages
+        // back now it has closed (see `y_core::memory` on what this costs).
+        let _ = memory::trim_working_set();
     }
 
     /// Registers every hotkey and creates one tray icon per root, for the
@@ -464,6 +475,7 @@ impl YPop {
         if !lines.is_empty()
             && let Some(tray) = self.tray.first_mut()
         {
+            self.balloon_is_about = false;
             let _ = tray.notify(
                 &Notification::new("Configuration", &lines.join("\n")).level(Notify::Warning),
             );
@@ -511,6 +523,47 @@ impl YPop {
                 "reload: tray icons could not be created: {error}"
             ));
         }
+
+        // Parsing allocated a document and a lot of small strings, all
+        // dropped by now.
+        let _ = memory::trim_working_set();
+    }
+
+    /// `y-pop-config.exe`, expected next to this executable — the two ship
+    /// together. `None` when it is not there.
+    fn settings_app(&self) -> Option<std::path::PathBuf> {
+        std::env::current_exe()
+            .ok()
+            .map(|exe| exe.with_file_name(ipc::CONFIG_EXE))
+            .filter(|app| app.is_file())
+    }
+
+    /// The *About* balloon: version, what is loaded, what it costs. Clicking
+    /// it opens the settings app. Spoken from the first tray icon; a
+    /// configuration with none has nowhere to show it.
+    fn show_about(&mut self) {
+        let version = product_version().unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_owned());
+        let title = format!("{} {version}", APP.name);
+        let config_path = config::path();
+        let body = about::body(&about::Facts {
+            icons: self.tree.roots.len(),
+            entries: self.tree.all_nodes().count(),
+            config: &config_path,
+            working_set: memory::working_set_bytes(),
+            settings_app: self.settings_app().is_some(),
+        });
+
+        let Some(tray) = self.tray.first_mut() else {
+            y_core::log::line("about: no tray icon to show the balloon from");
+            return;
+        };
+        self.balloon_is_about = true;
+        let icon = app_icon_or_stock(IconSize::Large);
+        let about = Notification::new(&title, &body)
+            .level(Notify::User(icon))
+            .large_icon();
+        let _ = tray.notify(&about);
+        let _ = memory::trim_working_set();
     }
 
     /// Opens the settings app (`y-pop-config.exe`, expected next to this
@@ -518,11 +571,24 @@ impl YPop {
     /// itself, so `<settings/>` never silently does nothing. The settings app
     /// is single-instance: a second click brings the open window forward.
     fn open_settings(&self) {
-        let app = std::env::current_exe()
-            .ok()
-            .map(|exe| exe.with_file_name(ipc::CONFIG_EXE));
-        match app.filter(|app| app.is_file()) {
-            Some(app) => y_core::shell::open(&app),
+        self.open_settings_with(None);
+    }
+
+    /// [`Self::open_settings`], asking it to do `request` too. The settings
+    /// app hands a request to the window already open when there is one.
+    fn open_settings_with(&self, request: Option<&ipc::Request>) {
+        match self.settings_app() {
+            Some(app) => match request {
+                Some(request) => {
+                    if let Err(error) = std::process::Command::new(&app)
+                        .args(request.to_args())
+                        .spawn()
+                    {
+                        y_core::log::line(format_args!("{} didn't start: {error}", ipc::CONFIG_EXE));
+                    }
+                }
+                None => y_core::shell::open(&app),
+            },
             None => {
                 y_core::log::line(format_args!(
                     "{} isn't installed next to y-pop — opening the file instead",
@@ -537,19 +603,6 @@ impl YPop {
 fn launch_and_report(hwnd: HWND, app: &y_pop::model::App, usage: Usage) {
     if let Err(error) = y_pop::launch::launch(hwnd, app, usage) {
         y_core::log::line(format_args!("launch failed: {error}"));
-    }
-}
-
-fn show_about() {
-    let message = HSTRING::from(format!("{} {}", APP.name, env!("CARGO_PKG_VERSION")));
-    let caption = HSTRING::from(APP.name);
-    unsafe {
-        MessageBoxW(
-            None,
-            PCWSTR(message.as_ptr()),
-            PCWSTR(caption.as_ptr()),
-            MB_OK | MB_ICONINFORMATION,
-        );
     }
 }
 
@@ -591,6 +644,13 @@ impl TrayApp for YPop {
             // message — WM_MOUSEMOVE alone fires repeatedly just from the
             // cursor sitting over it. Only an actual click (or its keyboard
             // equivalent) opens anything; TrayEvent::Other must not.
+            if event == TrayEvent::BalloonClicked && self.balloon_is_about {
+                self.balloon_is_about = false;
+                self.open_settings();
+                let _ = memory::trim_working_set();
+                return Some(LRESULT(0));
+            }
+
             let clicked = matches!(
                 event,
                 TrayEvent::Select | TrayEvent::ContextMenu | TrayEvent::DoubleClick
@@ -663,6 +723,10 @@ impl TrayApp for YPop {
             }
             if let Some(command) = command {
                 self.run_command(hwnd, command);
+            }
+            // The search window's index, fonts and bitmaps are dropped by now.
+            if self.search.as_ref().is_some_and(|search| !search.is_open()) {
+                let _ = memory::trim_working_set();
             }
             return Some(LRESULT(0));
         }

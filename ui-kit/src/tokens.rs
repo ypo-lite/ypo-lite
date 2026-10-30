@@ -66,6 +66,10 @@ pub mod size {
     /// A reservation, not a size the button is forced to — forcing 32px is
     /// what cropped the icons.
     pub const ICON_BUTTON: f64 = 44.0;
+    /// A number box beside a switch, on a setting's own line.
+    pub const INLINE_NUMBER: f64 = 110.0;
+    /// A text box beside a switch, on a setting's own line.
+    pub const INLINE_TEXT: f64 = 200.0;
     /// One emoji button in the icon picker.
     pub const ICON_CHOICE: f64 = 48.0;
     /// A multi-line text field shows at least this much (about seven lines)...

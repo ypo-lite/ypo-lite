@@ -290,6 +290,13 @@ pub struct SearchConfig {
     pub sections: Vec<Section>,
     /// What can be done to a result, and how.
     pub actions: ActionsConfig,
+    /// `theme="…"` on `<search>`: the window's own base skin. `None` is the
+    /// tray menus' theme.
+    pub theme: Option<Theme>,
+    /// `<skin>` under `<search>`: the window's own overrides, which replace
+    /// the menus' `<skin>` rather than add to it. `None` is the menus' skin
+    /// — unless [`SearchConfig::theme`] is set, which drops it too.
+    pub skin: Option<ThemeOverrides>,
 }
 
 impl SearchConfig {
@@ -348,7 +355,7 @@ impl SearchConfig {
 
 /// Whether two tray menu names are the same to `<menus include>`: compared as
 /// search compares, so case, accents and a menu's `&` marker make no difference.
-pub(crate) fn same_menu(a: &str, b: &str) -> bool {
+pub fn same_menu(a: &str, b: &str) -> bool {
     fold(&plain(a)) == fold(&plain(b))
 }
 

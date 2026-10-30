@@ -2,9 +2,10 @@
 //! letters. `docs/overlay-modes.md` §2 is the design, `docs/search-plan.md`
 //! the build order.
 //!
-//! Everything here is pure Rust with no Win32 and no window — the matcher
-//! and the hotkey-combination type take no `y-pop` type at all, so they can
-//! move to `y-core` when `y-term` needs them (spec §2.12).
+//! Everything here is pure Rust with no Win32 and no window, but for [`look`]
+//! and [`preview`], which paint — the matcher and the hotkey-combination type
+//! take no `y-pop` type at all, so they can move to `y-core` when `y-term`
+//! needs them (spec §2.12).
 //!
 //! * [`matcher`]: fuzzy subsequence scoring of one query word against one
 //!   piece of text.
@@ -21,6 +22,8 @@
 //! * [`input`]: the text box's state machine (text, caret, selection, keys).
 //! * [`keys`]: keys and shortcuts (`Ctrl+Shift+Enter`), parsed and checked.
 //! * [`layout`]: where the window's parts go (pure geometry, hit-testing).
+//! * [`look`]: what a skin gives the window: colours, frame, fonts.
+//! * [`preview`]: a picture of the window, for `y-pop-config`.
 //! * [`query`]: running a typed query over the index.
 //! * [`state`]: the box's behaviour — events in, outcomes out.
 //! * [`results`]: the Top hit / groups layout of a result list.
@@ -38,7 +41,9 @@ pub mod input;
 pub mod keycheck;
 pub mod keys;
 pub mod layout;
+pub mod look;
 pub mod matcher;
+pub mod preview;
 pub mod query;
 pub mod results;
 pub mod sections;

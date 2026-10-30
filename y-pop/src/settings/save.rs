@@ -21,7 +21,7 @@ use super::{
     Var, VarEntry,
 };
 use crate::model::OpenFolder;
-use crate::theme::{EdgeRule, GradientDirection, GradientOverride, Theme};
+use crate::theme::{EdgeRule, GradientDirection, GradientOverride, SeparatorSpan, Theme};
 
 impl Settings {
     /// The whole file as text.
@@ -184,6 +184,7 @@ fn skin(writer: &mut Writer, skin: &Skin) {
     attributes.number("padding", overrides.padding);
     attributes.number("margin", overrides.margin);
     attributes.text("edge", overrides.edge.map(edge_name));
+    attributes.text("separator", overrides.separator.map(separator_name));
     attributes.extras(&skin.extra_attrs);
 
     comments(writer, &skin.notes);
@@ -244,6 +245,7 @@ fn write_item(writer: &mut Writer, item: &Item) {
         attributes.text("name", item.name.as_deref());
         attributes.text("icon", item.icon.as_deref());
         attributes.text("tooltip", item.tooltip.as_deref());
+        attributes.text("keywords", item.keywords.as_deref());
         attributes.flag("default", item.default);
     }
     match &item.kind {
@@ -271,6 +273,7 @@ fn write_item(writer: &mut Writer, item: &Item) {
             attributes.text("events", (!events.is_empty()).then_some(events.as_str()));
 
             attributes.flag("browse", app.browse);
+            attributes.flag("index", app.index);
             attributes.text("filter", app.filter.as_deref());
             attributes.number("depth", app.depth);
             attributes.text("open-folder", app.open_folder.map(open_folder_name));
@@ -301,8 +304,10 @@ fn write_search(writer: &mut Writer, search: &SearchSettings) {
     attributes.text("results", search.results.map(ResultsMode::name));
     attributes.bool("row-actions", search.row_actions);
     attributes.bool("history", search.history);
+    attributes.text("theme", search.theme.map(theme_name));
     attributes.extras(&search.extra_attrs);
 
+    skin(writer, &search.skin);
     for child in &search.children {
         match child {
             SearchEntry::Comment(comment) => write_comment(writer, comment),
@@ -405,7 +410,17 @@ fn theme_name(theme: Theme) -> &'static str {
         Theme::Default => "default",
         Theme::Flat => "flat",
         Theme::Dark => "dark",
+        Theme::Graphite => "graphite",
+        Theme::Midnight => "midnight",
+        Theme::Sand => "sand",
         Theme::Auto => "auto",
+    }
+}
+
+fn separator_name(span: SeparatorSpan) -> &'static str {
+    match span {
+        SeparatorSpan::AfterIcons => "after-icons",
+        SeparatorSpan::Full => "full",
     }
 }
 

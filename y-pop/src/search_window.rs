@@ -80,7 +80,7 @@ use y_core::{
     icon::IconCache,
     ids::WM_APP_FIRST,
     monitor::Monitor,
-    overlay::{Canvas, Color, Font, Overlay, OverlaySpec, TextAlign},
+    overlay::{Canvas, Color, Overlay, OverlaySpec, TextAlign},
     window::WindowHandler,
 };
 
@@ -94,6 +94,9 @@ use y_pop::search::hotkey::KeyCombo;
 use y_pop::search::index::{Entry, Index, Target};
 use y_pop::search::keycheck::{self, Availability};
 use y_pop::search::layout::{self, ColumnsLayout, Hit, Layout, PaneSpec, Placed, Spec};
+use y_pop::search::look::{
+    self, Fonts, GLYPH_MORE, GLYPH_SEARCH, Palette, ROW_MARGIN, ROW_RADIUS, blend, rect,
+};
 use y_pop::search::matcher::plain;
 use y_pop::search::query;
 use y_pop::search::sections::{self, Place, SectionRow};
@@ -144,12 +147,6 @@ const MOD_SHIFT: isize = 2;
 const MOD_ALT: isize = 4;
 
 const CLASS: &str = "YpoLite.YPop.Search";
-const FONT_FAMILY: &str = "Segoe UI";
-/// Search glyph and the like: the icon font of Windows 10 and 11.
-const GLYPH_FAMILY: &str = "Segoe MDL2 Assets";
-const GLYPH_SEARCH: &str = "\u{E721}";
-/// "More" (⋯): the button that opens the action menu.
-const GLYPH_MORE: &str = "\u{E712}";
 /// Keys of a section row's icon in the pixel cache, which is otherwise keyed by
 /// index entry: far above any entry number.
 const SECTIONS_ICON: u32 = u32::MAX;
@@ -162,11 +159,6 @@ const GLYPH_ENTER: &str = "\u{E76C}";
 const GLYPH_CHEVRON: &str = "\u{E70D}";
 /// "History": the row that opens everything Windows remembers.
 const GLYPH_HISTORY: &str = "\u{E81C}";
-// Logical pixels, like the layout's.
-const INPUT_FONT: i32 = 18;
-const TITLE_FONT: i32 = 15;
-const SMALL_FONT: i32 = 12;
-const GLYPH_FONT: i32 = 16;
 /// The id of the hotkey registered for a moment to see whether a key is free.
 const PROBE_ID: u32 = 0x7F01;
 const ICON_SIZE: i32 = 32;
@@ -175,15 +167,9 @@ const ICON_SIZE: i32 = 32;
 const TOP_SHARE: f32 = 0.18;
 /// The list may take this share of the work area's height, input row included.
 const MAX_HEIGHT_SHARE: f32 = 0.6;
-const CORNER_RADIUS: i32 = 8;
-/// The selected row's inset from the window's sides, and its corner radius.
-const ROW_MARGIN: i32 = 6;
-const ROW_RADIUS: i32 = 6;
 const SCROLLBAR_WIDTH: i32 = 3;
 /// How many rows one notch of the wheel scrolls.
 const WHEEL_ROWS: i32 = 3;
-/// The selection highlight in the input: this much of the accent over the panel.
-const ACCENT: Color = Color::rgb(0x00, 0x78, 0xD4);
 
 const PLACEHOLDER: &str = "Search apps, menus, hotkeys…";
 const PLACEHOLDER_UNFOCUSED: &str = "Click here, then type to search";
@@ -274,14 +260,6 @@ struct Open {
     high_surrogate: Option<u16>,
 }
 
-struct Fonts {
-    input: Font,
-    title: Font,
-    small: Font,
-    heading: Font,
-    glyph: Font,
-}
-
 impl SearchWindow {
     /// `history`: the file wants the history, so its list of apps is read now,
     /// for the first opening not to wait for it.
@@ -366,7 +344,7 @@ impl SearchWindow {
             .with_owner(self.owner);
         let overlay = Overlay::with_handler(&overlay_spec, Box::new(handler))?;
 
-        let design = skins::resolve_design(tree.defaults.theme, tree.defaults.theme_overrides);
+        let design = skins::resolve_search_design(tree);
         let scaled = |logical: i32| monitor.scaled(logical);
         let icon_size = scaled(ICON_SIZE);
         // What Windows remembers: it orders the results and fills Recent.
@@ -409,28 +387,15 @@ impl SearchWindow {
         state.start(&index, listing.recent, sections, listing.bonuses);
         let files = Files::of(tree, &index);
 
+        let (radius, border) = look::frame_of(design.as_ref());
         let mut open = Open {
             owner: self.owner,
             generation: self.generation,
             palette: Palette::of(design.as_ref()),
-            radius: scaled(
-                design
-                    .as_ref()
-                    .map_or(CORNER_RADIUS, |design| design.border.round as i32),
-            ),
-            border: scaled(
-                design
-                    .as_ref()
-                    .map_or(1, |design| design.border.size as i32),
-            ),
+            radius: scaled(radius),
+            border: scaled(border),
             caret_width: scaled(1).max(2),
-            fonts: Fonts {
-                input: Font::new(FONT_FAMILY, scaled(INPUT_FONT), false)?,
-                title: Font::new(FONT_FAMILY, scaled(TITLE_FONT), false)?,
-                small: Font::new(FONT_FAMILY, scaled(SMALL_FONT), false)?,
-                heading: Font::new(FONT_FAMILY, scaled(SMALL_FONT - 1), true)?,
-                glyph: Font::new(GLYPH_FAMILY, scaled(GLYPH_FONT), false)?,
-            },
+            fonts: Fonts::new(monitor.scale())?,
             overlay,
             layout,
             spec,
@@ -743,8 +708,7 @@ impl SearchWindow {
                     .as_ref()
                     .and_then(|open| open.check.as_ref())
                     .is_some_and(|(_, availability)| *availability == Availability::Free);
-                // Free: open the settings, to put the key somewhere (it cannot
-                // yet go to a given item: `y-pop-config` has no `--select`).
+                // Free: open the settings, to put the key somewhere.
                 if free {
                     self.command = Some(Command::OpenSettings);
                     self.close();
@@ -1355,15 +1319,7 @@ impl Open {
         }
 
         // --- Border and corners, last ----------------------------------
-        let border_color = palette.border;
-        if *radius > 0 && *border > 0 {
-            canvas.stroke_rect(window, border_color);
-            canvas.round_rect_corners_with_border(window, *radius, *border, border_color);
-        } else if *radius > 0 {
-            canvas.round_rect_corners(window, *radius, Color::TRANSPARENT);
-        } else if *border > 0 {
-            canvas.stroke_rect(window, border_color);
-        }
+        look::draw_frame(canvas, window, *radius, *border, palette.border);
         Ok(())
     }
 }
@@ -1432,23 +1388,16 @@ impl ItemPainter<'_> {
         // On the selected row the name is a little dimmer than its matched
         // letters, which keep the full text colour.
         let (title, matched, detail, background) = if selected {
-            let (back, text) = (palette.selected_back, palette.selected_text);
             (
-                blend(text, back, 0.22),
-                text,
-                blend(text, back, 0.35),
-                Some(back),
+                palette.selected_title(),
+                palette.selected_text,
+                palette.selected_detail(),
+                Some(palette.selected_back),
             )
         } else {
             (palette.text, palette.matched, palette.dim, None)
         };
-        let margin = scaled(ROW_MARGIN);
-        let plate = RECT {
-            left: row.left + margin,
-            top: row.top + scaled(2),
-            right: row.right - margin,
-            bottom: row.bottom - scaled(2),
-        };
+        let plate = look::plate(row, self.scale);
         if let Some(background) = background {
             canvas.fill_rect(plate, background);
         }
@@ -1556,7 +1505,7 @@ impl ItemPainter<'_> {
         if let Some(buttons) = buttons {
             let (back, text) = (palette.selected_back, palette.selected_text);
             let lit = |button: Hit| !self.menu_open && self.hover == Some(button);
-            let pill = |hovered: bool| blend(back, text, if hovered { 0.30 } else { 0.14 });
+            let pill = |hovered: bool| palette.pill(hovered);
             let radius = scaled(4);
             let ids = state.row_buttons(self.index);
             for (n, (cell, id)) in buttons.items.iter().zip(&ids).enumerate() {
@@ -1602,18 +1551,15 @@ impl ItemPainter<'_> {
         let scaled = |logical: i32| (logical as f32 * self.scale).round() as i32;
 
         let (title, detail, background) = if selected {
-            let (back, text) = (palette.selected_back, palette.selected_text);
-            (blend(text, back, 0.22), blend(text, back, 0.35), Some(back))
+            (
+                palette.selected_title(),
+                palette.selected_detail(),
+                Some(palette.selected_back),
+            )
         } else {
             (palette.text, palette.dim, None)
         };
-        let margin = scaled(ROW_MARGIN);
-        let plate = RECT {
-            left: row.left + margin,
-            top: row.top + scaled(2),
-            right: row.right - margin,
-            bottom: row.bottom - scaled(2),
-        };
+        let plate = look::plate(row, self.scale);
         if let Some(background) = background {
             canvas.fill_rect(plate, background);
         }
@@ -2046,18 +1992,15 @@ impl ItemPainter<'_> {
         };
 
         let (title, detail, background) = if selected {
-            let (back, text) = (palette.selected_back, palette.selected_text);
-            (blend(text, back, 0.22), blend(text, back, 0.35), Some(back))
+            (
+                palette.selected_title(),
+                palette.selected_detail(),
+                Some(palette.selected_back),
+            )
         } else {
             (palette.text, palette.dim, None)
         };
-        let margin = scaled(ROW_MARGIN);
-        let plate = RECT {
-            left: row.left + margin,
-            top: row.top + scaled(2),
-            right: row.right - margin,
-            bottom: row.bottom - scaled(2),
-        };
+        let plate = look::plate(row, self.scale);
         if let Some(background) = background {
             canvas.fill_rect(plate, background);
         }
@@ -2164,15 +2107,6 @@ fn scrollbar(
     );
 }
 
-fn rect(rect: layout::Rect) -> RECT {
-    RECT {
-        left: rect.left,
-        top: rect.top,
-        right: rect.right,
-        bottom: rect.bottom,
-    }
-}
-
 /// The part of `text` covering the UTF-16 units `units`.
 fn unit_slice(text: &str, units: &Range<usize>) -> String {
     let mut unit = 0;
@@ -2211,75 +2145,6 @@ fn key_of(code: u16) -> Option<Key> {
         letter @ 0x41..=0x5A => Key::Letter(letter as u8 as char),
         _ => return None,
     })
-}
-
-/// The window's colours, from the tray menus' skin.
-#[derive(Clone, Copy, Debug)]
-struct Palette {
-    back: Color,
-    text: Color,
-    /// Hints, second lines: the text colour part of the way to the background.
-    dim: Color,
-    border: Color,
-    /// The rules between the input, the list and the footer, and the thumb.
-    line: Color,
-    /// Behind selected text in the input.
-    selection: Color,
-    /// The selected result row, and its text.
-    selected_back: Color,
-    selected_text: Color,
-    /// The letters of a name that the query matched.
-    matched: Color,
-}
-
-impl Palette {
-    /// The skin's colours; without a skin (`theme="native"`), a flat panel
-    /// that follows the system's light or dark setting.
-    fn of(design: Option<&y_core::menu::MenuDesign>) -> Self {
-        let (back, text, border) = match design {
-            Some(design) => (design.base.back, design.base.text, design.border.color),
-            None if y_core::theme::is_dark() => (
-                Color::rgb(0x20, 0x20, 0x20),
-                Color::rgb(0xFF, 0xFF, 0xFF),
-                Color::rgb(0x4A, 0x4A, 0x4A),
-            ),
-            None => (
-                Color::rgb(0xF9, 0xF9, 0xF9),
-                Color::rgb(0x00, 0x00, 0x00),
-                Color::rgb(0xC8, 0xC8, 0xC8),
-            ),
-        };
-        let dark = luma(back) < 128;
-        let (selected_back, selected_text) = match design {
-            Some(design) => (design.selected.back, design.selected.text),
-            None => (blend(back, ACCENT, if dark { 0.45 } else { 0.22 }), text),
-        };
-        Self {
-            back,
-            text,
-            dim: blend(text, back, 0.45),
-            border,
-            line: blend(text, back, 0.85),
-            selection: blend(back, ACCENT, 0.5),
-            selected_back,
-            selected_text,
-            matched: if dark {
-                Color::rgb(0x4C, 0xA3, 0xFF)
-            } else {
-                Color::rgb(0x00, 0x5A, 0xB4)
-            },
-        }
-    }
-}
-
-/// `a` moved `amount` of the way toward `b` (`0.0` is `a`, `1.0` is `b`).
-fn blend(a: Color, b: Color, amount: f32) -> Color {
-    let channel = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * amount).round() as u8;
-    Color::rgb(channel(a.r, b.r), channel(a.g, b.g), channel(a.b, b.b))
-}
-
-fn luma(color: Color) -> u32 {
-    (color.r as u32 * 299 + color.g as u32 * 587 + color.b as u32 * 114) / 1000
 }
 
 /// The overlay's window procedure: turns the few messages that matter into

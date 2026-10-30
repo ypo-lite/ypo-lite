@@ -25,7 +25,8 @@ use super::{
 use crate::config::{self, LoadError};
 use crate::model::OpenFolder;
 use crate::theme::{
-    BorderOverride, EdgeRule, GradientDirection, GradientOverride, Theme, ThemeOverrides,
+    BorderOverride, EdgeRule, GradientDirection, GradientOverride, SeparatorSpan, Theme,
+    ThemeOverrides,
 };
 use crate::variables::Lookup;
 
@@ -264,6 +265,7 @@ impl Loader {
             results: attrs.parse("results", ResultsMode::parse),
             row_actions: attrs.bool("row-actions"),
             history: attrs.bool("history"),
+            theme: attrs.parse("theme", parse_theme),
             ..SearchSettings::default()
         };
         search.extra_attrs = attrs.rest();
@@ -277,6 +279,10 @@ impl Loader {
                 }
                 Node::Element(child) => child,
             };
+            if child.name() == "skin" && search.skin.is_empty() {
+                search.skin = self.skin(child);
+                continue;
+            }
             let (lead, blank_before) = attached(&mut pending, child);
             search
                 .children
@@ -364,6 +370,7 @@ impl Loader {
             item.name = attrs.take("name");
             item.icon = attrs.take("icon");
             item.tooltip = attrs.take("tooltip");
+            item.keywords = attrs.take("keywords");
             item.default = attrs.bool("default").unwrap_or(false);
         }
         if matches!(item.kind, ItemKind::Group | ItemKind::App(_)) {
@@ -400,6 +407,7 @@ impl Loader {
             shell: attrs.bool("shell"),
             elevate: attrs.bool("elevate").unwrap_or(false),
             browse: attrs.bool("browse").unwrap_or(false),
+            index: attrs.bool("index").unwrap_or(false),
             filter: attrs.take("filter"),
             depth: attrs.parse("depth", |text| text.trim().parse().ok()),
             open_folder: attrs.parse("open-folder", parse_open_folder),
@@ -471,6 +479,7 @@ impl Loader {
             padding: attrs.parse("padding", parse_u32),
             margin: attrs.parse("margin", parse_u32),
             edge: attrs.parse("edge", parse_edge),
+            separator: attrs.parse("separator", parse_separator),
             ..ThemeOverrides::default()
         };
         let mut skin = Skin {
@@ -611,7 +620,18 @@ fn parse_theme(text: &str) -> Option<Theme> {
         "default" => Theme::Default,
         "flat" => Theme::Flat,
         "dark" | "black" => Theme::Dark,
+        "graphite" => Theme::Graphite,
+        "midnight" => Theme::Midnight,
+        "sand" => Theme::Sand,
         "auto" => Theme::Auto,
+        _ => return None,
+    })
+}
+
+fn parse_separator(text: &str) -> Option<SeparatorSpan> {
+    Some(match text {
+        "after-icons" => SeparatorSpan::AfterIcons,
+        "full" => SeparatorSpan::Full,
         _ => return None,
     })
 }

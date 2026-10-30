@@ -13,7 +13,9 @@
 	theme picks a base skin: "native" (the default if omitted) keeps plain,
 	unthemed OS chrome; "default"/"flat"/"dark" are PortAL's own three
 	built-in skins, reproduced with PortAL's own colours/border/gradient
-	values; "auto" resolves live, each time the menu opens, to "default" or
+	values (except that "default" has readable black hover text);
+	"graphite", "midnight" and "sand" are y-pop's own; "auto" resolves
+	live, each time the menu opens, to "default" or
 	"dark" to match Windows' current light/dark setting.
 
 	A <skin> child of <y-pop> overrides individual parts of whichever theme
@@ -24,7 +26,7 @@
 	the base theme's own value:
 	  back-color, text-color, hover-back-color, hover-text-color,
 	  disabled-text-color
-	  padding — gap BETWEEN rows, in pixels (0 in every built-in skin —
+	  padding — gap BETWEEN rows, in pixels (0 in PortAL's three skins —
 	    PortAL has no such gap; this is a y-pop-only addition)
 	  margin — gap WITHIN a row, between its border and its own icon/text,
 	    in pixels (also 0 in every built-in skin, also y-pop-only)
@@ -35,6 +37,9 @@
 	    set, not which rows the rule actually appears on, which reads
 	    backwards from what the words say; "idle"/"hover"/"always" name
 	    the actual row state instead.
+	  separator — "after-icons" (every built-in skin) starts the line of an
+	    untitled separator just past the icon column, which runs on through
+	    it; "full" takes the whole row. A titled one always takes the row.
 	<skin> can also carry child elements, each optional and independently
 	all-or-nothing (an incomplete one warns and is dropped):
 	  <border size="1" round="8" color="3a3a3a"/>
@@ -45,6 +50,13 @@
 	    only (a hovered/selected row's own fill already covers it) — same
 	    start/end/direction shape as <background-gradient>. A flat colour
 	    is written with start and end the same.
+
+	The search window follows the menus' theme and <skin> unless <search>
+	has a theme="..." and/or a <skin> of its own. They never mix: a theme
+	on <search> drops the menus' <skin>, and a <skin> on <search> replaces
+	theirs (on the menus' theme unless <search> names one). It takes the
+	five colours and <border> (its outline and corners); the rest of a
+	<skin> is about menu rows, and warns under <search>.
 -->
 <y-pop shell-execute="false" show-shortcuts="true" popup="native" theme="auto">
 

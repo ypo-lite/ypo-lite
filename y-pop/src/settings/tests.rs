@@ -418,7 +418,7 @@ fn every_app_field_round_trips() {
 
 #[test]
 fn a_skin_round_trips() {
-    let text = r##"<y-pop theme="auto"><skin back-color="#101010" hover-back-color="ff880080" padding="2" margin="4" edge="hover">
+    let text = r##"<y-pop theme="auto"><skin back-color="#101010" hover-back-color="ff880080" padding="2" margin="4" edge="hover" separator="full">
         <border size="1" round="8" color="3a3a3a"/>
         <background-gradient start="2b2b2b" end="1a1a1a" direction="v"/>
         <icon-gradient start="ffd996" end="000000"/>
@@ -656,14 +656,14 @@ const WITH_SEARCH: &str = r#"<?xml version="1.0" encoding="utf-8"?>
 		<!-- only here -->
 		<group name="Admin tools" keywords="admin root">
 			<app name="Registry" exe="%tools%\regedit.exe"/>
-			<app name="Services" exe="services.msc" keywords="svc"/>
+			<app name="Services" keywords="svc" exe="services.msc"/>
 		</group>
-		<app name="Scripts" exe="%tools%\Scripts" browse="true" depth="2" index="true"/>
+		<app name="Scripts" exe="%tools%\Scripts" browse="true" index="true" depth="2"/>
 		<plugin name="Calculator" src="plugins\calc.wasm" prefix="=" allow="clipboard"/>
 		<!-- trailing -->
 	</search>
 	<group name="Work">
-		<app name="Notepad" exe="notepad.exe" keywords="text edit"/>
+		<app name="Notepad" keywords="text edit" exe="notepad.exe"/>
 	</group>
 </y-pop>
 "#;
@@ -936,4 +936,36 @@ fn an_actions_element_with_something_else_inside_is_kept_as_a_comment() {
         "{:?}",
         search.children
     );
+}
+
+#[test]
+fn a_search_theme_and_skin_round_trip_through_both_readers() {
+    let text = r##"<y-pop theme="flat"><skin back-color="ebebeb"/>
+    <search theme="dark"><skin back-color="101010" hover-text-color="ffffff"/><menus/></search>
+    <quit/></y-pop>"##;
+    let settings = load(text);
+    assert!(settings.warnings.is_empty(), "{:?}", settings.warnings);
+    let search = search_of(&settings);
+    assert_eq!(search.theme, Some(Theme::Dark));
+    assert_eq!(
+        search.skin.overrides.back,
+        Some(y_core::overlay::Color::rgb(0x10, 0x10, 0x10))
+    );
+    // The window's skin is its own, not the menus'.
+    assert_eq!(
+        settings.skin.overrides.back,
+        Some(y_core::overlay::Color::rgb(0xeb, 0xeb, 0xeb))
+    );
+
+    let written = settings.to_xml();
+    let again = load(&written);
+    assert_eq!(search_of(&again).theme, search.theme);
+    assert_eq!(search_of(&again).skin, search.skin);
+
+    let one = config::load_str(text, &mut builtins()).expect("valid");
+    let two = config::load_str(&written, &mut builtins()).expect("valid");
+    assert!(two.warnings.is_empty(), "{:?}", two.warnings);
+    let (one, two) = (one.search.unwrap(), two.search.unwrap());
+    assert_eq!((one.theme, one.skin), (two.theme, two.skin));
+    assert_eq!(one.theme, Some(Theme::Dark));
 }

@@ -20,6 +20,11 @@
 //! and turned down): every choice is a real key from [`crate::keys`], so
 //! there is no invalid state to design around.
 //!
+//! A use that takes less than a hotkey does (y-pop's search shortcuts have no
+//! Win and few keys) says so with [`KeyRules`], and only what it can use is
+//! offered. What only the app can judge, such as a combination already taken,
+//! it passes as the `problem` line of [`key_picker_with`].
+//!
 //! The picker names no app `Msg`: the app owns a [`KeyPickerUi`] (category
 //! and search text), and passes [`KeyPickerEvents`] — one [`Callback`] per
 //! thing the user can do.
@@ -71,6 +76,29 @@ pub const MODIFIERS: [(&str, HOT_KEY_MODIFIERS); 4] = [
     ("Shift", MOD_SHIFT),
 ];
 
+/// What a picker offers.
+#[derive(Clone, Copy)]
+pub struct KeyRules {
+    pub modifiers: &'static [(&'static str, HOT_KEY_MODIFIERS)],
+    pub allows: fn(VIRTUAL_KEY) -> bool,
+}
+
+impl KeyRules {
+    /// Everything: what a hotkey can be.
+    pub const ANY: Self = Self {
+        modifiers: &MODIFIERS,
+        allows: |_| true,
+    };
+
+    /// The categories that hold a key these rules allow.
+    fn categories(&self) -> Vec<KeyCategory> {
+        KeyCategory::ALL
+            .into_iter()
+            .filter(|category| category.keys().any(|(_, key)| (self.allows)(key)))
+            .collect()
+    }
+}
+
 /// A combination as the keycap labels [`keycaps`] shows: held modifiers in
 /// Windows' own order, then the key.
 pub fn combo_labels(modifiers: HOT_KEY_MODIFIERS, key: Option<VIRTUAL_KEY>) -> Vec<String> {
@@ -93,6 +121,20 @@ pub fn key_picker(
     viewport: Viewport,
     events: &KeyPickerEvents,
 ) -> View {
+    key_picker_with(key, modifiers, &KeyRules::ANY, None, ui, viewport, events)
+}
+
+/// [`key_picker`] offering only what `rules` allow, with a `problem` to show
+/// under the combination.
+pub fn key_picker_with(
+    key: Option<VIRTUAL_KEY>,
+    modifiers: Option<HOT_KEY_MODIFIERS>,
+    rules: &KeyRules,
+    problem: Option<&str>,
+    ui: &KeyPickerUi,
+    viewport: Viewport,
+    events: &KeyPickerEvents,
+) -> View {
     let labels = combo_labels(modifiers.unwrap_or_default(), key);
     let readout: View = if key.is_some() {
         keycaps(&labels, true)
@@ -103,7 +145,7 @@ pub fn key_picker(
     let search = AutoSuggestBox::new()
         .text(ui.search.clone())
         .placeholder_text("Type a key name — F13, PgDn, Num 5…")
-        .items_source(keys::search(&ui.search))
+        .items_source(keys::search_among(&ui.search, rules.allows))
         .on_text_changed(events.on_search_changed.clone())
         .on_suggestion_chosen(events.on_search_chosen.clone())
         .fill();
@@ -114,7 +156,7 @@ pub fn key_picker(
         let chips = AutoGrid::new(56.0)
             .max_columns(4)
             .gap(space::XS, space::XS)
-            .items(MODIFIERS.map(|(name, modifier)| {
+            .items(rules.modifiers.iter().map(|&(name, modifier)| {
                 let checked = modifiers.0 & modifier.0 != 0;
                 let on_modifier = events.on_modifier.clone();
                 (
@@ -138,25 +180,28 @@ pub fn key_picker(
 
     Stack::vertical(space::L)
         .child("readout", readout)
+        .maybe("problem", problem.map(|problem| text::caption(problem).into()))
         .child("controls", controls.build(viewport))
         .child(
             "category",
-            category_selector(ui.category, viewport, &events.on_category),
+            category_selector(ui.category, rules, viewport, &events.on_category),
         )
         .child(
             format!("keys/{:?}", ui.category),
-            key_grid(ui.category, key, viewport, &events.on_key),
+            key_grid(ui.category, key, rules, viewport, &events.on_key),
         )
         .into()
 }
 
 fn category_selector(
     current: KeyCategory,
+    rules: &KeyRules,
     viewport: Viewport,
     on_category: &Callback<KeyCategory>,
 ) -> View {
+    let categories = rules.categories();
     if viewport.fits(TABS_MIN_WIDTH) {
-        let items = KeyCategory::ALL.map(|category| {
+        let items = categories.iter().map(|&category| {
             let item: View = SelectorBarItem::new()
                 .text(category.title())
                 .is_selected(category == current)
@@ -175,15 +220,14 @@ fn category_selector(
             }))
             .slots([SlotView::collection(SelectorBarSlot::Items, items)])
     } else {
-        let selected = KeyCategory::ALL
-            .iter()
-            .position(|&category| category == current);
+        let selected = categories.iter().position(|&category| category == current);
+        let titles: Vec<&str> = categories.iter().map(|category| category.title()).collect();
         let on_category = on_category.clone();
         let picker = combo(
-            KeyCategory::ALL.map(KeyCategory::title),
+            titles,
             selected,
             Callback::new(move |choice: Option<usize>| {
-                let _ = on_category.call(choice.map_or(current, |index| KeyCategory::ALL[index]));
+                let _ = on_category.call(choice.map_or(current, |index| categories[index]));
             }),
         );
         field("Keys", picker)
@@ -193,13 +237,15 @@ fn category_selector(
 fn key_grid(
     category: KeyCategory,
     current: Option<VIRTUAL_KEY>,
+    rules: &KeyRules,
     viewport: Viewport,
     on_key: &Callback<VIRTUAL_KEY>,
 ) -> View {
+    let allows = rules.allows;
     AutoGrid::new(category.min_button_width())
         .max_columns(13)
         .gap(space::XS, space::XS)
-        .items(category.keys().map(|(label, key)| {
+        .items(category.keys().filter(|&(_, key)| allows(key)).map(|(label, key)| {
             let on_key = on_key.clone();
             let button: View = Button::new()
                 .style(if Some(key) == current {

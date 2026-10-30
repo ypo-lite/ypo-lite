@@ -19,7 +19,8 @@ use y_core::overlay::Color;
 use y_pop::settings::Settings;
 use y_pop::skins;
 use y_pop::theme::{
-    BorderOverride, EdgeRule, GradientDirection, GradientOverride, Theme, ThemeOverrides,
+    BorderOverride, EdgeRule, GradientDirection, GradientOverride, SeparatorSpan, Theme,
+    ThemeOverrides,
 };
 
 use crate::skin_preview::Previews;
@@ -31,11 +32,14 @@ pub const MAX_BORDER: f64 = 16.0;
 pub const MAX_ROUND: f64 = 64.0;
 
 /// The themes, in the order the cards are shown.
-pub const THEMES: [Theme; 5] = [
+pub const THEMES: [Theme; 8] = [
     Theme::Native,
     Theme::Default,
     Theme::Flat,
     Theme::Dark,
+    Theme::Graphite,
+    Theme::Midnight,
+    Theme::Sand,
     Theme::Auto,
 ];
 
@@ -45,6 +49,9 @@ pub fn theme_title(theme: Theme) -> &'static str {
         Theme::Default => "Default",
         Theme::Flat => "Flat",
         Theme::Dark => "Dark",
+        Theme::Graphite => "Graphite",
+        Theme::Midnight => "Midnight",
+        Theme::Sand => "Sand",
         Theme::Auto => "Auto",
     }
 }
@@ -86,6 +93,17 @@ impl ColorSlot {
             Self::BackgroundEnd => "End",
             Self::IconStart => "Start",
             Self::IconEnd => "End",
+        }
+    }
+
+    /// [`ColorSlot::title`] for what the colour is in `scope`: the search
+    /// window has a selected row, and hints where a menu has disabled rows.
+    pub fn title_in(self, scope: Scope) -> &'static str {
+        match (scope, self) {
+            (Scope::Search, Self::HoverBack) => "Selected back",
+            (Scope::Search, Self::HoverText) => "Selected text",
+            (Scope::Search, Self::DisabledText) => "Hints",
+            _ => self.title(),
         }
     }
 
@@ -206,9 +224,16 @@ pub struct Editing {
 pub struct SkinUi {
     pub editing: Option<Editing>,
     pub previews: RefCell<Previews>,
+    pub scope: Scope,
 }
 
 pub enum SkinMsg {
+    /// Switch between the menus' look and the search window's.
+    Scope(Scope),
+    /// Give the search window a look of its own, starting from the menus'.
+    Customize,
+    /// Drop the search window's own look: it follows the menus again.
+    Follow,
     Theme(Theme),
     /// A swatch was clicked: open its editor, or close it if it is open.
     Open(ColorSlot),
@@ -223,6 +248,8 @@ pub enum SkinMsg {
     Margin(Option<f64>),
     /// The combo's index: 0 inherits, then [`EDGES`].
     Edge(Option<usize>),
+    /// The combo's index: 0 inherits, then [`SEPARATORS`].
+    Separator(Option<usize>),
     PartOn(Part, bool),
     BorderSize(Option<f64>),
     BorderRound(Option<f64>),
@@ -232,11 +259,59 @@ pub enum SkinMsg {
 }
 
 pub const EDGES: [EdgeRule; 3] = [EdgeRule::Idle, EdgeRule::Hover, EdgeRule::Always];
+pub const SEPARATORS: [SeparatorSpan; 2] = [SeparatorSpan::AfterIcons, SeparatorSpan::Full];
 pub const DIRECTIONS: [GradientDirection; 2] =
     [GradientDirection::Horizontal, GradientDirection::Vertical];
 
 pub fn theme_of(settings: &Settings) -> Theme {
     settings.globals.theme.unwrap_or(Theme::Native)
+}
+
+/// Which look the screen is editing: the tray menus', or the search
+/// window's own.
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+pub enum Scope {
+    #[default]
+    Menus,
+    Search,
+}
+
+/// Whether the search window has no look of its own and so draws like the
+/// tray menus. `false` when search is off: there is no window to style.
+pub fn search_follows_menus(settings: &Settings) -> bool {
+    settings
+        .search
+        .as_ref()
+        .is_some_and(|search| search.theme.is_none() && !search.skin.overrides.any_set())
+}
+
+/// The theme `scope` draws with.
+pub fn scoped_theme(settings: &Settings, scope: Scope) -> Theme {
+    match (scope, &settings.search) {
+        (Scope::Search, Some(search)) => search.theme.unwrap_or_else(|| theme_of(settings)),
+        _ => theme_of(settings),
+    }
+}
+
+/// The overrides `scope` draws with. A search window that follows the menus
+/// draws with theirs; one with a look of its own, with what it takes from its
+/// `<skin>`.
+pub fn scoped_overrides(settings: &Settings, scope: Scope) -> ThemeOverrides {
+    match (scope, &settings.search) {
+        (Scope::Search, Some(search)) if !search_follows_menus(settings) => {
+            search.skin.overrides.for_search()
+        }
+        _ => settings.skin.overrides,
+    }
+}
+
+/// Whether the search window's `<skin>` sets what the window ignores: a file
+/// written by hand. Nothing on the screen shows it, but Reset all clears it.
+pub fn has_ignored(settings: &Settings, scope: Scope) -> bool {
+    match (scope, &settings.search) {
+        (Scope::Search, Some(search)) => !search.skin.overrides.ignored_by_search().is_empty(),
+        _ => false,
+    }
 }
 
 /// What y-pop draws: a Native theme with overrides is Auto.
@@ -273,7 +348,7 @@ pub fn auto_theme() -> Theme {
     }
 }
 
-/// How many of the eleven overrides are set.
+/// How many of the twelve overrides are set.
 pub fn count(overrides: &ThemeOverrides) -> usize {
     [
         overrides.back.is_some(),
@@ -284,6 +359,7 @@ pub fn count(overrides: &ThemeOverrides) -> usize {
         overrides.padding.is_some(),
         overrides.margin.is_some(),
         overrides.edge.is_some(),
+        overrides.separator.is_some(),
         overrides.border.is_some(),
         overrides.background_gradient.is_some(),
         overrides.icon_gradient.is_some(),
@@ -348,18 +424,69 @@ fn direction_of(direction: y_core::menu::GradientDirection) -> GradientDirection
 
 /// Settles one message on `settings`. Whether the file now differs.
 pub fn apply(settings: &mut Settings, ui: &mut SkinUi, message: SkinMsg) -> bool {
-    let theme = theme_of(settings);
-    let base = base_design(theme);
-    let overrides = &mut settings.skin.overrides;
-
+    let scope = ui.scope;
     match message {
-        SkinMsg::Theme(chosen) => {
-            if chosen == theme {
+        SkinMsg::Scope(chosen) => {
+            ui.editing = None;
+            return std::mem::replace(&mut ui.scope, chosen) != chosen;
+        }
+        SkinMsg::Customize => {
+            let (theme, menus) = (theme_of(settings), settings.skin.overrides);
+            let Some(search) = settings.search.as_mut() else {
+                return false;
+            };
+            if search.theme.is_some() || search.skin.overrides.any_set() {
                 return false;
             }
-            settings.globals.theme = Some(chosen);
-            true
+            // The look it had: the menus' overrides may be all that makes a
+            // Native theme drawn, and the window does not take all of them.
+            search.theme = Some(effective_theme(theme, &menus));
+            search.skin.overrides = menus.for_search();
+            return true;
         }
+        SkinMsg::Follow => {
+            ui.editing = None;
+            let Some(search) = settings.search.as_mut() else {
+                return false;
+            };
+            let changed = search.theme.is_some() || !search.skin.is_empty();
+            search.theme = None;
+            search.skin = y_pop::settings::Skin::default();
+            return changed;
+        }
+        SkinMsg::Theme(chosen) => {
+            return match (scope, settings.search.as_mut()) {
+                (Scope::Search, Some(search)) => {
+                    search.theme.replace(chosen) != Some(chosen)
+                }
+                (Scope::Search, None) => false,
+                (Scope::Menus, _) => {
+                    if chosen == theme_of(settings) {
+                        return false;
+                    }
+                    settings.globals.theme = Some(chosen);
+                    true
+                }
+            };
+        }
+        _ => {}
+    }
+
+    let theme = scoped_theme(settings, scope);
+    let base = base_design(theme);
+    let overrides = match scope {
+        Scope::Menus => &mut settings.skin.overrides,
+        // Nothing to edit until the window has a look of its own.
+        Scope::Search => match settings.search.as_mut() {
+            Some(search) if search.theme.is_some() || search.skin.overrides.any_set() => {
+                &mut search.skin.overrides
+            }
+            _ => return false,
+        },
+    };
+
+    match message {
+        SkinMsg::Scope(_) | SkinMsg::Customize | SkinMsg::Follow | SkinMsg::Theme(_) => false,
 
         SkinMsg::Open(slot) => {
             ui.editing = match ui.editing {
@@ -401,6 +528,13 @@ pub fn apply(settings: &mut Settings, ui: &mut SkinUi, message: SkinMsg) -> bool
                 _ => None,
             };
             set_if_changed(&mut overrides.edge, edge)
+        }
+        SkinMsg::Separator(choice) => {
+            let span = match choice {
+                Some(index) if index > 0 => SEPARATORS.get(index - 1).copied(),
+                _ => None,
+            };
+            set_if_changed(&mut overrides.separator, span)
         }
 
         SkinMsg::PartOn(part, on) => {
@@ -459,7 +593,7 @@ pub fn apply(settings: &mut Settings, ui: &mut SkinUi, message: SkinMsg) -> bool
 
         SkinMsg::ResetAll => {
             ui.editing = None;
-            if count(overrides) == 0 {
+            if !overrides.any_set() {
                 return false;
             }
             *overrides = ThemeOverrides::default();
@@ -481,11 +615,16 @@ impl ConfigApp {
         let Ok(settings) = &mut self.settings else {
             return;
         };
-        let before = matches!(message, SkinMsg::ResetAll).then(|| settings.clone());
+        let label = match message {
+            SkinMsg::ResetAll => Some("Reset the skin overrides"),
+            SkinMsg::Follow => Some("Make search follow the menus' look"),
+            _ => None,
+        };
+        let before = label.map(|_| settings.clone());
         if apply(settings, &mut self.skin_ui, message) {
-            if let Some(before) = before {
+            if let (Some(before), Some(label)) = (before, label) {
                 self.undo = Some(Undo {
-                    label: "Reset the skin overrides".to_owned(),
+                    label: label.to_owned(),
                     settings: before,
                 });
             }
@@ -509,6 +648,124 @@ mod tests {
 
     fn run(settings: &mut Settings, ui: &mut SkinUi, message: SkinMsg) -> bool {
         apply(settings, ui, message)
+    }
+
+    fn with_search() -> Settings {
+        settings(r#"<y-pop theme="flat"><skin back-color="ebebeb"/><search/><quit/></y-pop>"#)
+    }
+
+    fn in_search() -> SkinUi {
+        SkinUi {
+            scope: Scope::Search,
+            ..SkinUi::default()
+        }
+    }
+
+    #[test]
+    fn search_follows_the_menus_until_customized() {
+        let mut settings = with_search();
+        let mut ui = in_search();
+        assert!(search_follows_menus(&settings));
+        // Nothing to edit yet.
+        assert!(!run(&mut settings, &mut ui, SkinMsg::Padding(Some(3.0))));
+        assert!(run(&mut settings, &mut ui, SkinMsg::Customize));
+        let search = settings.search.as_ref().expect("search");
+        assert_eq!(search.theme, Some(Theme::Flat));
+        assert_eq!(search.skin.overrides, settings.skin.overrides);
+        assert!(!run(&mut settings, &mut ui, SkinMsg::Customize), "once");
+    }
+
+    #[test]
+    fn editing_the_search_look_leaves_the_menus_alone() {
+        let mut settings = with_search();
+        let mut ui = in_search();
+        run(&mut settings, &mut ui, SkinMsg::Customize);
+        assert!(run(&mut settings, &mut ui, SkinMsg::Theme(Theme::Graphite)));
+        run(&mut settings, &mut ui, SkinMsg::Open(ColorSlot::Text));
+        let red = Color::rgb(255, 0, 0);
+        assert!(run(&mut settings, &mut ui, SkinMsg::Color(red)));
+
+        assert_eq!(theme_of(&settings), Theme::Flat);
+        assert_eq!(settings.skin.overrides.text, None);
+        let search = settings.search.as_ref().expect("search");
+        assert_eq!(search.theme, Some(Theme::Graphite));
+        assert_eq!(search.skin.overrides.text, Some(red));
+
+        // And it survives a save.
+        let again = self::settings(&settings.to_xml());
+        assert_eq!(again.search.as_ref().expect("search").theme, search.theme);
+    }
+
+    #[test]
+    fn a_look_of_its_own_takes_only_what_the_window_uses_from_the_menus() {
+        let mut settings = settings(
+            r#"<y-pop><skin back-color="101010" padding="4" edge="always"/><search/><quit/></y-pop>"#,
+        );
+        assert!(run(&mut settings, &mut in_search(), SkinMsg::Customize));
+        let search = settings.search.as_ref().expect("search");
+        let back = Color::rgb(0x10, 0x10, 0x10);
+        assert_eq!(search.skin.overrides.back, Some(back));
+        assert_eq!(search.skin.overrides.padding, None);
+        assert_eq!(search.skin.overrides.edge, None);
+        assert_eq!(settings.skin.overrides.padding, Some(4), "the menus keep it");
+    }
+
+    /// Native menus with a `<skin>` are drawn as Auto, and when the padding is
+    /// all it has, there would be nothing left to keep the window drawn.
+    #[test]
+    fn a_look_of_its_own_stays_the_look_it_had() {
+        let mut settings =
+            settings(r#"<y-pop><skin padding="4"/><search/><quit/></y-pop>"#);
+        assert!(run(&mut settings, &mut in_search(), SkinMsg::Customize));
+        let search = settings.search.as_ref().expect("search");
+        assert_eq!(search.theme, Some(Theme::Auto));
+    }
+
+    #[test]
+    fn what_the_window_ignores_is_not_counted_but_reset_all_clears_it() {
+        let mut settings = settings(
+            r#"<y-pop><search theme="dark"><skin padding="4" text-color="ffffff"/></search><quit/></y-pop>"#,
+        );
+        let mut ui = in_search();
+        let overrides = scoped_overrides(&settings, Scope::Search);
+        assert_eq!(count(&overrides), 1);
+        assert!(has_ignored(&settings, Scope::Search));
+
+        assert!(run(&mut settings, &mut ui, SkinMsg::ResetAll));
+        assert!(!has_ignored(&settings, Scope::Search));
+        let search = settings.search.as_ref().expect("search");
+        assert!(!search.skin.overrides.any_set());
+    }
+
+    #[test]
+    fn following_the_menus_drops_the_search_look() {
+        let mut settings = with_search();
+        let mut ui = in_search();
+        run(&mut settings, &mut ui, SkinMsg::Customize);
+        assert!(run(&mut settings, &mut ui, SkinMsg::Follow));
+        assert!(search_follows_menus(&settings));
+        assert!(!run(&mut settings, &mut ui, SkinMsg::Follow));
+    }
+
+    #[test]
+    fn nothing_changes_without_a_search_element() {
+        let mut settings = dark();
+        let mut ui = in_search();
+        for message in [SkinMsg::Customize, SkinMsg::Theme(Theme::Flat), SkinMsg::Follow] {
+            assert!(!run(&mut settings, &mut ui, message));
+        }
+        assert_eq!(theme_of(&settings), Theme::Dark);
+    }
+
+    /// The loader and the saver each have their own list of names.
+    #[test]
+    fn every_theme_is_written_and_read_back() {
+        for theme in THEMES {
+            let mut edited = dark();
+            run(&mut edited, &mut SkinUi::default(), SkinMsg::Theme(theme));
+            assert_eq!(theme_of(&settings(&edited.to_xml())), theme);
+            assert!(resolved(theme, ThemeOverrides::default()).is_some() || theme == Theme::Native);
+        }
     }
 
     #[test]
@@ -631,6 +888,19 @@ mod tests {
         assert!(run(&mut settings, &mut ui, SkinMsg::Padding(None)));
         assert_eq!(settings.skin.overrides.padding, None);
         assert!(!run(&mut settings, &mut ui, SkinMsg::Margin(None)));
+    }
+
+    #[test]
+    fn the_separator_combo_has_inherit_first() {
+        let mut settings = dark();
+        let mut ui = SkinUi::default();
+        assert!(!run(&mut settings, &mut ui, SkinMsg::Separator(Some(0))));
+        assert!(run(&mut settings, &mut ui, SkinMsg::Separator(Some(2))));
+        assert_eq!(settings.skin.overrides.separator, Some(SeparatorSpan::Full));
+        let design = resolved(Theme::Dark, settings.skin.overrides).expect("themed");
+        assert_eq!(design.separator, y_core::menu::SeparatorSpan::Full);
+        assert!(run(&mut settings, &mut ui, SkinMsg::Separator(Some(0))));
+        assert_eq!(settings.skin.overrides.separator, None);
     }
 
     #[test]

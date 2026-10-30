@@ -16,7 +16,7 @@
 
 use std::collections::HashSet;
 
-use y_pop::settings::{AppFields, Entry, Item, ItemId, ItemKind, Settings};
+use y_pop::settings::{AppFields, Entry, Item, ItemId, ItemKind, SearchEntry, Settings};
 
 /// Where an entry sits.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -29,6 +29,28 @@ pub struct Location {
 
 // ---- finding ---------------------------------------------------------
 
+/// Which top-level list an item is in: the tray menus, or the search-only
+/// groups and folders among `<search>`'s children.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Top {
+    Roots,
+    Search,
+}
+
+/// The top-level item at `index` of `top`, if that entry is an item.
+fn top_item(settings: &Settings, top: Top, index: usize) -> Option<&Item> {
+    match top {
+        Top::Roots => match settings.roots.get(index)? {
+            Entry::Item(item) => Some(item),
+            Entry::Comment(_) => None,
+        },
+        Top::Search => match settings.search.as_ref()?.children.get(index)? {
+            SearchEntry::Item(item) => Some(item),
+            _ => None,
+        },
+    }
+}
+
 pub fn item(settings: &Settings, id: ItemId) -> Option<&Item> {
     fn find(entries: &[Entry], id: ItemId) -> Option<&Item> {
         entries.iter().find_map(|entry| match entry {
@@ -37,10 +59,21 @@ pub fn item(settings: &Settings, id: ItemId) -> Option<&Item> {
             Entry::Comment(_) => None,
         })
     }
-    find(&settings.roots, id)
+    find(&settings.roots, id).or_else(|| {
+        settings
+            .search
+            .as_ref()?
+            .children
+            .iter()
+            .find_map(|entry| match entry {
+                SearchEntry::Item(item) if item.id == id => Some(item),
+                SearchEntry::Item(item) => find(&item.children, id),
+                _ => None,
+            })
+    })
 }
 
-/// Indices to follow from the top-level list down to `id`.
+/// Indices to follow from a top-level list down to `id`.
 fn path_to(entries: &[Entry], id: ItemId) -> Option<Vec<usize>> {
     for (index, entry) in entries.iter().enumerate() {
         let Entry::Item(item) = entry else { continue };
@@ -55,40 +88,75 @@ fn path_to(entries: &[Entry], id: ItemId) -> Option<Vec<usize>> {
     None
 }
 
-pub fn item_mut(settings: &mut Settings, id: ItemId) -> Option<&mut Item> {
-    let path = path_to(&settings.roots, id)?;
-    let mut entries = &mut settings.roots;
-    for (step, &index) in path.iter().enumerate() {
-        let Entry::Item(item) = &mut entries[index] else {
-            return None;
+/// The list `id` is in, and the indices down to it. The first index is among
+/// the entries of `<search>` for [`Top::Search`], comments and sections
+/// counted.
+fn find_path(settings: &Settings, id: ItemId) -> Option<(Top, Vec<usize>)> {
+    if let Some(path) = path_to(&settings.roots, id) {
+        return Some((Top::Roots, path));
+    }
+    let search = settings.search.as_ref()?;
+    for (index, entry) in search.children.iter().enumerate() {
+        let SearchEntry::Item(item) = entry else {
+            continue;
         };
-        if step + 1 == path.len() {
-            return Some(item);
+        if item.id == id {
+            return Some((Top::Search, vec![index]));
         }
-        entries = &mut item.children;
+        if let Some(mut rest) = path_to(&item.children, id) {
+            rest.insert(0, index);
+            return Some((Top::Search, rest));
+        }
     }
     None
 }
 
-pub fn locate(settings: &Settings, id: ItemId) -> Option<Location> {
-    let path = path_to(&settings.roots, id)?;
-    let index = *path.last()?;
-    let parent = if path.len() == 1 {
-        None
-    } else {
-        // The group is the item one step up the path.
-        let mut entries = &settings.roots;
-        let mut parent = None;
-        for &step in &path[..path.len() - 1] {
-            let Entry::Item(item) = &entries[step] else {
-                return None;
-            };
-            parent = Some(item.id);
-            entries = &item.children;
-        }
-        parent
+pub fn item_mut(settings: &mut Settings, id: ItemId) -> Option<&mut Item> {
+    let (top, path) = find_path(settings, id)?;
+    let mut item = match top {
+        Top::Roots => match settings.roots.get_mut(path[0])? {
+            Entry::Item(item) => item,
+            Entry::Comment(_) => return None,
+        },
+        Top::Search => match settings.search.as_mut()?.children.get_mut(path[0])? {
+            SearchEntry::Item(item) => item,
+            _ => return None,
+        },
     };
-    Some(Location { parent, index })
+    for &index in &path[1..] {
+        item = match item.children.get_mut(index)? {
+            Entry::Item(item) => item,
+            Entry::Comment(_) => return None,
+        };
+    }
+    Some(item)
+}
+
+/// Where `id` sits. `None` for a top-level search-only item: its list holds
+/// sections and comments of another type, so it is moved, added and removed
+/// by [`crate::search_edit`] and [`crate::search_only`], never by the
+/// functions here (which therefore refuse it harmlessly).
+pub fn locate(settings: &Settings, id: ItemId) -> Option<Location> {
+    let (top, path) = find_path(settings, id)?;
+    let index = *path.last()?;
+    if path.len() == 1 {
+        return (top == Top::Roots).then_some(Location {
+            parent: None,
+            index,
+        });
+    }
+    // The group is the item one step up the path.
+    let mut parent = top_item(settings, top, path[0])?;
+    for &step in &path[1..path.len() - 1] {
+        parent = match parent.children.get(step)? {
+            Entry::Item(item) => item,
+            Entry::Comment(_) => return None,
+        };
+    }
+    Some(Location {
+        parent: Some(parent.id),
+        index,
+    })
 }
 
 /// The list `parent` names: its children, or the top-level list.
@@ -310,16 +378,39 @@ pub fn groups(settings: &Settings, excluding: Option<ItemId>) -> Vec<(String, It
     }
     let mut out = Vec::new();
     walk(&settings.roots, "", excluding, &mut out);
+    // The search-only groups follow, under a name that says what they are.
+    if let Some(search) = &settings.search {
+        for entry in &search.children {
+            let SearchEntry::Item(item) = entry else {
+                continue;
+            };
+            if item.kind != ItemKind::Group || Some(item.id) == excluding {
+                continue;
+            }
+            let here = format!("Only in search › {}", crate::roots::label(item));
+            out.push((here.clone(), item.id));
+            walk(&item.children, &here, excluding, &mut out);
+        }
+    }
     out
 }
 
-/// The tray menu (top-level item) `id` belongs to — itself, for one.
+/// The top-level item `id` belongs to — itself, for one: a tray menu, or a
+/// search-only group or folder.
 pub fn root_of(settings: &Settings, id: ItemId) -> Option<ItemId> {
-    let first = *path_to(&settings.roots, id)?.first()?;
-    match settings.roots.get(first)? {
-        Entry::Item(root) => Some(root.id),
-        Entry::Comment(_) => None,
-    }
+    let (top, path) = find_path(settings, id)?;
+    top_item(settings, top, *path.first()?).map(|root| root.id)
+}
+
+/// Whether `id` is directly in a top-level list: a tray menu, or a search-only
+/// group or folder.
+pub fn is_top(settings: &Settings, id: ItemId) -> bool {
+    matches!(find_path(settings, id), Some((_, path)) if path.len() == 1)
+}
+
+/// Whether `id` is (or is in) a search-only group or folder.
+pub fn is_search_only(settings: &Settings, id: ItemId) -> bool {
+    matches!(find_path(settings, id), Some((Top::Search, _)))
 }
 
 /// Wraps the top-level item `id` in a new group of the same name, so an app

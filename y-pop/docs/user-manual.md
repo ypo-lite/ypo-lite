@@ -89,7 +89,38 @@ the action menu, the wheel scrolls. Clicking outside the window, or on another
 window, closes it.
 
 The window sits on the monitor with the cursor, scales with its DPI, and takes
-the colours of your tray menu's `theme`.
+the colours of your tray menu's `theme`: `default`, `flat`, `dark`, `graphite`,
+`midnight`, `sand` or `auto`, or Windows' light or dark setting with `native`.
+
+To give it colours of its own, put a `theme` and/or a `<skin>` on `<search>`
+(same attributes as the menus' `<skin>`; **Skin → Search window** in
+y-pop-config):
+
+```xml
+<y-pop theme="flat">
+    <skin back-color="ebebeb"/>            <!-- the tray menus -->
+    <search theme="dark">                  <!-- the search window -->
+        <skin hover-back-color="2563eb"/>  <!-- optional -->
+    </search>
+</y-pop>
+```
+
+The window's look never mixes with the menus': a `theme` on `<search>` drops
+the menus' `<skin>`, and a `<skin>` on `<search>` replaces theirs (on the
+menus' theme unless `<search>` names one). With neither, it follows the menus.
+
+The window takes these from a skin:
+
+| In `<skin>` | In the search window |
+|---|---|
+| `back-color`, `text-color` | The panel and its text. |
+| `hover-back-color`, `hover-text-color` | The selected row, always a solid colour. |
+| `disabled-text-color` | Second lines, headings and the footer's hints. |
+| `<border>` | The window's outline and the radius of its corners. |
+
+`padding`, `margin`, `edge`, `separator`, `<background-gradient>` and
+`<icon-gradient>` are about menu rows. In the `<skin>` of `<search>` they do
+nothing and y-pop warns about them.
 
 ---
 
@@ -166,7 +197,16 @@ action is not offered for them.
 
 ### Edit
 
-Opens `y-pop-config`. It does not yet jump to the item.
+Opens `y-pop-config` on the item: its tray menu (or, for a search-only group or
+folder, its own page) is shown, the groups above it are unfolded and it is
+selected. If `y-pop-config` is already open, that window comes forward and goes
+to the item.
+
+`y-pop-config` also understands these on its command line, for a launcher or a
+script: `--select <path>` (positions down the tree, `2/0/5`: the sixth entry of
+the first group of the third menu; `s/1/0` for the first entry of the second
+search-only group or folder; `search` for the Search page) and `--new-app` with `--name`, `--target`,
+`--args`, `--icon` and `--dir` (adds an app to the open tray menu, filled in).
 
 ---
 
@@ -498,9 +538,11 @@ still apply. If **none** of them match, every tray menu is left out: the section
 disappears and a plain search finds nothing from your menus, so read that warning.
 
 `browse` and `include` work together: `<menus browse="a-z" include="Work"/>`. In
-`y-pop-config` neither has a field yet: edit `y-pop.xml` by hand. Saving from
-`y-pop-config` keeps what you wrote. After editing the file by hand, run
-`>Reload configuration`.
+`y-pop-config`, the **Search** page has both: use the Edit button of the *Tray
+menus* row, choose how it opens, and click the tray menus to count. Renaming a
+tray menu there keeps it in `include`, and deleting one takes it out. A menu with
+a `;` in its name can't be listed: it counts only while every menu does. After
+editing the file by hand, run `>Reload configuration`.
 
 ### Browsed folders: `browse="true"`
 
@@ -531,6 +573,10 @@ Where a browsed folder shows, and what each setting does there:
 | Network folder | listed | skipped without `index="true"` | listed, `index` or not, without icons |
 
 ### Search-only items
+
+In `y-pop-config`, the Search page adds them (*Add group*, *Add folder*); each
+then has its own page under *Only in search*, edited like a tray menu, minus what
+only a tray icon has (hotkeys, default item, menu style).
 
 Children of `<search>` that are not settings are results that are *only* in
 the search, not in any tray menu:
@@ -586,7 +632,7 @@ An action keeps working without a key it was refused.
 
 Not search settings, but they feed it: the `name`, `keywords`, `tooltip`,
 `exe` and `hotkey` of every item in `y-pop.xml` are searchable. Add
-`keywords="…"` to an item to make it findable under other words.
+`keywords="…"` to an item to make it findable under other words — in `y-pop-config`, the **Keywords** box of the item. A browsed folder's **Search inside it with /** switch is `index="true"`.
 
 ---
 

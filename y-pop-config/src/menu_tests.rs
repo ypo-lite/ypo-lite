@@ -302,6 +302,61 @@ fn a_tray_menu_moves_among_the_others_and_its_screen_stays_open() {
     assert_eq!(app.screen, Screen::Menu(menu), "it is addressed by id");
 }
 
+fn included(app: &ConfigApp) -> Vec<String> {
+    crate::search_edit::include_names(settings(app))
+}
+
+const LISTED: &str = r#"<y-pop><search><menus include="Work"/></search>
+    <group name="Work"/><group name="Games"/></y-pop>"#;
+
+fn app_of(xml: &str) -> ConfigApp {
+    let loaded = y_pop::settings::Settings::load_str(xml, &mut Vec::new()).expect("valid");
+    crate::test_app(loaded)
+}
+
+fn open_menu(app: &mut ConfigApp, name: &str) -> ItemId {
+    let menu = roots::menus(settings(app))
+        .find(|item| item.name.as_deref() == Some(name))
+        .expect("the menu")
+        .id;
+    app.screen = Screen::Menu(menu);
+    menu
+}
+
+#[test]
+fn a_tray_menu_emptied_and_retyped_stays_in_include() {
+    let mut app = app_of(LISTED);
+    let work = open_menu(&mut app, "Work");
+    for text in ["Wor", "", "J", "Job"] {
+        app.edit_menu(MenuMsg::Text(work, TextField::Name, text.to_owned()));
+    }
+    assert_eq!(included(&app), ["Job"]);
+    let tree = y_pop::config::load_str(&settings(&app).to_xml(), &mut Vec::new()).expect("readable");
+    assert!(tree.warnings.is_empty(), "{:?}", tree.warnings);
+}
+
+#[test]
+fn a_semicolon_in_a_listed_menu_waits_until_it_is_gone() {
+    let mut app = app_of(LISTED);
+    let work = open_menu(&mut app, "Work");
+    app.edit_menu(MenuMsg::Text(work, TextField::Name, "Wo;rk".to_owned()));
+    assert_eq!(included(&app), ["Work"]);
+    assert!(crate::search_edit::name_breaks_include(settings(&app), "Wo;rk"));
+    app.edit_menu(MenuMsg::Text(work, TextField::Name, "Worker".to_owned()));
+    assert_eq!(included(&app), ["Worker"]);
+}
+
+#[test]
+fn deleting_the_only_listed_menu_counts_the_others_with_undo() {
+    let mut app = app_of(LISTED);
+    let work = open_menu(&mut app, "Work");
+    app.delete_menu(work);
+    assert!(included(&app).is_empty());
+    assert!(!settings(&app).to_xml().contains("include"));
+    app.update_undo_for_test();
+    assert_eq!(included(&app), ["Work"]);
+}
+
 fn hotkeys_of(app: &ConfigApp, name: &str) -> Vec<(String, bool)> {
     let item = tree::item(settings(app), id(app, name)).expect("an item");
     item.hotkeys
@@ -312,29 +367,30 @@ fn hotkeys_of(app: &ConfigApp, name: &str) -> Vec<(String, bool)> {
 
 #[test]
 fn a_hotkey_is_built_from_modifiers_then_a_key_and_can_be_removed_with_undo() {
+    use crate::key_edit::{KeyMsg, KeyTarget};
     use windows::Win32::UI::Input::KeyboardAndMouse::{MOD_CONTROL, MOD_WIN, VK_F5};
 
     let mut app = app();
     let a = id(&app, "A");
-    app.edit_menu(MenuMsg::HotkeyAdd(a));
-    assert_eq!(app.hotkeys.open, Some((a, 0)));
-    assert_eq!(hotkeys_of(&app, "A"), [(String::new(), false)]);
+    app.edit_key(KeyMsg::Open(KeyTarget::NewHotkey(a)));
+    assert_eq!(app.key_edit.open, Some(KeyTarget::NewHotkey(a)));
+    assert!(hotkeys_of(&app, "A").is_empty(), "not until OK");
 
-    // Chips before the key: the modifiers are kept in the text.
-    app.edit_menu(MenuMsg::HotkeyModifier(a, 0, MOD_WIN));
-    app.edit_menu(MenuMsg::HotkeyModifier(a, 0, MOD_CONTROL));
-    assert_eq!(hotkeys_of(&app, "A")[0].0, "Win+Ctrl");
-    app.edit_menu(MenuMsg::HotkeyKey(a, 0, VK_F5));
-    assert_eq!(hotkeys_of(&app, "A")[0].0, "Win+Ctrl+F5");
-    app.edit_menu(MenuMsg::HotkeyModifier(a, 0, MOD_WIN));
+    app.edit_key(KeyMsg::Modifier(MOD_WIN));
+    app.edit_key(KeyMsg::Modifier(MOD_CONTROL));
+    app.edit_key(KeyMsg::Key(VK_F5));
+    app.edit_key(KeyMsg::Modifier(MOD_WIN));
+    assert!(hotkeys_of(&app, "A").is_empty(), "not until OK");
+    app.edit_key(KeyMsg::Closed { accepted: true });
     assert_eq!(hotkeys_of(&app, "A")[0].0, "Ctrl+F5");
+    assert!(app.dirty);
 
     app.edit_menu(MenuMsg::HotkeyOverride(a, 0, true));
     assert_eq!(hotkeys_of(&app, "A"), [("Ctrl+F5".to_owned(), true)]);
 
     app.edit_menu(MenuMsg::HotkeyRemove(a, 0));
     assert!(hotkeys_of(&app, "A").is_empty());
-    assert_eq!(app.hotkeys.open, None);
+    assert_eq!(app.key_edit.open, None);
     app.update_undo_for_test();
     assert_eq!(hotkeys_of(&app, "A").len(), 1);
 }
@@ -356,27 +412,27 @@ fn hotkey_texts_split_and_join_both_ways() {
 }
 
 #[test]
-fn cancelling_the_hotkey_dialog_restores_the_hotkey_and_drops_a_new_one() {
+fn cancelling_the_hotkey_dialog_changes_nothing() {
+    use crate::key_edit::{KeyMsg, KeyTarget};
     use windows::Win32::UI::Input::KeyboardAndMouse::{VK_F5, VK_F6};
 
     let mut app = app();
     let a = id(&app, "A");
 
     // A new hotkey that is cancelled never reaches the file.
-    app.edit_menu(MenuMsg::HotkeyAdd(a));
-    app.edit_menu(MenuMsg::HotkeyKey(a, 0, VK_F5));
-    app.edit_menu(MenuMsg::HotkeyClosed { accepted: false });
+    app.edit_key(KeyMsg::Open(KeyTarget::NewHotkey(a)));
+    app.edit_key(KeyMsg::Key(VK_F5));
+    app.edit_key(KeyMsg::Closed { accepted: false });
     assert!(hotkeys_of(&app, "A").is_empty());
-    assert_eq!(app.hotkeys.open, None);
+    assert_eq!(app.key_edit.open, None);
 
-    // OK keeps it; editing it again and cancelling goes back to it.
-    app.edit_menu(MenuMsg::HotkeyAdd(a));
-    app.edit_menu(MenuMsg::HotkeyKey(a, 0, VK_F5));
-    app.edit_menu(MenuMsg::HotkeyClosed { accepted: true });
-    app.edit_menu(MenuMsg::HotkeyEdit(a, 0));
-    app.edit_menu(MenuMsg::HotkeyKey(a, 0, VK_F6));
-    assert_eq!(hotkeys_of(&app, "A")[0].0, "F6");
-    app.edit_menu(MenuMsg::HotkeyClosed { accepted: false });
+    // OK keeps it; editing it again and cancelling leaves it.
+    app.edit_key(KeyMsg::Open(KeyTarget::NewHotkey(a)));
+    app.edit_key(KeyMsg::Key(VK_F5));
+    app.edit_key(KeyMsg::Closed { accepted: true });
+    app.edit_key(KeyMsg::Open(KeyTarget::Item(a, 0)));
+    app.edit_key(KeyMsg::Key(VK_F6));
+    app.edit_key(KeyMsg::Closed { accepted: false });
     assert_eq!(hotkeys_of(&app, "A")[0].0, "F5");
 }
 
@@ -801,4 +857,104 @@ fn adding_with_nothing_ticked_changes_nothing() {
     app.edit_menu(MenuMsg::AppPickerToggled);
     app.edit_menu(MenuMsg::StartAdd);
     assert!(!app.dirty);
+}
+
+#[test]
+fn a_select_request_opens_the_menu_and_unfolds_to_the_item() {
+    let mut app = app();
+    let g1 = id(&app, "G1");
+    app.collapsed.insert(g1);
+    app.screen = Screen::General;
+
+    app.apply_request(y_pop::ipc::Request::Select("0/1/0".to_owned()));
+
+    let root = roots::menus(settings(&app)).next().expect("a menu").id;
+    assert_eq!(app.screen, Screen::Menu(root));
+    assert_eq!(app.selected(root), id(&app, "G1a"));
+    assert!(!app.collapsed.contains(&g1));
+    assert!(!app.dirty, "looking is not an edit");
+
+    app.apply_request(y_pop::ipc::Request::Select("9".to_owned()));
+    assert_eq!(app.screen, Screen::Menu(root), "a missing item changes nothing");
+    assert!(app.run_status.as_ref().is_some_and(|(_, ok)| !ok));
+}
+
+#[test]
+fn a_new_app_request_adds_a_filled_in_app_to_the_open_menu() {
+    let mut app = app();
+    app.screen = Screen::Variables;
+
+    app.apply_request(y_pop::ipc::Request::NewApp(y_pop::ipc::NewApp {
+        name: Some("Notepad".to_owned()),
+        target: Some(r"C:\Windows\notepad.exe".to_owned()),
+        args: Some("-x".to_owned()),
+        dir: Some(r"C:\Temp".to_owned()),
+        icon: None,
+    }));
+
+    let root = roots::menus(settings(&app)).next().expect("a menu").id;
+    assert_eq!(app.screen, Screen::Menu(root));
+    assert!(app.dirty);
+    let fields = app_fields(&app, "Notepad");
+    assert_eq!(fields.exe.as_deref(), Some(r"C:\Windows\notepad.exe"));
+    assert_eq!(fields.param.as_deref(), Some("-x"));
+    assert_eq!(fields.path.as_deref(), Some(r"C:\Temp"));
+    assert_eq!(app.selected(root), id(&app, "Notepad"));
+}
+
+#[test]
+fn keywords_and_the_index_flag_are_edited_and_written() {
+    let mut app = app();
+    let a = id(&app, "A");
+    app.edit_menu(MenuMsg::Select(a));
+    app.edit_menu(MenuMsg::Text(a, TextField::Keywords, "mail outlook".to_owned()));
+    let xml = settings(&app).to_xml();
+    assert!(xml.contains(r#"keywords="mail outlook""#), "{xml}");
+
+    app.edit_menu(MenuMsg::Text(a, TextField::Keywords, String::new()));
+    assert!(!settings(&app).to_xml().contains("keywords"));
+
+    // Only an app has the flag; `Flag` on a group changes nothing.
+    app.edit_menu(MenuMsg::Flag(a, FlagField::Index, true));
+    assert!(settings(&app).to_xml().contains(r#"index="true""#));
+    let g1 = id(&app, "G1");
+    app.edit_menu(MenuMsg::Flag(g1, FlagField::Index, true));
+    assert_eq!(settings(&app).to_xml().matches("index=").count(), 1);
+}
+
+#[test]
+fn renaming_a_tray_menu_keeps_it_in_the_searchs_include() {
+    let loaded = Settings::load_str(
+        r#"<y-pop><search><menus include="Menu;Other"/></search><group name="Menu"/><group name="Other"/></y-pop>"#,
+        &mut Vec::<Variable>::new(),
+    )
+    .expect("valid");
+    let root = roots::menus(&loaded).next().expect("a menu").id;
+    let mut app = test_app(loaded);
+    app.screen = Screen::Menu(root);
+
+    app.edit_menu(MenuMsg::Text(root, TextField::Name, "Jobs".to_owned()));
+    assert!(settings(&app).to_xml().contains(r#"include="Jobs;Other""#));
+
+    assert!(app.dirty);
+}
+
+#[test]
+fn a_select_request_reaches_search_only_items_and_the_search_page() {
+    let loaded = Settings::load_str(
+        r#"<y-pop><search><group name="G"><app name="a" exe="a.exe"/></group></search><group name="T"/></y-pop>"#,
+        &mut Vec::<Variable>::new(),
+    )
+    .expect("valid");
+    let mut app = test_app(loaded);
+
+    app.apply_request(y_pop::ipc::Request::Select("s/0/0".to_owned()));
+    let Screen::SearchOnly(group) = app.screen else {
+        panic!("{:?}", app.screen);
+    };
+    let (_, wanted) = roots::resolve_path(settings(&app), "s/0/0").expect("there");
+    assert_eq!(app.selected(group), wanted);
+
+    app.apply_request(y_pop::ipc::Request::Select("search".to_owned()));
+    assert_eq!(app.screen, Screen::Search);
 }

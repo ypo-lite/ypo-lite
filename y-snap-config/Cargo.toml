@@ -10,3 +10,6 @@ windows-reactor = { workspace = true }
 y-core = { workspace = true }
 ui-kit = { workspace = true }
 y-snap = { path = "../y-snap" }
+
+[build-dependencies]
+y-core = { path = "../core", default-features = false, features = ["build"] }

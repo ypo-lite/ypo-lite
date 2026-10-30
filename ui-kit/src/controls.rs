@@ -14,7 +14,7 @@
 
 use crate::layout::{Fill, Stack, cell};
 use crate::text;
-use crate::tokens::{font, radius, size, space};
+use crate::tokens::{emphasis, font, radius, size, space};
 use windows_reactor::*;
 
 /// A dropdown over plain strings, reporting the chosen index.
@@ -107,9 +107,15 @@ pub fn text_box(
 /// and a `null` `OnContent` is precisely what makes WinUI fall back to its
 /// localized default text ("Activé"/"Désactivé"), which then got cropped.
 pub fn switch(is_on: bool, on_toggle: Callback<bool>) -> View {
+    switch_enabled(is_on, true, on_toggle)
+}
+
+/// A [`switch`] that can be greyed out; say why next to it.
+pub fn switch_enabled(is_on: bool, enabled: bool, on_toggle: Callback<bool>) -> View {
     let nothing = || -> View { Border::new().width(0.0).height(0.0).into() };
     ToggleSwitch::new()
         .is_on(is_on)
+        .is_enabled(enabled)
         .on_toggled(on_toggle)
         .min_width(0.0)
         .fill()
@@ -254,6 +260,9 @@ pub const TWO_ICON_BUTTONS: f64 = 2.0 * size::ICON_BUTTON + space::XS;
 /// [`icon_button`] (↑ ↓ and delete, always visible).
 pub const THREE_ICON_BUTTONS: f64 = 3.0 * size::ICON_BUTTON + 2.0 * space::XS;
 
+/// Four [`icon_button`]s side by side, for an actions column.
+pub const FOUR_ICON_BUTTONS: f64 = 4.0 * size::ICON_BUTTON + 3.0 * space::XS;
+
 /// The "Reorder" toggle beside a list's add button. While on, rows show
 /// [`move_buttons`] instead of their usual actions; Accent marks the mode,
 /// and the label says how to leave it.
@@ -311,8 +320,13 @@ pub fn field(label: &str, control: impl Into<View>) -> View {
         .into()
 }
 
-/// A key combination as keycaps: `[Ctrl] [Alt] [F5]`. `large` is the
-/// picker's readout; the default size fits inside a table row's button.
+/// A key combination as keycaps: `[Ctrl] + [Alt] + [F5]`, the `+` saying they
+/// are one combination. `large` is the picker's readout; the default size fits
+/// inside a table row's button.
+///
+/// Caps are centred, not left to stretch: a horizontal stack gives its children
+/// the height of the tallest, so beside a button a cap would grow with its text
+/// left at the top.
 pub fn keycaps(keys: &[String], large: bool) -> View {
     let (font_size, padding) = if large {
         (font::BODY_LARGE, Thickness::xy(space::M, space::XS))
@@ -320,29 +334,77 @@ pub fn keycaps(keys: &[String], large: bool) -> View {
         (font::CAPTION, Thickness::xy(space::S, 1.0))
     };
 
-    Stack::horizontal(space::XS)
-        .children(keys.iter().enumerate().map(|(index, key)| {
-            // A thicker bottom edge is what makes a box read as a key.
-            let cap: View = Border::new()
-                .padding(padding.clone())
-                .corner_radius(CornerRadius::uniform(radius::CONTROL))
-                .border_thickness(Thickness::new(
-                    size::STROKE,
-                    size::STROKE,
-                    size::STROKE,
-                    2.0 * size::STROKE,
-                ))
-                .border_brush(ThemeBrush::CardStroke)
-                .background(ThemeBrush::CardBackground)
-                .content(
-                    TextBlock::new()
-                        .text(key.clone())
-                        .font_size(font_size)
-                        .font_weight(FontWeight::SEMI_BOLD),
-                );
-            (index, cap)
-        }))
-        .into()
+    let mut caps = Stack::horizontal(space::XS);
+    for (index, key) in keys.iter().enumerate() {
+        if index > 0 {
+            caps = caps.child(
+                format!("plus{index}"),
+                TextBlock::new()
+                    .text("+")
+                    .font_size(font_size)
+                    .opacity(emphasis::MUTED)
+                    .vertical_alignment(VerticalAlignment::Center),
+            );
+        }
+        // A thicker bottom edge is what makes a box read as a key.
+        let cap = Border::new()
+            .padding(padding.clone())
+            .corner_radius(CornerRadius::uniform(radius::CONTROL))
+            .border_thickness(Thickness::new(
+                size::STROKE,
+                size::STROKE,
+                size::STROKE,
+                2.0 * size::STROKE,
+            ))
+            .border_brush(ThemeBrush::CardStroke)
+            .background(ThemeBrush::CardBackground)
+            .vertical_alignment(VerticalAlignment::Center)
+            .content(
+                TextBlock::new()
+                    .text(key.clone())
+                    .font_size(font_size)
+                    .font_weight(FontWeight::SEMI_BOLD)
+                    .vertical_alignment(VerticalAlignment::Center),
+            );
+        caps = caps.child(format!("cap{index}"), cap);
+    }
+    caps.into()
+}
+
+/// What can be chosen as a key, where one is shown: `shown` (usually
+/// [`keycaps`]) on a button that opens the picker, filling the width so the
+/// optional ✕ `clear` — tooltip, enabled, what it does — ends up at the same
+/// place down a list, whatever the combination's length. Greyed rather than
+/// hidden when there is nothing to clear, for the same reason.
+pub fn key_field(
+    shown: View,
+    tooltip: &str,
+    on_open: Callback<()>,
+    clear: Option<(&str, bool, Callback<()>)>,
+) -> View {
+    let open: View = Button::new()
+        .fill()
+        .horizontal_content_alignment(HorizontalAlignment::Left)
+        .on_click(on_open)
+        .content(shown)
+        .tooltip(tooltip);
+    let Some((clear_tooltip, enabled, on_clear)) = clear else {
+        return open;
+    };
+    Grid::new()
+        .columns([GridLength::STAR, GridLength::Auto])
+        .column_spacing(space::XS)
+        .keyed_children([
+            ("open", cell(open, 0, 0)),
+            (
+                "clear",
+                cell(
+                    icon_button_enabled(Symbol::Cancel, clear_tooltip, enabled, on_clear),
+                    0,
+                    1,
+                ),
+            ),
+        ])
 }
 
 /// A small filled circle — a status light.

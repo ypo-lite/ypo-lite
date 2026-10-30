@@ -401,10 +401,22 @@ fn folder(
         ),
     );
 
-    AutoGrid::new(220.0)
-        .max_columns(3)
-        .item("filter", filter)
-        .item("depth", depth_box)
-        .item("open", open)
-        .build(viewport)
+    let index = labeled_switch(
+        "Search inside it with / even on a network share (otherwise only local folders are listed)",
+        app.index,
+        context.callback(move |on| Msg::Menu(MenuMsg::Flag(id, FlagField::Index, on))),
+    );
+
+    Stack::vertical(space::M)
+        .child(
+            "grid",
+            AutoGrid::new(220.0)
+                .max_columns(3)
+                .item("filter", filter)
+                .item("depth", depth_box)
+                .item("open", open)
+                .build(viewport),
+        )
+        .child("index", index)
+        .into()
 }

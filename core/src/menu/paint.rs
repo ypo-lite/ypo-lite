@@ -45,7 +45,9 @@ use windows::Win32::UI::Controls::{
 
 use crate::overlay::Color;
 
-use super::{EdgeRule, Fill, Gradient, GradientDirection, ItemData, ItemKind, MenuDesign};
+use super::{
+    EdgeRule, Fill, Gradient, GradientDirection, ItemData, ItemKind, MenuDesign, SeparatorSpan,
+};
 
 /// The icon size every themed row's icon draws at, and the width reserved
 /// for it on *every* `Normal` row regardless of whether that particular
@@ -209,20 +211,39 @@ pub fn handle_draw_item(lparam: LPARAM) -> bool {
     // `base`/`text_color` match above already does for the row's fill).
     let idle = !selected || disabled;
 
+    // Where a normal row's icon column ends. Worked out from the design, not
+    // this row's `content_rect`: a separator has no padding or margin, and
+    // its line has to meet the column the normal rows around it draw.
+    let design = &data.design;
+    let column_end = icon_column_end(
+        item.rcItem.left + (design.padding + design.border.size + design.margin) as i32,
+    );
+    // The icon column doesn't run through a separator whose line spans the
+    // row: every titled one, and an untitled one if the design says so.
+    let has_column = match data.kind {
+        ItemKind::Normal => true,
+        ItemKind::Separator => {
+            data.text.is_empty() && data.design.separator == SeparatorSpan::AfterIcons
+        }
+    };
+
     if selected && !disabled {
         paint_selected_row(hdc, cell, &data.design);
     } else {
         fill_solid(hdc, cell, base);
         if idle
-            && matches!(data.kind, ItemKind::Normal)
+            && has_column
             && let Some(icon_backdrop) = data.design.icon_backdrop
         {
-            paint_icon_backdrop(hdc, cell, content_rect, icon_backdrop);
+            paint_icon_backdrop(hdc, cell, column_end, icon_backdrop);
         }
     }
 
     match data.kind {
-        ItemKind::Separator => draw_separator(hdc, content_rect, data, text_color),
+        ItemKind::Separator => {
+            let column = has_column.then_some(column_end);
+            draw_separator(hdc, content_rect, data, text_color, column, idle)
+        }
         ItemKind::Normal => {
             draw_normal_item(hdc, content_rect, item.rcItem, data, text_color, idle)
         }
@@ -353,23 +374,34 @@ fn edge_rule_draws(rule: EdgeRule, idle: bool) -> bool {
 /// [`MenuDesign::icon_backdrop`]'s extra fill, idle rows only — PortAL's own
 /// `icon_gradiant` (`menu.cpp::OnDrawItem`): a rect from the row's own left
 /// edge (`cell`, the same rect the plain base fill it paints over just
-/// used) out to just past the icon/text boundary — `content_rect.left +
-/// TEXT_PAD + ICON_SIZE + ICON_GAP / 2` is that boundary (see
-/// `draw_normal_item`'s own `icon_end` for the identical computation, used
-/// there to place [`MenuDesign::edge`]'s rule), `+ 2` more to bleed past it
-/// the same amount PortAL's own `iconSize.cx + 18` does (`+16` for the
-/// boundary itself, `+2` further) — confirmed by reading `menu.cpp`, not
-/// guessed. Drawn *before* [`draw_normal_item`] so the icon/text/arrow it
-/// goes on to draw land on top, same order PortAL's own call site uses.
-fn paint_icon_backdrop(hdc: HDC, cell: RECT, content_rect: RECT, gradient: Gradient) {
-    let icon_end = content_rect.left + TEXT_PAD + ICON_SIZE + ICON_GAP / 2 + 2;
+/// used) out to just past the icon/text boundary — [`icon_column_end`],
+/// `+ 2` more to bleed past it the same amount PortAL's own
+/// `iconSize.cx + 18` does (`+16` for the boundary itself, `+2` further) —
+/// confirmed by reading `menu.cpp`, not guessed. Drawn *before*
+/// [`draw_normal_item`] so the icon/text/arrow it goes on to draw land on
+/// top, same order PortAL's own call site uses.
+fn paint_icon_backdrop(hdc: HDC, cell: RECT, column_end: i32, gradient: Gradient) {
     let rect = RECT {
         left: cell.left,
         top: cell.top,
-        right: icon_end.min(cell.right),
+        right: (column_end + 2).min(cell.right),
         bottom: cell.bottom,
     };
     fill_gradient(hdc, rect, gradient);
+}
+
+/// The icon/text boundary of a row whose content starts at `content_left`:
+/// where [`MenuDesign::edge`]'s rule goes, the midpoint of the icon/text gap.
+fn icon_column_end(content_left: i32) -> i32 {
+    content_left + TEXT_PAD + ICON_SIZE + ICON_GAP / 2
+}
+
+/// [`MenuDesign::edge`]'s rule at `x`, over `rect`'s height.
+fn draw_edge_rule(hdc: HDC, x: i32, rect: RECT) {
+    let mut bar = RECT { left: x, ..rect };
+    unsafe {
+        let _ = DrawEdge(hdc, &mut bar, EDGE_ETCHED, BF_LEFT);
+    }
 }
 
 /// The clip region's bounding rect, backed up before [`set_round_clip`]
@@ -454,7 +486,6 @@ fn draw_normal_item(
         let y = rect.top + ((rect.bottom - rect.top) - h) / 2;
         blit_icon(hdc, text_rect.left, y, w, h, bitmap);
     }
-    let icon_end = text_rect.left + ICON_SIZE;
     text_rect.left += ICON_SIZE + ICON_GAP;
 
     // A vertical rule between the icon column and the text — see
@@ -462,23 +493,11 @@ fn draw_normal_item(
     // and why the config-facing names (`Idle`/`Hover`/`Always`) aren't
     // PortAL's own `_SEL`/`_UNSEL`. Positioned at the midpoint of the
     // icon/text gap, same as PortAL's own `iconSize.cx + 16` (`menu.cpp`,
-    // confirmed by reading it) — `icon_end` here already *is* PortAL's
-    // `iconSize.cx` term (both measured from the row's own left edge),
-    // `+ ICON_GAP / 2` the other half of their `+ 16` (`ICON_GAP == 16`,
-    // see its own doc comment).
+    // confirmed by reading it).
     if let Some(rule) = data.design.edge
         && edge_rule_draws(rule, idle)
     {
-        let x = icon_end + ICON_GAP / 2;
-        let mut bar = RECT {
-            left: x,
-            top: rect.top,
-            right: rect.right,
-            bottom: rect.bottom,
-        };
-        unsafe {
-            let _ = DrawEdge(hdc, &mut bar, EDGE_ETCHED, BF_LEFT);
-        }
+        draw_edge_rule(hdc, icon_column_end(rect.left), rect);
     }
 
     if data.submenu {
@@ -552,12 +571,27 @@ fn draw_normal_item(
 /// PortAL's own separator look (`menu.cpp::OnDrawItem`'s `MENU_SEP`/
 /// `MENU_TITLE` branches, confirmed by reading them): an `EDGE_ETCHED`
 /// groove — the same two-tone line a plain, non-owner-draw `MF_SEPARATOR`
-/// gets from Windows for free — spanning the row when untitled, or split
-/// either side of the centred title when not.
-fn draw_separator(hdc: HDC, rect: RECT, data: &ItemData, text_color: Color) {
+/// gets from Windows for free. With a `column` (where the icon column ends) it
+/// starts just past it, PortAL's `iconSize.cx + 17`, and that column's rule
+/// carries on through it. Without, it spans the row, split either side of the
+/// centred title if there is one.
+fn draw_separator(
+    hdc: HDC,
+    rect: RECT,
+    data: &ItemData,
+    text_color: Color,
+    column: Option<i32>,
+    idle: bool,
+) {
     if data.text.is_empty() {
+        if let Some(column_end) = column
+            && let Some(rule) = data.design.edge
+            && edge_rule_draws(rule, idle)
+        {
+            draw_edge_rule(hdc, column_end, rect);
+        }
         let mut bar = RECT {
-            left: rect.left + TEXT_PAD,
+            left: column.map_or(rect.left + TEXT_PAD, |column_end| column_end + 1),
             right: rect.right - TEXT_PAD,
             top: (rect.top + rect.bottom) / 2,
             bottom: (rect.top + rect.bottom) / 2,
@@ -789,6 +823,7 @@ mod tests {
             padding: 0,
             margin: 0,
             edge: None,
+            separator: SeparatorSpan::AfterIcons,
             icon_backdrop: None,
         }
     }
@@ -975,6 +1010,7 @@ mod tests {
     fn a_themed_item_with_an_edge_rule_and_icon_backdrop_draws_without_a_live_popup() {
         let design = MenuDesign {
             edge: Some(EdgeRule::Always),
+            separator: SeparatorSpan::AfterIcons,
             icon_backdrop: Some(Gradient {
                 direction: GradientDirection::Horizontal,
                 start: Color::rgb(255, 217, 150),

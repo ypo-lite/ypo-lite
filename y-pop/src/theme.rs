@@ -35,6 +35,12 @@ pub enum Theme {
     Flat,
     /// PortAL's `dark`/`black` skin.
     Dark,
+    /// y-pop's own: neutral dark, a soft rounded hover.
+    Graphite,
+    /// y-pop's own: deep navy, a saturated blue hover.
+    Midnight,
+    /// y-pop's own: warm light, a golden hover.
+    Sand,
     /// Follows `AppsUseLightTheme`, resolved live each time a popup opens
     /// (not cached at load) — same reasoning `y-snap`'s own `"auto"` uses.
     /// Resolves to [`Theme::Default`] or [`Theme::Dark`] — `Flat` has no
@@ -80,6 +86,8 @@ pub struct ThemeOverrides {
     /// for why this uses those three names rather than PortAL's own
     /// `edge="true"|"sel"|"unsel"`.
     pub edge: Option<EdgeRule>,
+    /// `separator="after-icons"|"full"` — see [`SeparatorSpan`].
+    pub separator: Option<SeparatorSpan>,
     /// `<icon-gradient start="" end="" direction=""/>`, a child of `<skin>`
     /// — PortAL's own `<icon color="a:b" direction="h|v">` (`xmlconfig.cpp`'s
     /// `loadMenuSkin`), reshaped to match `<background-gradient>`'s own
@@ -108,6 +116,15 @@ pub enum EdgeRule {
     Idle,
     Hover,
     Always,
+}
+
+/// `separator="after-icons"|"full"` on `<skin>`: where an untitled separator's
+/// line starts. Mirrors [`y_core::menu::SeparatorSpan`], the same split as
+/// [`EdgeRule`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SeparatorSpan {
+    AfterIcons,
+    Full,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -152,7 +169,42 @@ impl ThemeOverrides {
             || self.border.is_some()
             || self.background_gradient.is_some()
             || self.edge.is_some()
+            || self.separator.is_some()
             || self.icon_gradient.is_some()
+    }
+
+    /// What the search window takes from a `<skin>`: its colours and border.
+    /// Row spacing, edge rules, separators and the two gradients are about
+    /// menu rows, and the window has no such thing. (Its selected row is solid
+    /// on purpose: hover text only has to read on one colour.)
+    pub fn for_search(&self) -> Self {
+        Self {
+            back: self.back,
+            text: self.text,
+            hover_back: self.hover_back,
+            hover_text: self.hover_text,
+            disabled_text: self.disabled_text,
+            border: self.border,
+            ..Self::default()
+        }
+    }
+
+    /// The names of what is set here and [`ThemeOverrides::for_search`] drops.
+    pub fn ignored_by_search(&self) -> Vec<&'static str> {
+        [
+            (self.padding.is_some(), "padding"),
+            (self.margin.is_some(), "margin"),
+            (self.edge.is_some(), "edge"),
+            (self.separator.is_some(), "separator"),
+            (
+                self.background_gradient.is_some(),
+                "<background-gradient>",
+            ),
+            (self.icon_gradient.is_some(), "<icon-gradient>"),
+        ]
+        .into_iter()
+        .filter_map(|(set, name)| set.then_some(name))
+        .collect()
     }
 }
 
@@ -172,6 +224,9 @@ impl Reader<'_> {
             "default" => Some(Theme::Default),
             "flat" => Some(Theme::Flat),
             "dark" | "black" => Some(Theme::Dark),
+            "graphite" => Some(Theme::Graphite),
+            "midnight" => Some(Theme::Midnight),
+            "sand" => Some(Theme::Sand),
             "auto" => Some(Theme::Auto),
             other => {
                 self.warn(element, format!("unknown theme {other:?}"));
@@ -211,6 +266,7 @@ impl Reader<'_> {
                 "padding",
                 "margin",
                 "edge",
+                "separator",
             ],
         );
 
@@ -260,6 +316,16 @@ impl Reader<'_> {
             Some("always") => Some(EdgeRule::Always),
             Some(other) => {
                 self.warn(skin, format!("unknown edge {other:?}"));
+                None
+            }
+        };
+
+        overrides.separator = match skin.attr("separator") {
+            None => None,
+            Some("after-icons") => Some(SeparatorSpan::AfterIcons),
+            Some("full") => Some(SeparatorSpan::Full),
+            Some(other) => {
+                self.warn(skin, format!("unknown separator {other:?}"));
                 None
             }
         };
@@ -399,6 +465,9 @@ mod tests {
             ("flat", Theme::Flat),
             ("dark", Theme::Dark),
             ("black", Theme::Dark),
+            ("graphite", Theme::Graphite),
+            ("midnight", Theme::Midnight),
+            ("sand", Theme::Sand),
             ("auto", Theme::Auto),
         ] {
             let xml = format!(r#"<y-pop theme="{value}"><quit/></y-pop>"#);
@@ -578,6 +647,25 @@ mod tests {
                 tree.defaults.theme_overrides.edge,
                 Some(expected),
                 "edge={value:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn separator_is_read_off_skin_directly() {
+        for (value, expected) in [
+            ("after-icons", Some(SeparatorSpan::AfterIcons)),
+            ("full", Some(SeparatorSpan::Full)),
+            ("nope", None),
+        ] {
+            let xml = format!(r#"<y-pop><skin separator="{value}"/><quit/></y-pop>"#);
+            let tree = load_str(&xml, &mut builtins()).expect("valid");
+            assert_eq!(tree.defaults.theme_overrides.separator, expected);
+            assert_eq!(
+                tree.warnings.is_empty(),
+                expected.is_some(),
+                "{:?}",
+                tree.warnings
             );
         }
     }

@@ -1,7 +1,9 @@
-//! The Skin screen's pictures of a menu: the five theme cards and the live
-//! preview. Each is drawn by `y_core::menu::preview`, which runs the real
-//! owner-draw painter, so they match what y-pop shows (minus the system's
-//! popup chrome — see that module).
+//! The Skin screen's pictures: the theme cards and the live preview, of a
+//! menu or of the search window, whichever look is being edited. A menu is
+//! drawn by `y_core::menu::preview`, which runs the real owner-draw painter,
+//! so it matches what y-pop shows (minus the system's popup chrome — see that
+//! module); the search window by `y_pop::search::preview`, on the window's
+//! own layout, colours and frame.
 //!
 //! `windows-reactor`'s `Brush` has no gradients, so these can't be built
 //! from controls; they are PNGs, rendered when the design they show changes
@@ -12,9 +14,10 @@ use windows_reactor::EncodedImage;
 use y_core::menu::preview::{Bitmap, PreviewRow, render_menu};
 use y_core::menu::{Border, ColorPair, Fill, MenuDesign};
 use y_core::overlay::Color;
+use y_pop::search::preview::{self as search_preview, Sample};
 use y_pop::theme::{Theme, ThemeOverrides};
 
-use crate::skin;
+use crate::skin::{self, Scope};
 
 /// A rendered picture and its size on screen, in DIPs (the picture is made
 /// at the system DPI, so 1 pixel is `96 / dpi` DIPs).
@@ -34,22 +37,30 @@ struct Cached<K> {
 
 #[derive(Default)]
 pub struct Previews {
-    cards: Vec<Cached<(Theme, bool)>>,
-    main: Option<Cached<(Theme, ThemeOverrides, bool)>>,
+    cards: Vec<Cached<(Theme, Scope, bool)>>,
+    main: Option<Cached<(Theme, ThemeOverrides, Scope, bool)>>,
 }
 
 impl Previews {
-    /// The small menu on a theme's card.
-    pub fn card(&mut self, theme: Theme) -> Option<Picture> {
-        let key = (theme, y_core::theme::is_dark());
+    /// The small picture on a theme's card.
+    pub fn card(&mut self, theme: Theme, scope: Scope) -> Option<Picture> {
+        let key = (theme, scope, y_core::theme::is_dark());
         if let Some(cached) = self.cards.iter().find(|cached| cached.key == key) {
             return cached.picture.clone();
         }
-        let design = match theme {
-            Theme::Native => native_look(),
-            _ => skin::base_design(theme),
+        let picture = match scope {
+            Scope::Menus => {
+                let design = match theme {
+                    Theme::Native => native_look(),
+                    _ => skin::base_design(theme),
+                };
+                draw(design, &card_rows(), None)
+            }
+            Scope::Search => {
+                let design = skin::resolved(theme, ThemeOverrides::default());
+                draw_search(design, Sample::Card)
+            }
         };
-        let picture = draw(design, &card_rows(), None);
         self.cards.push(Cached {
             key,
             picture: picture.clone(),
@@ -57,22 +68,32 @@ impl Previews {
         picture
     }
 
-    /// The big menu of the preview: the theme with the overrides on top.
-    /// `None` for Native with nothing overridden — Windows draws that one.
-    pub fn main(&mut self, theme: Theme, overrides: ThemeOverrides) -> Option<Picture> {
-        let key = (theme, overrides, y_core::theme::is_dark());
+    /// The big picture of the preview: the theme with the overrides on top.
+    /// `None` for a menu on Native with nothing overridden — Windows draws
+    /// that one. The search window is always y-pop's to draw.
+    pub fn main(
+        &mut self,
+        theme: Theme,
+        overrides: ThemeOverrides,
+        scope: Scope,
+    ) -> Option<Picture> {
+        let key = (theme, overrides, scope, y_core::theme::is_dark());
         if let Some(cached) = &self.main
             && cached.key == key
         {
             return cached.picture.clone();
         }
-        let picture = skin::resolved(theme, overrides).and_then(|design| {
-            draw(
-                design,
-                &sample_rows(),
-                Some((SUBMENU_PARENT, &submenu_rows())),
-            )
-        });
+        let design = skin::resolved(theme, overrides);
+        let picture = match scope {
+            Scope::Menus => design.and_then(|design| {
+                draw(
+                    design,
+                    &sample_rows(),
+                    Some((SUBMENU_PARENT, &submenu_rows())),
+                )
+            }),
+            Scope::Search => draw_search(design, Sample::Window),
+        };
         self.main = Some(Cached {
             key,
             picture: picture.clone(),
@@ -107,6 +128,7 @@ fn native_look() -> MenuDesign {
         padding: 0,
         margin: 0,
         edge: None,
+        separator: y_core::menu::SeparatorSpan::AfterIcons,
         icon_backdrop: None,
     }
 }
@@ -173,6 +195,17 @@ fn draw(
         canvas = wide;
     }
 
+    encode(&canvas)
+}
+
+/// The search window painted with `design` (`None`: `theme="native"`), as a
+/// PNG.
+fn draw_search(design: Option<MenuDesign>, sample: Sample) -> Option<Picture> {
+    let scale = dpi() as f32 / 96.0;
+    encode(&search_preview::render(design, scale, sample)?)
+}
+
+fn encode(canvas: &Bitmap) -> Option<Picture> {
     let png = y_core::png::encode_rgba(canvas.width, canvas.height, &canvas.rgba);
     if png.is_empty() {
         return None;
@@ -199,16 +232,32 @@ mod tests {
         let mut previews = Previews::default();
         assert!(
             previews
-                .main(Theme::Native, ThemeOverrides::default())
+                .main(Theme::Native, ThemeOverrides::default(), Scope::Menus)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn the_search_window_is_previewed_as_itself_even_on_native() {
+        let mut previews = Previews::default();
+        let window = previews
+            .main(Theme::Native, ThemeOverrides::default(), Scope::Search)
+            .expect("y-pop draws the window");
+        let menu = previews
+            .main(Theme::Dark, ThemeOverrides::default(), Scope::Menus)
+            .expect("drawn");
+        assert!(window.width > menu.width, "560 pixels wide, not a menu");
+        let again = previews
+            .main(Theme::Dark, ThemeOverrides::default(), Scope::Search)
+            .expect("drawn");
+        assert!(again.width > menu.width, "the scope is part of the key");
     }
 
     #[test]
     fn a_themed_preview_is_drawn_and_reused_until_its_design_changes() {
         let mut previews = Previews::default();
         let first = previews
-            .main(Theme::Dark, ThemeOverrides::default())
+            .main(Theme::Dark, ThemeOverrides::default(), Scope::Menus)
             .expect("drawn");
         assert!(first.width > 0.0 && first.height > 0.0);
         assert!(previews.main.is_some());
@@ -217,7 +266,9 @@ mod tests {
             padding: Some(3),
             ..ThemeOverrides::default()
         };
-        let taller = previews.main(Theme::Dark, overrides).expect("drawn");
+        let taller = previews
+            .main(Theme::Dark, overrides, Scope::Menus)
+            .expect("drawn");
         assert!(
             taller.height > first.height,
             "row gaps make the menu taller"
@@ -227,17 +278,13 @@ mod tests {
     #[test]
     fn every_theme_has_a_card() {
         let mut previews = Previews::default();
-        for theme in [
-            Theme::Native,
-            Theme::Default,
-            Theme::Flat,
-            Theme::Dark,
-            Theme::Auto,
-        ] {
-            assert!(previews.card(theme).is_some(), "{theme:?}");
+        for scope in [Scope::Menus, Scope::Search] {
+            for theme in skin::THEMES {
+                assert!(previews.card(theme, scope).is_some(), "{theme:?}");
+            }
         }
-        assert_eq!(previews.cards.len(), 5);
-        previews.card(Theme::Flat);
-        assert_eq!(previews.cards.len(), 5, "drawn once");
+        assert_eq!(previews.cards.len(), 2 * skin::THEMES.len());
+        previews.card(Theme::Flat, Scope::Search);
+        assert_eq!(previews.cards.len(), 2 * skin::THEMES.len(), "drawn once");
     }
 }

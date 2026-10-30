@@ -266,7 +266,7 @@ fn usage_text(settings: &Settings, users: &[UsedIn]) -> String {
         .map(|used| match used {
             UsedIn::Item { id, field } => {
                 let name = settings
-                    .items()
+                    .all_items()
                     .find(|item| item.id == *id)
                     .map(crate::roots::label)
                     .unwrap_or_default();

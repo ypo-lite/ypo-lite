@@ -260,6 +260,11 @@ pub fn label(key: VIRTUAL_KEY) -> String {
 /// contains it (case-insensitive), as `"label — Category"` strings for the
 /// suggestion list. Empty query, no suggestions.
 pub fn search(query: &str) -> Vec<String> {
+    search_among(query, |_| true)
+}
+
+/// [`search`], over the keys `allows` accepts.
+pub fn search_among(query: &str, allows: fn(VIRTUAL_KEY) -> bool) -> Vec<String> {
     let query = query.trim().to_lowercase();
     if query.is_empty() {
         return Vec::new();
@@ -275,6 +280,7 @@ pub fn search(query: &str) -> Vec<String> {
         .filter(|(_, (label, name))| {
             label.to_lowercase().contains(&query) || name.to_lowercase().contains(&query)
         })
+        .filter(|(_, (_, name))| key_from_name(name).is_some_and(allows))
         .map(|(category, (label, _))| suggestion(label, category))
         .take(12)
         .collect()

@@ -15,7 +15,6 @@ use y_pop::settings::{Item, ItemId, ItemKind, Settings};
 use crate::menu_edit::{DropTarget, MenuMsg};
 use crate::start_menu::Source;
 use crate::tree::{self, NewKind, TreeRowKind};
-use crate::ui::key_picker::KeyPickerUi;
 use crate::ui::prelude::*;
 use crate::{ConfigApp, Msg, roots};
 use windows_reactor::*;
@@ -39,16 +38,6 @@ pub struct MenuUi<'a> {
     pub icons: &'a crate::app_icons::IconStore,
     /// "Delete this tray menu?" is waiting for an answer.
     pub confirming_delete: bool,
-}
-
-/// The hotkey picker dialog: which hotkey (item, position) it is open on, if any,
-/// the text that hotkey had when it opened (what Cancel restores), and
-/// the picker's own category and search. Not saved; one picker at a time.
-#[derive(Default)]
-pub struct HotkeyUi {
-    pub open: Option<(ItemId, usize)>,
-    pub original: String,
-    pub picker: KeyPickerUi,
 }
 
 /// Each level of nesting indents a row by this much.
@@ -696,7 +685,7 @@ fn programs_in_menu(
 ) -> HashSet<String> {
     let mut builtins = builtins.borrow_mut();
     settings
-        .items()
+        .all_items()
         .filter(|item| tree::is_inside(settings, root, item.id))
         .filter_map(|item| match &item.kind {
             ItemKind::App(app) => match (&app.app_id, &app.exe) {

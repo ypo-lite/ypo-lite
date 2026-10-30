@@ -20,7 +20,10 @@ pub enum LastScreen {
     General,
     Skin,
     Variables,
+    Search,
     Menu(usize),
+    /// Among the search-only groups and folders.
+    SearchOnly(usize),
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -87,7 +90,11 @@ impl LastScreen {
             "general" => Some(Self::General),
             "skin" => Some(Self::Skin),
             "variables" => Some(Self::Variables),
-            other => other.strip_prefix("menu:")?.parse().ok().map(Self::Menu),
+            "search" => Some(Self::Search),
+            other => match other.strip_prefix("only:") {
+                Some(position) => position.parse().ok().map(Self::SearchOnly),
+                None => other.strip_prefix("menu:")?.parse().ok().map(Self::Menu),
+            },
         }
     }
 
@@ -96,7 +103,9 @@ impl LastScreen {
             Self::General => "general".to_owned(),
             Self::Skin => "skin".to_owned(),
             Self::Variables => "variables".to_owned(),
+            Self::Search => "search".to_owned(),
             Self::Menu(position) => format!("menu:{position}"),
+            Self::SearchOnly(position) => format!("only:{position}"),
         }
     }
 }
@@ -122,8 +131,11 @@ mod tests {
             LastScreen::General,
             LastScreen::Skin,
             LastScreen::Variables,
+            LastScreen::Search,
             LastScreen::Menu(0),
             LastScreen::Menu(7),
+            LastScreen::SearchOnly(0),
+            LastScreen::SearchOnly(3),
         ] {
             let prefs = Prefs {
                 show_comments: false,

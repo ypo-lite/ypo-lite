@@ -32,9 +32,10 @@
 use y_core::menu::{self, Border, ColorPair, Fill, Gradient, MenuDesign};
 use y_core::overlay::Color;
 
+use crate::model::ConfigTree;
 use crate::theme::{
     EdgeRule as ConfigEdgeRule, GradientDirection as ConfigGradientDirection, GradientOverride,
-    Theme, ThemeOverrides,
+    SeparatorSpan as ConfigSeparatorSpan, Theme, ThemeOverrides,
 };
 
 const SYSTEM_LIKE_BASE: ColorPair = ColorPair {
@@ -72,11 +73,19 @@ const FLAT_BORDER: Color = Color::rgb(0xa8, 0xd2, 0xfd);
 const FLAT_SELECTED_BACK: Color = Color::rgb(0xed, 0xf4, 0xfc);
 
 /// PortAL's `default` skin (`menu.cpp`'s `design1`): 1px border, 10px
-/// round, [`BLUE_ACCENT`], system base/selected, a white-to-`BLUE_ACCENT`
-/// vertical hover gradient.
+/// round, [`BLUE_ACCENT`], system base, a white-to-`BLUE_ACCENT` vertical
+/// hover gradient.
+///
+/// `selected` departs from PortAL on purpose, which leaves it `NULL` (system
+/// highlight colours): white text is unreadable on this light gradient. The
+/// back matters too, as the search window paints it solid where a menu
+/// paints the gradient.
 pub const DEFAULT: MenuDesign = MenuDesign {
     base: SYSTEM_LIKE_BASE,
-    selected: SYSTEM_LIKE_SELECTED,
+    selected: ColorPair {
+        text: Color::rgb(0x00, 0x00, 0x00),
+        back: BLUE_ACCENT,
+    },
     disabled_text: SYSTEM_LIKE_DISABLED_TEXT,
     border: Border {
         size: 1,
@@ -94,6 +103,7 @@ pub const DEFAULT: MenuDesign = MenuDesign {
     // (inverted-from-its-name) runtime meaning; see `y_core::menu::
     // EdgeRule`'s own doc comment.
     edge: Some(menu::EdgeRule::Idle),
+    separator: menu::SeparatorSpan::AfterIcons,
     icon_backdrop: None,
 };
 
@@ -117,6 +127,7 @@ pub const FLAT: MenuDesign = MenuDesign {
     margin: 0,
     // `design2.edge = PORTAL_ST_NONE` — no rule at all.
     edge: None,
+    separator: menu::SeparatorSpan::AfterIcons,
     icon_backdrop: None,
 };
 
@@ -148,6 +159,7 @@ pub const DARK: MenuDesign = MenuDesign {
     // same accent gradient in just its icon column that a hovered row
     // shows across its whole cell.
     edge: Some(menu::EdgeRule::Always),
+    separator: menu::SeparatorSpan::AfterIcons,
     icon_backdrop: Some(Gradient {
         direction: menu::GradientDirection::Horizontal,
         start: BLUE_ACCENT,
@@ -155,6 +167,87 @@ pub const DARK: MenuDesign = MenuDesign {
     }),
     padding: 0,
     margin: 0,
+};
+
+/// y-pop's own `graphite` skin, not one of PortAL's: the neutral dark of a
+/// Windows 11 menu, with a soft rounded hover floating between the rows.
+pub const GRAPHITE: MenuDesign = MenuDesign {
+    base: ColorPair {
+        text: Color::rgb(0xf3, 0xf3, 0xf3),
+        back: Color::rgb(0x2b, 0x2b, 0x2b),
+    },
+    selected: ColorPair {
+        text: Color::rgb(0xff, 0xff, 0xff),
+        back: Color::rgb(0x40, 0x40, 0x40),
+    },
+    disabled_text: Color::rgb(0x8a, 0x8a, 0x8a),
+    border: Border {
+        size: 0,
+        round: 6,
+        color: Color::rgb(0x4a, 0x4a, 0x4a),
+    },
+    fill: Fill::Solid,
+    padding: 2,
+    margin: 0,
+    edge: None,
+    separator: menu::SeparatorSpan::AfterIcons,
+    icon_backdrop: None,
+};
+
+/// y-pop's own `midnight` skin: deep navy, with a saturated blue hover.
+pub const MIDNIGHT: MenuDesign = MenuDesign {
+    base: ColorPair {
+        text: Color::rgb(0xe6, 0xed, 0xf7),
+        back: Color::rgb(0x14, 0x1b, 0x2d),
+    },
+    selected: ColorPair {
+        text: Color::rgb(0xff, 0xff, 0xff),
+        back: Color::rgb(0x25, 0x63, 0xeb),
+    },
+    disabled_text: Color::rgb(0x7b, 0x88, 0xa1),
+    border: Border {
+        size: 0,
+        round: 6,
+        color: Color::rgb(0x2a, 0x35, 0x50),
+    },
+    fill: Fill::Gradient(Gradient {
+        direction: menu::GradientDirection::Horizontal,
+        start: Color::rgb(0x25, 0x63, 0xeb),
+        end: Color::rgb(0x1e, 0x40, 0xaf),
+    }),
+    padding: 2,
+    margin: 0,
+    edge: None,
+    separator: menu::SeparatorSpan::AfterIcons,
+    icon_backdrop: None,
+};
+
+/// y-pop's own `sand` skin: warm paper, with a golden hover.
+pub const SAND: MenuDesign = MenuDesign {
+    base: ColorPair {
+        text: Color::rgb(0x3b, 0x2f, 0x20),
+        back: Color::rgb(0xfb, 0xf6, 0xec),
+    },
+    selected: ColorPair {
+        text: Color::rgb(0x2b, 0x21, 0x14),
+        back: Color::rgb(0xf3, 0xdf, 0xb8),
+    },
+    disabled_text: Color::rgb(0x8c, 0x7f, 0x6b),
+    border: Border {
+        size: 1,
+        round: 6,
+        color: Color::rgb(0xd9, 0xb8, 0x77),
+    },
+    fill: Fill::Gradient(Gradient {
+        direction: menu::GradientDirection::Vertical,
+        start: Color::rgb(0xff, 0xf3, 0xdc),
+        end: Color::rgb(0xef, 0xd1, 0x9a),
+    }),
+    padding: 2,
+    margin: 0,
+    edge: None,
+    separator: menu::SeparatorSpan::AfterIcons,
+    icon_backdrop: None,
 };
 
 /// [`Theme`] + [`ThemeOverrides`] → `Option<MenuDesign>` — `None` means
@@ -182,6 +275,9 @@ pub fn resolve_design(theme: Theme, overrides: ThemeOverrides) -> Option<MenuDes
         Theme::Default => DEFAULT,
         Theme::Flat => FLAT,
         Theme::Dark => DARK,
+        Theme::Graphite => GRAPHITE,
+        Theme::Midnight => MIDNIGHT,
+        Theme::Sand => SAND,
         Theme::Auto if y_core::theme::is_dark() => DARK,
         Theme::Auto => DEFAULT,
     };
@@ -210,11 +306,37 @@ pub fn resolve_design(theme: Theme, overrides: ThemeOverrides) -> Option<MenuDes
         padding: overrides.padding.unwrap_or(base.padding),
         margin: overrides.margin.unwrap_or(base.margin),
         edge: overrides.edge.map(convert_edge).or(base.edge),
+        separator: overrides
+            .separator
+            .map_or(base.separator, convert_separator),
         icon_backdrop: overrides
             .icon_gradient
             .map(convert_gradient)
             .or(base.icon_backdrop),
     })
+}
+
+/// The search window's design: its own `theme` and `<skin>` when `<search>`
+/// has either, else the tray menus' ([`resolve_design`]).
+///
+/// The two are not merged. A search `theme` brings no menu `<skin>` with it —
+/// a menu `back-color` written for a light theme would otherwise keep the
+/// window light under `theme="dark"` — and a search `<skin>` replaces the
+/// menus' wholesale, on the menus' theme unless it names its own. Of a search
+/// `<skin>`, only [`ThemeOverrides::for_search`] counts.
+pub fn resolve_search_design(tree: &ConfigTree) -> Option<MenuDesign> {
+    let defaults = &tree.defaults;
+    match tree
+        .search
+        .as_ref()
+        .filter(|search| search.theme.is_some() || search.skin.is_some())
+    {
+        None => resolve_design(defaults.theme, defaults.theme_overrides),
+        Some(search) => resolve_design(
+            search.theme.unwrap_or(defaults.theme),
+            search.skin.unwrap_or_default().for_search(),
+        ),
+    }
 }
 
 fn convert_gradient(g: GradientOverride) -> Gradient {
@@ -225,6 +347,13 @@ fn convert_gradient(g: GradientOverride) -> Gradient {
         },
         start: g.start,
         end: g.end,
+    }
+}
+
+fn convert_separator(span: ConfigSeparatorSpan) -> menu::SeparatorSpan {
+    match span {
+        ConfigSeparatorSpan::AfterIcons => menu::SeparatorSpan::AfterIcons,
+        ConfigSeparatorSpan::Full => menu::SeparatorSpan::Full,
     }
 }
 
@@ -400,6 +529,48 @@ mod tests {
         );
     }
 
+    /// WCAG's contrast ratio, from 1 (none) to 21 (black on white).
+    fn contrast(a: Color, b: Color) -> f32 {
+        fn luminance(color: Color) -> f32 {
+            let channel = |value: u8| {
+                let value = f32::from(value) / 255.0;
+                if value <= 0.04045 {
+                    value / 12.92
+                } else {
+                    ((value + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * channel(color.r) + 0.7152 * channel(color.g) + 0.0722 * channel(color.b)
+        }
+        let (a, b) = (luminance(a), luminance(b));
+        (a.max(b) + 0.05) / (a.min(b) + 0.05)
+    }
+
+    /// A menu paints the fill and the search window paints `selected.back`,
+    /// so hover text has to read on both. `DARK` isn't here: its gradient
+    /// runs from light blue to black, and no one colour reads on both ends.
+    #[test]
+    fn hover_text_reads_on_everything_it_is_drawn_over() {
+        for (name, design) in [
+            ("default", DEFAULT),
+            ("flat", FLAT),
+            ("graphite", GRAPHITE),
+            ("midnight", MIDNIGHT),
+            ("sand", SAND),
+        ] {
+            let mut backs = vec![design.selected.back];
+            if let menu::Fill::Gradient(gradient) = design.fill {
+                backs.extend([gradient.start, gradient.end]);
+            }
+            for back in backs {
+                let ratio = contrast(design.selected.text, back);
+                assert!(ratio >= 4.5, "{name}: {ratio} on {back:?}");
+            }
+            let ratio = contrast(design.base.text, design.base.back);
+            assert!(ratio >= 4.5, "{name}: {ratio} on an idle row");
+        }
+    }
+
     #[test]
     fn an_edge_override_replaces_the_base_themes_edge() {
         let overrides = ThemeOverrides {
@@ -440,5 +611,53 @@ mod tests {
         assert_eq!(icon_backdrop.start, Color::rgb(1, 2, 3));
         assert_eq!(icon_backdrop.end, Color::rgb(4, 5, 6));
         assert_eq!(icon_backdrop.direction, menu::GradientDirection::Vertical);
+    }
+
+    fn search_back(xml: &str) -> Option<Color> {
+        let tree = crate::config::load_str(xml, &mut Vec::new()).expect("valid");
+        assert!(tree.warnings.is_empty(), "{:?}", tree.warnings);
+        resolve_search_design(&tree).map(|design| design.base.back)
+    }
+
+    #[test]
+    fn search_follows_the_menus_unless_it_says_otherwise() {
+        let menus = r#"theme="flat"><skin back-color="ebebeb"/"#;
+        let light = Some(Color::rgb(0xeb, 0xeb, 0xeb));
+        assert_eq!(
+            search_back(&format!("<y-pop {menus}><search/><quit/></y-pop>")),
+            light
+        );
+    }
+
+    #[test]
+    fn a_search_theme_does_not_inherit_the_menus_skin() {
+        let xml = r#"<y-pop theme="flat"><skin back-color="ebebeb"/>
+            <search theme="graphite"/><quit/></y-pop>"#;
+        assert_eq!(search_back(xml), Some(GRAPHITE.base.back));
+    }
+
+    #[test]
+    fn a_search_skin_replaces_the_menus_skin_on_the_menus_theme() {
+        let xml = r#"<y-pop theme="dark"><skin back-color="ebebeb"/>
+            <search><skin back-color="102030"/></search><quit/></y-pop>"#;
+        assert_eq!(search_back(xml), Some(Color::rgb(0x10, 0x20, 0x30)));
+
+        let xml = r#"<y-pop theme="dark"><skin back-color="ebebeb"/>
+            <search><skin hover-back-color="102030"/></search><quit/></y-pop>"#;
+        assert_eq!(search_back(xml), Some(DARK.base.back));
+    }
+
+    #[test]
+    fn a_search_skin_of_what_the_window_ignores_does_not_theme_it() {
+        let xml = r#"<y-pop><search><skin padding="4"/></search><quit/></y-pop>"#;
+        let tree = crate::config::load_str(xml, &mut Vec::new()).expect("valid");
+        assert!(resolve_search_design(&tree).is_none());
+        assert!(
+            tree.warnings
+                .iter()
+                .any(|warning| warning.contains("padding")),
+            "{:?}",
+            tree.warnings
+        );
     }
 }

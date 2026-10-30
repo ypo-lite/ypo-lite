@@ -97,9 +97,11 @@ such as page padding. A component that knows its own minimum width should use
 | A few exclusive options | `segmented(&[Choice::new("A"), Choice::disabled("B", "why")], selected, on_select)` | The chosen one is Accent. Re-selecting reports its index again: ignore an unchanged value. |
 | A multi-line text field | `text_area(text, placeholder, on_change)` | Wraps; Enter inserts a line. |
 | A full-width row in a table | `Row::spanning(key, view)` | A comment, a section label. In card layout it is the view alone. |
-| Inputs | `combo`, `number_box`, `text_box`, `switch`, `labeled_switch`, `chip`, `button`, `icon_button`, `add_button` | All pre-filled; `icon_button` always has a tooltip. |
+| Inputs | `combo`, `number_box`, `text_box`, `switch`, `switch_enabled`, `labeled_switch`, `chip`, `button`, `icon_button`, `add_button` | All pre-filled; `icon_button` always has a tooltip. |
 | A bounded number to set by feel *and* exactly | `range_input(value, min, max, step, on_slide, on_type)` | Slider + number box; map both callbacks to one message that ignores unchanged values. |
-| Key combo display | `keycaps(&labels, large)` | Labels from `key_picker::combo_labels` / `keys::label`. |
+| Key combo display | `keycaps(&labels, large)` | Joined by `+`. Labels from `key_picker::combo_labels` / `keys::label`. |
+| A key that can be changed | `key_field(shown, tooltip, on_open, clear)` | `keycaps` on a filling button; the ✕ stays aligned down a list, greyed when there is nothing to clear. |
+| Choosing a key | `key_picker`, or `key_picker_with` for less than a hotkey can hold | `KeyRules` limits the modifiers and keys on offer; `problem` is a line under the combination. Keys are chosen, never typed. |
 | Card / panel / note / section | `card()`, `panel(title, trailing, body)`, `note(text)`, `section(title, body)` | `card()` returns the `Border` builder, so `.opacity()` etc. still chain. |
 | Text | `text::title/lede/body/strong/caption/section_title/single_line/placeholder` | They return `TextBlock`, so you can still chain. |
 | Place a `View` in a `Grid` cell | `cell(view, row, column)` | `.grid_row()` only exists on native builders, so this wraps the view in a `Border`. |

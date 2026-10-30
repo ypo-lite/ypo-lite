@@ -87,6 +87,9 @@ impl Comment {
 
 /// One thing in a group's (or the root's) list: a menu item, or a comment of
 /// its own.
+// An `Item` is the common case and a `Comment` is rare: boxing the item would
+// touch every walk of the tree for a few bytes saved per comment.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, PartialEq, Debug)]
 pub enum Entry {
     Item(Item),
@@ -110,6 +113,8 @@ pub struct Item {
     /// `path` or `path,index`, raw.
     pub icon: Option<String>,
     pub tooltip: Option<String>,
+    /// Extra words search finds it by (`keywords="mail outlook"`).
+    pub keywords: Option<String>,
     pub default: bool,
     /// Groups: open the menu when the pointer hovers its tray icon.
     pub auto_open: bool,
@@ -137,6 +142,7 @@ impl Item {
             name: None,
             icon: None,
             tooltip: None,
+            keywords: None,
             default: false,
             auto_open: false,
             show_shortcuts: None,
@@ -195,6 +201,8 @@ pub struct AppFields {
     pub other_events: Vec<String>,
     /// `exe` names a folder, listed as a submenu.
     pub browse: bool,
+    /// A browsed folder on a network share: list it for `/` search too.
+    pub index: bool,
     pub filter: Option<String>,
     pub depth: Option<u32>,
     pub open_folder: Option<OpenFolder>,
@@ -285,6 +293,11 @@ pub struct SearchSettings {
     pub results: Option<ResultsMode>,
     pub row_actions: Option<bool>,
     pub history: Option<bool>,
+    /// The window's own base theme; `None` follows the tray menus'.
+    pub theme: Option<Theme>,
+    /// The window's own `<skin>`, written first inside `<search>`; empty
+    /// follows the tray menus' (unless [`SearchSettings::theme`] is set).
+    pub skin: Skin,
     pub extra_attrs: Vec<(String, String)>,
     pub children: Vec<SearchEntry>,
 }
@@ -496,5 +509,12 @@ impl Settings {
         let mut items = Vec::new();
         walk(&self.roots, &mut items);
         items.into_iter()
+    }
+
+    /// [`Self::items`], then the items only search has: its groups and
+    /// folders and what is in them.
+    pub fn all_items(&self) -> impl Iterator<Item = &Item> {
+        self.items()
+            .chain(self.search.iter().flat_map(vars::search_items))
     }
 }

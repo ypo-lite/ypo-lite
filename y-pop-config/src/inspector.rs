@@ -14,12 +14,12 @@ use y_pop::settings::{Item, ItemId, ItemKind, Settings};
 use crate::from_file::{FileKind, Origin};
 use crate::icon_picker::IconMsg;
 use crate::menu_edit::{
-    FlagField, MenuMsg, OriginChange, TextField, canonical_hotkey, split_hotkey,
+    FlagField, MenuMsg, OriginChange, TextField, split_hotkey,
 };
-use crate::menu_view::{HotkeyUi, MenuUi};
+use crate::key_edit::{KeyMsg, KeyTarget, hotkey_warning};
+use crate::menu_view::MenuUi;
 use crate::tree::{self, MoveDir};
-use crate::ui::editor::modal;
-use crate::ui::key_picker::{KeyPickerEvents, combo_labels, key_picker};
+use crate::ui::key_picker::combo_labels;
 use crate::ui::prelude::*;
 use crate::{ConfigApp, Msg, roots};
 use windows_reactor::*;
@@ -39,7 +39,7 @@ pub fn inspector_view(
         return card().content(text::body("Nothing is selected."));
     };
     let location = tree::locate(settings, id);
-    let is_root = location.is_some_and(|location| location.parent.is_none());
+    let is_root = tree::is_top(settings, id);
     let inner = viewport.inset(CARD_INSET);
 
     let mut body = Stack::vertical(space::L)
@@ -53,7 +53,8 @@ pub fn inspector_view(
         )
         .maybe(
             "confirm",
-            (is_root && ui.confirming_delete).then(|| confirm_delete(id, context)),
+            (is_root && ui.confirming_delete)
+                .then(|| confirm_delete(id, tree::is_search_only(settings, id), context)),
         );
 
     // Moving to another group isn't a thing for a tray menu or a column break.
@@ -201,7 +202,11 @@ fn header(
     context: &ViewContext<ConfigApp>,
 ) -> View {
     let place = if is_root {
-        "tray icon".to_owned()
+        if tree::is_search_only(settings, item.id) {
+            "only in search".to_owned()
+        } else {
+            "tray icon".to_owned()
+        }
     } else {
         match tree::locate(settings, item.id)
             .and_then(|l| l.parent)
@@ -257,15 +262,19 @@ fn move_bar(
         ("Move up", "Move down")
     };
 
-    let mut bar = Stack::horizontal(space::XS)
-        .child(
-            "up",
-            arrow_button(true, up, can(MoveDir::Up), go(MoveDir::Up)),
-        )
-        .child(
-            "down",
-            arrow_button(false, down, can(MoveDir::Down), go(MoveDir::Down)),
-        );
+    // A search-only group's place among the others is a row of the Search page.
+    let mut bar = Stack::horizontal(space::XS);
+    if !(is_root && tree::is_search_only(settings, id)) {
+        bar = bar
+            .child(
+                "up",
+                arrow_button(true, up, can(MoveDir::Up), go(MoveDir::Up)),
+            )
+            .child(
+                "down",
+                arrow_button(false, down, can(MoveDir::Down), go(MoveDir::Down)),
+            );
+    }
 
     if !is_root {
         let into = tree::group_above(settings, id).and_then(|group| tree::item(settings, group));
@@ -309,7 +318,11 @@ fn move_bar(
     let delete: View = if is_root {
         icon_button(
             Symbol::Delete,
-            "Delete this tray menu",
+            if tree::is_search_only(settings, id) {
+                "Delete this from the search"
+            } else {
+                "Delete this tray menu"
+            },
             context.callback(move |()| Msg::DeleteAsked(id)),
         )
     } else {
@@ -323,11 +336,15 @@ fn move_bar(
 }
 
 /// Deleting a tray menu removes a tray icon, so it asks.
-fn confirm_delete(id: ItemId, context: &ViewContext<ConfigApp>) -> View {
+fn confirm_delete(id: ItemId, only: bool, context: &ViewContext<ConfigApp>) -> View {
     Stack::vertical(space::S)
         .child(
             "ask",
-            text::body("Remove this tray icon and everything in it?"),
+            text::body(if only {
+                "Remove this from the search, and everything in it?"
+            } else {
+                "Remove this tray icon and everything in it?"
+            }),
         )
         .child(
             "buttons",
@@ -365,18 +382,33 @@ fn fields(
     context: &ViewContext<ConfigApp>,
 ) -> View {
     let id = item.id;
+    let only = tree::is_search_only(settings, id);
     let text_of = move |field: TextField| {
         context.callback(move |text: String| Msg::Menu(MenuMsg::Text(id, field, text)))
     };
+    let breaks_include = !only
+        && roots::menus(settings).any(|menu| menu.id == id)
+        && crate::search_edit::name_breaks_include(
+            settings,
+            item.name.as_deref().unwrap_or_default(),
+        );
     let name = |placeholder: &str| {
-        field(
+        let field = field(
             "Name",
             text_box(
                 item.name.clone().unwrap_or_default(),
                 placeholder,
                 text_of(TextField::Name),
             ),
-        )
+        );
+        let warning: Option<View> = breaks_include.then(|| {
+            text::caption(
+                "The search lists its tray menus separated by ;, so with one in its name this \\
+                 menu keeps its old name there until the ; is gone.",
+            )
+            .into()
+        });
+        View::from(Stack::vertical(space::XS).child("field", field).maybe("semicolon", warning))
     };
     let tooltip = || {
         field(
@@ -385,6 +417,16 @@ fn fields(
                 item.tooltip.clone().unwrap_or_default(),
                 "Shown when the pointer rests on it",
                 text_of(TextField::Tooltip),
+            ),
+        )
+    };
+    let keywords = || {
+        field(
+            "Keywords",
+            text_box(
+                item.keywords.clone().unwrap_or_default(),
+                "Extra words search finds it by",
+                text_of(TextField::Keywords),
             ),
         )
     };
@@ -454,6 +496,7 @@ fn fields(
                 grid(vec![
                     ("name", name("Name in the menu")),
                     ("tooltip", tooltip()),
+                    ("keywords", keywords()),
                     ("icon", icon()),
                 ]),
             )
@@ -461,16 +504,24 @@ fn fields(
                 "app",
                 crate::app_form::sections(settings, ui, item, app, viewport, context),
             )
-            .child(
+            .maybe(
                 "default",
-                flag(
-                    "Default item (shown in bold)",
-                    FlagField::Default,
-                    item.default,
-                ),
+                (!only).then(|| {
+                    flag(
+                        "Default item (shown in bold)",
+                        FlagField::Default,
+                        item.default,
+                    )
+                }),
             )
-            .child("hotkeys", hotkeys_section(settings, item, context))
-            .maybe("menu", is_root.then(|| turn_into_menu(id, context)))
+            .maybe(
+                "hotkeys",
+                (!only).then(|| hotkeys_section(settings, item, context)),
+            )
+            .maybe(
+                "menu",
+                (is_root && !only).then(|| turn_into_menu(id, context)),
+            )
             .into(),
 
         ItemKind::Group => {
@@ -530,7 +581,7 @@ fn fields(
                     item.default,
                 ),
             );
-            if is_root {
+            if is_root && !only {
                 switches = switches.child(
                     "hover",
                     flag(
@@ -546,13 +597,19 @@ fn fields(
                     grid(vec![
                         ("name", name("Name in the menu")),
                         ("tooltip", tooltip()),
+                        ("keywords", keywords()),
                         ("icon", icon()),
-                        ("shortcuts", shortcuts),
-                        ("style", style),
-                    ]),
+                    ]
+                    .into_iter()
+                    .chain((!only).then_some(("shortcuts", shortcuts)))
+                    .chain((!only).then_some(("style", style)))
+                    .collect()),
                 )
-                .child("switches", switches)
-                .child("hotkeys", hotkeys_section(settings, item, context))
+                .maybe("switches", (!only).then(|| View::from(switches)))
+                .maybe(
+                    "hotkeys",
+                    (!only).then(|| hotkeys_section(settings, item, context)),
+                )
                 .into()
         }
 
@@ -569,18 +626,21 @@ fn fields(
                     grid(vec![
                         ("name", name(placeholder)),
                         ("tooltip", tooltip()),
+                        ("keywords", keywords()),
                         ("icon", icon()),
                     ]),
                 )
-                .child(
+                .maybe(
                     "default",
-                    flag(
-                        "Default item (shown in bold)",
-                        FlagField::Default,
-                        item.default,
-                    ),
+                    (!only).then(|| {
+                        flag(
+                            "Default item (shown in bold)",
+                            FlagField::Default,
+                            item.default,
+                        )
+                    }),
                 );
-            if is_root {
+            if is_root && !only {
                 form = form
                     .child("hotkeys", hotkeys_section(settings, item, context))
                     .child("menu", turn_into_menu(id, context));
@@ -598,10 +658,10 @@ fn turn_into_menu(id: ItemId, context: &ViewContext<ConfigApp>) -> View {
         .into()
 }
 
-/// The item's hotkeys: each as keycaps with Edit (opens the shared key picker
-/// in a dialog), an Override switch and Remove; then "Add hotkey". A
-/// combination used by more than one hotkey in the file is flagged — the
-/// second one to register would silently lose.
+/// The item's hotkeys: each a [`key_field`] (click it for the key dialog, ✕
+/// removes it) and an Override switch; then "Add hotkey". A combination that another
+/// hotkey in the file has, or Windows keeps, is flagged: whoever asks second
+/// loses.
 fn hotkeys_section(settings: &Settings, item: &Item, context: &ViewContext<ConfigApp>) -> View {
     let id = item.id;
     let mut rows = Stack::vertical(space::M);
@@ -618,25 +678,16 @@ fn hotkeys_section(settings: &Settings, item: &Item, context: &ViewContext<Confi
         } else {
             keycaps(&labels, false)
         };
-        let line = Stack::horizontal(space::S)
-            .child("keys", shown)
-            .child(
-                "edit",
-                button(
-                    "Edit",
-                    false,
-                    true,
-                    context.callback(move |()| Msg::Menu(MenuMsg::HotkeyEdit(id, index))),
-                ),
-            )
-            .child(
-                "remove",
-                icon_button(
-                    Symbol::Delete,
-                    "Remove this hotkey",
-                    context.callback(move |()| Msg::Menu(MenuMsg::HotkeyRemove(id, index))),
-                ),
-            );
+        let line = key_field(
+            shown,
+            "Change the key combination",
+            context.callback(move |()| Msg::Key(KeyMsg::Open(KeyTarget::Item(id, index)))),
+            Some((
+                "Remove this hotkey",
+                true,
+                context.callback(move |()| Msg::Menu(MenuMsg::HotkeyRemove(id, index))),
+            )),
+        );
 
         let mut row = Stack::vertical(space::S).child("line", line).child(
             "override",
@@ -646,11 +697,8 @@ fn hotkeys_section(settings: &Settings, item: &Item, context: &ViewContext<Confi
                 context.callback(move |on| Msg::Menu(MenuMsg::HotkeyOverride(id, index, on))),
             ),
         );
-        if let Some(other) = shared_with(settings, item, &entry.key) {
-            row = row.child(
-                "conflict",
-                text::caption(format!("Also used by {other}: only one of them will work.")),
-            );
+        if let Some(warning) = hotkey_warning(settings, &entry.key, KeyTarget::Item(id, index)) {
+            row = row.child("conflict", text::caption(warning));
         }
         rows = rows.child(format!("hotkey{index}"), row);
     }
@@ -659,61 +707,10 @@ fn hotkeys_section(settings: &Settings, item: &Item, context: &ViewContext<Confi
         "add",
         add_button(
             "Add hotkey",
-            context.callback(move |()| Msg::Menu(MenuMsg::HotkeyAdd(id))),
+            context.callback(move |()| Msg::Key(KeyMsg::Open(KeyTarget::NewHotkey(id)))),
         ),
     );
     field("Hotkeys", rows)
-}
-
-/// The key picker in a modal with OK / Cancel, over the whole page, while a
-/// hotkey is being edited. The edit commits live, so the keycaps behind it
-/// follow; Cancel restores the old text.
-pub fn hotkey_modal(
-    settings: &Settings,
-    hotkeys: &HotkeyUi,
-    window: Viewport,
-    context: &ViewContext<ConfigApp>,
-) -> Option<View> {
-    let (id, index) = hotkeys.open?;
-    let item = tree::item(settings, id)?;
-    let entry = item.hotkeys.get(index)?;
-    let (modifiers, key) = split_hotkey(&entry.key);
-    let events = KeyPickerEvents {
-        on_key: context.callback(move |key| Msg::Menu(MenuMsg::HotkeyKey(id, index, key))),
-        on_modifier: context
-            .callback(move |modifier| Msg::Menu(MenuMsg::HotkeyModifier(id, index, modifier))),
-        on_category: context.callback(|category| Msg::Menu(MenuMsg::HotkeyCategory(category))),
-        on_search_changed: context.callback(|text| Msg::Menu(MenuMsg::HotkeySearch(text))),
-        on_search_chosen: context
-            .callback(move |text| Msg::Menu(MenuMsg::HotkeySearchChosen(id, index, text))),
-    };
-    Some(modal(
-        window,
-        format!("Hotkey for {}", roots::label(item)),
-        |viewport| key_picker(key, Some(modifiers), &hotkeys.picker, viewport, &events),
-        // A combination needs a key: OK waits for one.
-        key.is_some(),
-        context.callback(|()| Msg::Menu(MenuMsg::HotkeyClosed { accepted: false })),
-        context.callback(|()| Msg::Menu(MenuMsg::HotkeyClosed { accepted: true })),
-    ))
-}
-
-/// The label of another item that has the same combination as `raw`, if any.
-fn shared_with(settings: &Settings, item: &Item, raw: &str) -> Option<String> {
-    let canonical = canonical_hotkey(raw)?;
-    let mut seen_here = 0;
-    for other in settings.items() {
-        for entry in &other.hotkeys {
-            if canonical_hotkey(&entry.key).as_deref() != Some(canonical.as_str()) {
-                continue;
-            }
-            if other.id != item.id {
-                return Some(roots::label(other));
-            }
-            seen_here += 1;
-        }
-    }
-    (seen_here > 1).then(|| "another hotkey of this item".to_owned())
 }
 
 // ---- the XML preview -------------------------------------------------

@@ -242,6 +242,9 @@ pub struct MenuDesign {
     /// field existed. See [`EdgeRule`]'s own doc comment for why this drops
     /// PortAL's `_SEL`/`_UNSEL` naming rather than reusing it.
     pub edge: Option<EdgeRule>,
+    /// Where an untitled separator's line starts. A titled one always spans
+    /// the row.
+    pub separator: SeparatorSpan,
     /// Extra background painted behind the icon column *only*, idle rows
     /// only — PortAL's own `icon_gradiant` (`menu.cpp`'s `OnDrawItem`,
     /// gated on `!ODS_SELECTED`: a hovered/selected row's own [`Fill`]
@@ -277,6 +280,17 @@ pub enum EdgeRule {
     Hover,
     /// Both — PortAL's `dark` skin (`PORTAL_ST_ALL`).
     Always,
+}
+
+/// How much of the row an untitled separator's line takes.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SeparatorSpan {
+    /// From just past the icon column, which runs on through the separator —
+    /// what PortAL always does (`menu.cpp::OnDrawItem`'s `iconSize.cx + 17`).
+    AfterIcons,
+    /// Across the row, the icon column stopping at it — not a PortAL option,
+    /// the look of a Windows menu.
+    Full,
 }
 
 /// An idle or selected row's text/background colour pair — was `MenuDesign`'
@@ -1150,6 +1164,7 @@ mod tests {
             padding: 0,
             margin: 0,
             edge: None,
+            separator: SeparatorSpan::AfterIcons,
             icon_backdrop: None,
         }
     }

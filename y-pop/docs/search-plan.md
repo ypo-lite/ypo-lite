@@ -110,8 +110,8 @@ Decisions taken while building, to confirm or change:
 - **`include`/`exclude` are `;`-separated**, not space-separated as the spec
   example had it: a tray menu can be called "Admin tools". Spec §2.2/§2.5
   should say so.
-- **`keywords` has no field in `Settings::Item` yet**: it round-trips as an
-  unknown attribute (`extra_attrs`) until 11.4 gives it an editor.
+- **`keywords` now has a field (11.4)**; before that it round-tripped as an
+  unknown attribute (`extra_attrs`).
 - **`<plugin>` keeps `allow` and `section`** as known attributes (not
   warned), but only `name`, `src` and `prefix` are modelled.
 - **No "Search" element and no search icon by default** (decided). Search
@@ -365,7 +365,7 @@ Spec §2.9 (rev. 2026-10-26: actions are configured, with an action menu).
 | 5.4 | **The action menu**: `Alt+Enter` / right click / `Shift+F10` and the Menu key; a list on the selected row with each action's shortcut; ↑↓ Enter, click, the shortcuts, Esc; closes on any other focus change. Drawn by the window, hit-tested by `layout`. | 👁 |
 | 5.5 | **Row buttons**: the actions with `button="true"` and a **⋯** on the selected row (`row-actions`), with hit-testing in `layout`. | 👁 |
 | 5.6 | **Reveal** (`reveal`, default Ctrl+R) with the native popup: open the item's tray menu at the tray icon and open the submenu chain down to it (best effort; `TrackPopupMenu` can't preselect a row; spec §2.9). If opening nested submenus programmatically proves unreliable, open the tray menu and say which submenu holds it, and note the simplification in the doc comment. | 👁 |
-| 5.7 | **Edit** (`edit`, default Ctrl+E): `y-pop-config --select "<path in tree>"`. Needs phase 11.1; until then, Edit opens `y-pop-config` without selecting. | ✅ (the part that can be done now) |
+| 5.7 | **Edit** (`edit`, default Ctrl+E): `y-pop-config --select "<path in tree>"`. Needs phase 11.1; until then, Edit opens `y-pop-config` without selecting. | 👁 (`--select` built in 11.1) |
 
 **Done when:** 👁 each action from the menu, from its shortcut and from its
 button; a `<actions>` that removes or rebinds some.
@@ -966,10 +966,10 @@ Can start any time after phase 1; 11.1 and 11.2 unblock 5.7 and 9.5.
 
 | | Task | Status |
 |---|---|---|
-| 11.1 | Command line `--select "<path in tree>"`; if already running, forward through `y_pop::ipc` (a second registered message, or `WM_COPYDATA`) and bring it to the front. | ⬜ |
-| 11.2 | `--new-app` with prefilled fields (from the Start menu); opens the "add" flow of phase 8 of `y-pop-config/docs/plan.md`. | ⬜ |
-| 11.3 | A **Search** node in the outline: hotkey, collapsed, results, row actions, history; the sections list (add, remove, reorder); search-only groups and folders edited like menu items. | ⬜ |
-| 11.4 | `keywords` field in the item inspector, and `index` for a browsed folder. | ⬜ |
+| 11.1 | Command line `--select "<path in tree>"`; if already running, forward it and bring the window to the front. **As built:** the path is the positions among siblings, `2/0/5` (`ipc::path_of`, `roots::resolve_path`), not names. The second launch writes `y-pop-config.request` next to `y-pop.xml` (`ipc::post_request`); the open window polls for it twice a second on a background task, as nothing here owns the window procedure. Search-only items have no path until 11.3: Edit opens the app without selecting. | 👁 |
+| 11.2 | `--new-app` with prefilled fields (from the Start menu): `--name`, `--target`, `--args`, `--icon`, `--dir`. **As built:** adds an app with those fields to the open tray menu (else the first, else a new one) and selects it, exactly as the toolbar does. It does not open the picker or focus a field (the config plan's 11.2 "new items focus their first field" is still open). | 👁 |
+| 11.3 | **Reworked after a review on 2026-10-30 (11.3.1–11.3.8 built, verify live, 5.2 left): see `y-pop-config/docs/search-screen-plan.md`.** A **Search** node in the outline: hotkey, collapsed, results, row actions, history; the sections list (add, remove, reorder); search-only groups and folders edited like menu items. | ⬜ |
+| 11.4 | `keywords` field in the item inspector, and `index` for a browsed folder. **As built:** `Item::keywords` and `AppFields::index` in `y_pop::settings` (loaded, written, round-tripped); a Keywords box beside Tooltip for apps, groups and About/Quit/Settings; a "Search inside it with /" switch under a folder app's Filter, Depth and Open fields. Attributes now save in the order name, icon, tooltip, keywords, then the app's own. | 👁 |
 
 **Done when:** 👁 search configured entirely from `y-pop-config`.
 
