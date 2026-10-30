@@ -6,12 +6,13 @@
 //! is `menu`'s doing, via `WM_INITMENUPOPUP`; see that module's doc comment.
 //! PortAL's own `HandleSubDirectory`/`listFiles`/`listSubDirectories`
 //! (`menu.cpp`) follow the same split and the same per-submenu laziness —
-//! confirmed by reading them, not assumed.
+//! confirmed by reading them, not assumed. Search's `/` prefix lists the same
+//! way, on a thread of its own ([`crate::search::files`]).
 
 use std::fs::Metadata;
 use std::os::windows::fs::MetadataExt;
 
-use y_pop::model::{Browse, OpenFolder};
+use crate::model::{Browse, OpenFolder};
 
 /// One directory entry [`list`] found: a file to launch, or a subfolder —
 /// either one to browse further ([`Entry::browsable`]) or one that has
@@ -50,8 +51,8 @@ const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
 
 /// Lists `dir`, applying `browse`'s filter, depth and open-folder settings.
 /// `level` is `dir`'s own distance from the browsed app's root (the root
-/// itself, and every folder [`crate::menu`] calls this for, is one level
-/// below its parent — `0` for the very first call). An unreadable directory
+/// itself, and every folder `menu` calls this for, is one level below its
+/// parent — `0` for the very first call). An unreadable directory
 /// (removed, permission denied, a network path that timed out) yields an
 /// empty list rather than an error — the submenu opens showing nothing
 /// rather than not opening at all, the same tolerance [`crate::launch`]
@@ -203,6 +204,7 @@ mod tests {
             filter: None,
             depth,
             open_folder,
+            index: false,
         }
     }
 

@@ -614,6 +614,10 @@ fn draw_text(
     color: Color,
     align: windows::Win32::Graphics::Gdi::DRAW_TEXT_FORMAT,
 ) {
+    // `DrawTextW` reads through an empty `Vec`'s dangling pointer.
+    if text.is_empty() {
+        return;
+    }
     unsafe {
         SetBkMode(hdc, TRANSPARENT);
         SetTextColor(hdc, color.colorref());

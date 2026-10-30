@@ -12,6 +12,7 @@
 //! * [`commands`]: the `>` commands, the `?` prefixes and the rows they make.
 //! * [`keycheck`]: is a key combination free? The table of the keys Windows keeps.
 //! * [`display`]: the text of a result row (matched runs, headings, second line).
+//! * [`files`]: the files of the `/` prefix, listed on a thread of their own.
 //! * [`history`]: what Windows remembers, for Recent and a ranking bonus.
 //! * [`hotkey`]: a key combination as a set, for queries like `shift+ctrl+esc`.
 //! * [`index`]: the flat list of everything searchable, built from a
@@ -27,6 +28,7 @@
 pub mod actions;
 pub mod commands;
 pub mod display;
+pub mod files;
 pub mod history;
 pub mod hotkey;
 pub mod index;

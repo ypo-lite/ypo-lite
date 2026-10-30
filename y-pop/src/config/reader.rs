@@ -725,6 +725,7 @@ impl<'b> Reader<'b> {
                 "filter",
                 "depth",
                 "open-folder",
+                "index",
             ],
         );
 
@@ -759,6 +760,7 @@ impl<'b> Reader<'b> {
                 filter: self.opt_text(element, "filter"),
                 depth: self.depth(element),
                 open_folder: self.open_folder(element),
+                index: element.attr_bool("index").unwrap_or(false),
             });
 
         let mut events = EventMask::default();

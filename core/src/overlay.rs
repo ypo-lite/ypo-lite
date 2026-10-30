@@ -783,6 +783,11 @@ impl Canvas {
         align: TextAlign,
         extra: DRAW_TEXT_FORMAT,
     ) -> Result<()> {
+        // Nothing to draw, and `DrawTextW` must not be asked to: an empty `Vec`'s
+        // pointer is dangling, and it reads through it.
+        if text.is_empty() {
+            return Ok(());
+        }
         let mut rect = rect;
         let text: Vec<u16> = text.encode_utf16().collect();
 
@@ -807,7 +812,7 @@ impl Canvas {
 
             SelectObject(self.dc, previous);
 
-            if drawn == 0 && !buffer.is_empty() {
+            if drawn == 0 {
                 return Err(Error::from_thread());
             }
         }
@@ -1291,6 +1296,24 @@ mod tests {
                 || pixels[8 * 200 + x] != Color::rgb(0, 0, 0).premultiplied()
         });
         assert!(lit_inside, "and something is drawn inside it");
+    }
+
+    #[test]
+    fn empty_text_draws_nothing_in_any_format() {
+        let mut canvas = Canvas::new((80, 24)).unwrap();
+        let font = Font::new("Segoe UI", 12, false).unwrap();
+        let rect = RECT {
+            left: 0,
+            top: 0,
+            right: 80,
+            bottom: 24,
+        };
+        canvas
+            .draw_text("", rect, &font, Color::WHITE, TextAlign::Left)
+            .unwrap();
+        canvas
+            .draw_text_ellipsis("", rect, &font, Color::WHITE, TextAlign::Left)
+            .unwrap();
     }
 
     #[test]

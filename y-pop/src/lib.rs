@@ -14,6 +14,7 @@
 //! in the crate (tests included) uses them, not by whether `main` happens
 //! to reach every one of them yet.
 
+pub mod browse;
 pub mod builtins;
 pub mod config;
 pub mod internal_icons;

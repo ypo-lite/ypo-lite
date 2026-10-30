@@ -658,7 +658,7 @@ const WITH_SEARCH: &str = r#"<?xml version="1.0" encoding="utf-8"?>
 			<app name="Registry" exe="%tools%\regedit.exe"/>
 			<app name="Services" exe="services.msc" keywords="svc"/>
 		</group>
-		<app name="Scripts" exe="%tools%\Scripts" browse="true" depth="2"/>
+		<app name="Scripts" exe="%tools%\Scripts" browse="true" depth="2" index="true"/>
 		<plugin name="Calculator" src="plugins\calc.wasm" prefix="=" allow="clipboard"/>
 		<!-- trailing -->
 	</search>

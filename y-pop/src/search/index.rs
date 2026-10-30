@@ -22,6 +22,8 @@ pub enum Source {
     StartMenu,
     /// Windows's history, for what no tray menu or search-only group holds.
     History,
+    /// Found in a browsed folder: only `/` searches these.
+    BrowsedFile,
 }
 
 /// What an entry stands for.
@@ -32,6 +34,8 @@ pub enum Target {
     /// An item of this opening's history
     /// ([`super::history::Listing::items`]), by position.
     History(u32),
+    /// A file of this opening's `/` ([`super::files::Files::get`]).
+    File(u32),
 }
 
 /// What an entry is. Decides its group and whether it is ranked lower.
@@ -39,9 +43,10 @@ pub enum Target {
 pub enum Kind {
     App,
     Group,
-    /// A browsed folder; its files are only searched through `/`.
+    /// A browsed folder, whose files are only searched through `/`; or a
+    /// sub-folder found there.
     Folder,
-    /// A file Windows remembers having opened.
+    /// A file Windows remembers having opened, or one found in a browsed folder.
     File,
     /// A y-pop command: About, Quit, Settings… (and, phase 8, the `>` ones).
     /// Ranked below everything else.
@@ -135,11 +140,20 @@ impl Entry {
         entry
     }
 
+    /// The entry of file `number` of `/`. Its name is a file name, not a menu
+    /// label: an `&` in it is a letter like the others.
+    pub fn from_file(number: u32, kind: Kind, name: &str) -> Self {
+        let mut entry = Self::new(Source::BrowsedFile, NodeId::from_u32(0), kind, "");
+        entry.target = Target::File(number);
+        entry.name = fold(name).into();
+        entry
+    }
+
     /// The tree node it stands for, if it stands for one.
     pub fn node(&self) -> Option<NodeId> {
         match self.target {
             Target::Node(id) => Some(id),
-            Target::History(_) => None,
+            Target::History(_) | Target::File(_) => None,
         }
     }
 

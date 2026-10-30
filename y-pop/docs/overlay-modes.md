@@ -414,7 +414,7 @@ box's prefix line.
 | *(none)* | Every section with `global="true"` (the default), and commands, ranked lower | Launch / open | |
 | `>` | y-pop commands | Run it | Reload configuration, Open settings, Edit `y-pop.xml`, Open configuration folder, Refresh the Start menu, Reload plugins, Start with Windows, About, Quit. |
 | `#` | Hotkeys | Launch what the key opens | `#` alone lists every binding in the file, including the search hotkey and each tray menu's. `#ctrl+alt+x` with no match **checks the key** (§2.14). |
-| `/` | Files inside browsed folders: the menus' and the search-only ones (§2.5.3) | Open the file | Folders are listed on first use of `/` per opening, in the background; results join as they arrive. Network folders (`\\…`) are skipped unless `index="true"` is set on them, and say so. |
+| `/` | Files and sub-folders inside browsed folders: the menus' and the search-only ones (§2.5.3) | Open it | Folders are listed on first use of `/` per opening, in the background; results join as they arrive, at most 5000. Network folders (`\\…`) are skipped unless `index="true"` is set on them, and say so. |
 | `?` | The prefixes | Type that prefix | Lists every prefix, the plugins' included. |
 | *a plugin's* | That plugin only | The plugin's action | `prefix="="` on `<plugin>`. One character, not a letter or digit, not one of the above. Two plugins with the same prefix: the second loses it, with a warning. |
 

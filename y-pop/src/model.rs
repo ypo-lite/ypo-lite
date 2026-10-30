@@ -547,6 +547,23 @@ pub struct App {
     pub browse: Option<Browse>,
 }
 
+impl App {
+    /// What opens the folder `dir` in Explorer: through the shell, the only
+    /// route that can, and never elevated.
+    pub fn open_folder(dir: &str) -> Self {
+        Self {
+            exe: Some(Arc::from(dir)),
+            app_id: None,
+            param: None,
+            path: None,
+            shell: Some(true),
+            elevate: false,
+            events: EventMask::default(),
+            browse: None,
+        }
+    }
+}
+
 /// `browse="true"`: `exe` names a folder, listed as this node's children —
 /// see the `NodeData::children` doc for when that listing actually happens.
 #[derive(Clone, Debug)]
@@ -582,6 +599,9 @@ pub struct Browse {
     /// open the folder it lists directly, rather than only being reachable
     /// by digging into its contents.
     pub open_folder: OpenFolder,
+    /// `index="true"`: search's `/` lists this folder even on a network share
+    /// (`\\…`), which it otherwise skips, and says so.
+    pub index: bool,
 }
 
 /// The hard ceiling [`crate::config`] clamps a `depth=""` attribute to — see

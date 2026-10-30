@@ -41,6 +41,12 @@
 //! Loaded synchronously, for the rows on screen only, and kept as pixels for
 //! the life of the window. Async loading is the native popup's roadmap step 7;
 //! it is not needed until a slow icon is seen.
+//!
+//! # Files
+//!
+//! The files of `/` are listed by a thread ([`y_pop::search::files`]), started
+//! by the first `/` of an opening. It only ever posts [`WM_SEARCH_FILES`], with
+//! the generation like the rest, and what it found is taken here.
 
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -69,9 +75,10 @@ use y_core::{
     window::WindowHandler,
 };
 
-use y_pop::model::{ActionId, ActionsConfig, ConfigTree, NodeId, ResultsLayout, Section};
+use y_pop::model::{ActionId, ActionsConfig, App, ConfigTree, NodeId, ResultsLayout, Section};
 use y_pop::search::commands::{Command, Line, PREFIXES};
 use y_pop::search::display::{self, LineContext};
+use y_pop::search::files::Files;
 use y_pop::search::history::{self, AppNames, Item};
 use y_pop::search::hotkey::KeyCombo;
 use y_pop::search::index::{Index, Target};
@@ -113,6 +120,10 @@ pub const WM_SEARCH_WHEEL: u32 = WM_APP_FIRST + 0x16;
 
 /// A right click. `lParam` is the window's client position, as for a click.
 pub const WM_SEARCH_CONTEXT: u32 = WM_APP_FIRST + 0x17;
+
+/// The thread listing the files of `/` has found more
+/// ([`y_pop::search::files`]).
+pub const WM_SEARCH_FILES: u32 = WM_APP_FIRST + 0x18;
 
 const MOD_CTRL: isize = 1;
 const MOD_SHIFT: isize = 2;
@@ -168,6 +179,8 @@ pub enum Pick {
     Node(NodeId),
     /// An item of Windows's history that no node stands for.
     History(Item),
+    /// A file found by `/`, as the tray menu would run it.
+    File(App),
 }
 
 /// What the owner keeps: nothing while closed, the open window otherwise.
@@ -187,6 +200,10 @@ pub struct SearchWindow {
 }
 
 struct Open {
+    /// Who hears from the thread that lists the files of `/`, and as which
+    /// opening.
+    owner: HWND,
+    generation: usize,
     overlay: Overlay,
     layout: Layout,
     spec: Spec,
@@ -212,6 +229,8 @@ struct Open {
     /// The second lines of those items, as far as they were shown: one means
     /// reading a shortcut.
     details: HashMap<u32, String>,
+    /// The files of `/`, listed the first time it is typed.
+    files: Files,
     /// Whether Windows keeps recent files at all.
     tracks_files: bool,
     /// Whether y-pop starts with Windows, for the line in `>`; read once.
@@ -362,8 +381,11 @@ impl SearchWindow {
         .with_collapsed(search.is_some_and(|search| search.collapsed))
         .with_recent_shown(recent_count.unwrap_or(0));
         state.start(&index, listing.recent, sections, listing.bonuses);
+        let files = Files::of(tree, &index);
 
         let mut open = Open {
+            owner: self.owner,
+            generation: self.generation,
             palette: Palette::of(design.as_ref()),
             radius: scaled(
                 design
@@ -393,6 +415,7 @@ impl SearchWindow {
             state,
             items: listing.items,
             details: HashMap::new(),
+            files,
             tracks_files: y_core::recent::tracks_files(),
             startup: y_core::startup::is_enabled(ipc::STARTUP_NAME),
             search_hotkey: tree
@@ -450,7 +473,7 @@ impl SearchWindow {
         lparam: LPARAM,
         tree: &ConfigTree,
     ) -> bool {
-        if !(WM_SEARCH_CLOSE..=WM_SEARCH_CONTEXT).contains(&msg) {
+        if !(WM_SEARCH_CLOSE..=WM_SEARCH_FILES).contains(&msg) {
             return false;
         }
         // A message from a window that is already gone.
@@ -569,6 +592,9 @@ impl SearchWindow {
                     }
                 }
             }
+            WM_SEARCH_FILES if self.open.as_mut().is_some_and(Open::take_files) => {
+                self.redraw(tree, true);
+            }
             _ => {}
         }
         true
@@ -612,26 +638,32 @@ impl SearchWindow {
                 if let Some(open) = self.open.as_mut() {
                     let entry = &open.index.entries()[hit.entry as usize];
                     let item = match entry.target {
-                        Target::Node(_) => None,
                         Target::History(number) => Some(&open.items[number as usize]),
+                        Target::Node(_) | Target::File(_) => None,
                     };
                     match action {
                         // Done here: the clipboard needs only a window of
                         // ours, and the tree says what the path is.
                         ActionId::CopyPath => {
-                            let path = match item {
-                                Some(item) => item.file().or_else(|| Some(item.address())),
-                                None => display::target(tree, entry),
+                            let path = match (entry.target, item) {
+                                (Target::File(number), _) => {
+                                    Some(open.files.get(number).path.clone())
+                                }
+                                (_, Some(item)) => item.file().or_else(|| Some(item.address())),
+                                (_, None) => display::target(tree, entry),
                             };
                             if let Some(path) = path {
                                 clipboard::set_text(self.owner, &path);
                             }
                         }
                         _ => {
-                            let pick = match (entry.node(), item) {
-                                (Some(node), _) => Some(Pick::Node(node)),
-                                (None, Some(item)) => Some(Pick::History(item.clone())),
-                                (None, None) => None,
+                            let pick = match (entry.target, item) {
+                                (Target::Node(node), _) => Some(Pick::Node(node)),
+                                (Target::File(number), _) => {
+                                    Some(Pick::File(open.files.app(number)))
+                                }
+                                (_, Some(item)) => Some(Pick::History(item.clone())),
+                                (_, None) => None,
                             };
                             self.activation = pick.map(|pick| (pick, action));
                         }
@@ -710,10 +742,38 @@ impl Open {
         })
     }
 
+    /// The first `/` of this opening: sets the thread listing the folders off.
+    /// It posts to the owner, as nothing else may touch the window from there.
+    fn start_files(&mut self) {
+        // A handle is a number to the thread, which only ever posts to it.
+        let owner = self.owner.0 as isize;
+        let generation = self.generation;
+        self.files.start(move || {
+            let owner = HWND(owner as *mut _);
+            let _ = unsafe {
+                PostMessageW(Some(owner), WM_SEARCH_FILES, WPARAM(generation), LPARAM(0))
+            };
+        });
+        self.state.files_changed(&self.index, self.files.progress());
+    }
+
+    /// What the thread has found since last time joins the list. `true` if the
+    /// list changed.
+    fn take_files(&mut self) -> bool {
+        let changed = self.files.take(&mut self.index);
+        if changed {
+            self.state.files_changed(&self.index, self.files.progress());
+        }
+        changed
+    }
+
     /// Lays the rows out again for the state as it is. `follow` scrolls the
     /// list to keep the selected row in view (after typing or a key, not
     /// after the wheel or hover).
     fn relayout(&mut self, follow: bool) {
+        if self.state.wants_files() && !self.files.progress().started {
+            self.start_files();
+        }
         self.spec.footer = !self.state.folded();
         let kinds = self.state.row_kinds();
         if follow && let Some(selected) = self.state.selected() {
@@ -796,6 +856,7 @@ impl Open {
             pixels,
             items,
             details,
+            files,
             tracks_files,
             radius,
             border,
@@ -969,6 +1030,7 @@ impl Open {
                     .map(|(_, availability)| *availability);
                 (typed, answer)
             }),
+            scan: files.progress(),
         };
         let rows = state.rows().to_vec();
         let mut painter = ItemPainter {
@@ -981,6 +1043,7 @@ impl Open {
             pixels,
             items,
             details,
+            files,
             tracks_files: *tracks_files,
             icon_size: *icon_size,
             scale: spec.scale,
@@ -1138,6 +1201,7 @@ struct ItemPainter<'a> {
     pixels: &'a mut HashMap<u32, Option<Vec<u32>>>,
     items: &'a [Item],
     details: &'a mut HashMap<u32, String>,
+    files: &'a Files,
     tracks_files: bool,
     icon_size: i32,
     scale: f32,
@@ -1161,8 +1225,12 @@ impl ItemPainter<'_> {
         let entry = &self.index.entries()[hit.entry as usize];
         let node = entry.node().map(|id| self.tree.node(id));
         let item = match entry.target {
-            Target::Node(_) => None,
             Target::History(number) => Some((number, &self.items[number as usize])),
+            Target::Node(_) | Target::File(_) => None,
+        };
+        let file = match entry.target {
+            Target::File(number) => Some(number),
+            Target::Node(_) | Target::History(_) => None,
         };
         let row = placed.rect;
         let mut parts = self.layout.item_parts(row);
@@ -1208,11 +1276,13 @@ impl ItemPainter<'_> {
         // The icon, loaded the first time its row is shown.
         let size = self.icon_size;
         let icons = &mut *self.icons;
+        let files = self.files;
         let pixels = self.pixels.entry(hit.entry).or_insert_with(|| {
-            let icon = match (node, item) {
-                (Some(node), _) => crate::menu::resolve_icon(icons, node),
-                (None, Some((_, item))) => item.icon(icons),
-                (None, None) => None,
+            let icon = match (node, item, file) {
+                (Some(node), _, _) => crate::menu::resolve_icon(icons, node),
+                (None, Some((_, item)), _) => item.icon(icons),
+                (None, None, Some(number)) => files.icon(number, icons),
+                (None, None, None) => None,
             };
             icon.and_then(|icon| icon.to_pixels(size))
         });
@@ -1245,10 +1315,11 @@ impl ItemPainter<'_> {
 
         // The name, the letters the query matched emphasized. A name too
         // long for its box is cut with an ellipsis instead, unemphasized.
-        let label = match (node, item) {
-            (Some(node), _) => plain(&node.name),
-            (None, Some((_, item))) => item.name.clone(),
-            (None, None) => String::new(),
+        let label = match (node, item, file) {
+            (Some(node), _, _) => plain(&node.name),
+            (None, Some((_, item)), _) => item.name.clone(),
+            (None, None, Some(number)) => files.get(number).name.clone(),
+            (None, None, None) => String::new(),
         };
         let label = label.as_str();
         let title_box = RECT {
@@ -1291,7 +1362,10 @@ impl ItemPainter<'_> {
                 .entry(number)
                 .or_insert_with(|| item.detail())
                 .clone(),
-            None => display::subtitle(self.tree, entry, hit.matched),
+            None => match file {
+                Some(number) => files.detail(number),
+                None => display::subtitle(self.tree, entry, hit.matched),
+            },
         };
         if let Some(row) = state.recent_row(hit) {
             let since = history::now().saturating_sub(row.last);
@@ -1488,6 +1562,9 @@ impl ItemPainter<'_> {
             Line::Command(_) => "\u{E756}",
             Line::Prefix(_) => "\u{E8D5}",
             Line::SearchHotkey => "\u{E765}",
+            // "Sync" while it runs, then "Info".
+            Line::Scan if context.scan.listing => "\u{E895}",
+            Line::Scan => "\u{E946}",
             Line::Check => match context.check {
                 Some((_, Some(Availability::Free))) => "\u{E73E}",
                 Some((_, Some(_))) => "\u{E711}",

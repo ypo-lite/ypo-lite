@@ -10,8 +10,9 @@ use crate::model::{ActionId, ActionsConfig, ResultsLayout};
 
 use super::actions::{self, Available};
 use super::commands::{Command, Line, PREFIXES};
+use super::files::Progress;
 use super::hotkey::KeyCombo;
-use super::index::{Field, Index, Kind};
+use super::index::{Field, Index, Kind, Source};
 use super::input::Input;
 use super::layout::RowKind;
 use super::matcher::fold;
@@ -69,9 +70,12 @@ pub enum Row {
 
 impl Row {
     /// Whether the selection can rest on it: not a header, not the line of
-    /// prefixes.
+    /// prefixes, not the note on how `/` is doing.
     pub fn selectable(&self) -> bool {
-        !matches!(self, Self::Header(_) | Self::Prefixes)
+        !matches!(
+            self,
+            Self::Header(_) | Self::Prefixes | Self::Line(Line::Scan)
+        )
     }
 }
 
@@ -114,6 +118,8 @@ pub struct State {
     /// What the typed combination is, when `#` asks whether it is free: the
     /// text after the prefix, for the window to probe.
     check: Option<String>,
+    /// How the listing of `/` is going.
+    scan: Progress,
     /// `collapsed="true"`: the list can be folded away, leaving the input row.
     collapsible: bool,
     /// Folded now: no rows, whatever the text. Only ever true when collapsible.
@@ -149,6 +155,7 @@ impl State {
             sections: Vec::new(),
             search_hotkey: None,
             check: None,
+            scan: Progress::default(),
             collapsible: false,
             folded: false,
         }
@@ -394,7 +401,7 @@ impl State {
                 self.selected = Some(row);
                 self.enter(index, place)
             }
-            Some(Row::Line(_)) => {
+            Some(line @ Row::Line(_)) if line.selectable() => {
                 self.selected = Some(row);
                 self.activate_line(index)
             }
@@ -701,6 +708,33 @@ impl State {
     /// it: the text the window should try to register.
     pub fn check(&self) -> Option<&str> {
         self.check.as_deref()
+    }
+
+    /// Whether `/` is in the box, so the folders should be listed.
+    pub fn wants_files(&self) -> bool {
+        self.prefix() == Some('/')
+    }
+
+    /// The listing of `/` got further: `index` has more entries, or `progress`
+    /// has news. The new rows join without moving the selection, which stays on
+    /// the same result (and an open action menu with it) wherever that lands.
+    pub fn files_changed(&mut self, index: &Index, progress: Progress) {
+        self.scan = progress;
+        if !self.wants_files() {
+            return;
+        }
+        let menu = self.menu.take();
+        let kept = self.selected_hit();
+        self.refresh(index);
+        let row = kept.and_then(|kept| {
+            self.rows
+                .iter()
+                .position(|row| matches!(row, Row::Result(hit) if hit.entry == kept.entry))
+        });
+        if let Some(row) = row {
+            self.selected = Some(row);
+            self.menu = menu.map(|menu| ActionMenu { row, ..menu });
+        }
     }
 
     /// The prefix typed first, if it starts a list of its own. Only on the
@@ -1018,6 +1052,33 @@ impl State {
                 }
             }
             '#' => self.list_hotkeys(index, rest),
+            '/' => {
+                let hits = if rest.is_empty() {
+                    index
+                        .entries()
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, entry)| entry.source == Source::BrowsedFile)
+                        .map(|(position, _)| Hit {
+                            entry: position as u32,
+                            score: 0,
+                            matched: Field::Name,
+                        })
+                        .collect()
+                } else {
+                    self.searcher
+                        .search(index, &self.query, Scope::Files)
+                        .to_vec()
+                };
+                if !hits.is_empty() {
+                    self.rows.push(Row::Header(Heading::Files));
+                    self.rows.extend(hits.into_iter().map(Row::Result));
+                }
+                // Last: the rows above it do not move when it goes.
+                if self.scan.worth_a_row() {
+                    self.rows.push(Row::Line(Line::Scan));
+                }
+            }
             '?' => {
                 let mut lines = Vec::new();
                 for info in PREFIXES {
@@ -2666,6 +2727,129 @@ mod tests {
         assert_eq!(press(&mut state, &index, Key::Enter), Outcome::Redraw);
         assert_eq!(state.input().text(), "#", "the second one");
         assert_eq!(lines(&state), [Line::SearchHotkey]);
+    }
+
+    /// `index` with `names` appended as files of `/`.
+    fn with_files(index: &mut Index, names: &[&str]) {
+        let first = index
+            .entries()
+            .iter()
+            .filter(|entry| entry.source == Source::BrowsedFile)
+            .count() as u32;
+        for (n, name) in names.iter().enumerate() {
+            index.push(super::super::index::Entry::from_file(
+                first + n as u32,
+                Kind::File,
+                name,
+            ));
+        }
+    }
+
+    fn listing() -> Progress {
+        Progress {
+            started: true,
+            listing: true,
+            folders: 1,
+            ..Progress::default()
+        }
+    }
+
+    #[test]
+    fn slash_asks_for_the_files_lists_them_and_says_how_it_is_going() {
+        let (mut state, mut index) = (state(), index());
+        assert!(!state.wants_files());
+        type_text(&mut state, &index, "/");
+        assert!(state.wants_files());
+        assert!(state.rows().is_empty(), "nothing yet");
+
+        state.files_changed(&index, listing());
+        assert_eq!(lines(&state), [Line::Scan]);
+        assert_eq!(state.selected(), None, "a note is not a selection");
+        assert!(!state.select_row(0));
+        assert_eq!(state.click_row(&index, 0), Outcome::Nothing);
+        assert_eq!(press(&mut state, &index, Key::Enter), Outcome::Nothing);
+
+        with_files(&mut index, &["deploy.ps1", "notes.txt"]);
+        state.files_changed(&index, listing());
+        assert_eq!(state.rows()[0], Row::Header(Heading::Files));
+        assert_eq!(names(&state, &index), ["deploy.ps1", "notes.txt"]);
+        assert_eq!(state.rows().last(), Some(&Row::Line(Line::Scan)));
+        assert_eq!(state.selected(), Some(1));
+
+        let done = Progress {
+            listing: false,
+            ..listing()
+        };
+        state.files_changed(&index, done);
+        assert!(lines(&state).is_empty(), "nothing left to say");
+    }
+
+    #[test]
+    fn slash_searches_files_and_only_files() {
+        let (mut state, mut index) = (state(), index());
+        with_files(&mut index, &["notes.txt", "deploy.ps1"]);
+        type_text(&mut state, &index, "/note");
+        assert_eq!(names(&state, &index), ["notes.txt"], "not the app Notes");
+
+        press(&mut state, &index, Key::Escape);
+        type_text(&mut state, &index, "note");
+        assert!(
+            !names(&state, &index).contains(&"notes.txt".to_owned()),
+            "and a plain search does not see the files"
+        );
+    }
+
+    #[test]
+    fn files_join_without_moving_the_selection() {
+        let (mut state, mut index) = (state(), index());
+        with_files(&mut index, &["report a.txt", "report b.txt"]);
+        type_text(&mut state, &index, "/report");
+        press(&mut state, &index, Key::Down);
+        let kept = state.selected_hit().unwrap();
+        assert_eq!(name_of(&index, kept), "report b.txt");
+        state.handle(&index, shortcut("Alt+Enter"));
+        assert!(state.menu().is_some());
+
+        // A better match arrives, above it.
+        with_files(&mut index, &["report"]);
+        state.files_changed(&index, listing());
+        assert_eq!(names(&state, &index)[0], "report");
+        let hit = state.selected_hit().unwrap();
+        assert_eq!(hit.entry, kept.entry, "still on the same file");
+        let menu = state.menu().expect("the menu stays open");
+        assert_eq!(Some(menu.row), state.selected(), "and on its row");
+    }
+
+    #[test]
+    fn files_arriving_leave_any_other_list_alone() {
+        let (mut state, mut index) = (state(), index());
+        type_text(&mut state, &index, "notepad");
+        let rows = state.rows().to_vec();
+        with_files(&mut index, &["notepad.txt"]);
+        state.files_changed(&index, listing());
+        assert_eq!(state.rows(), rows);
+    }
+
+    #[test]
+    fn a_file_has_the_actions_of_a_file() {
+        let (mut state, mut index) = (state(), index());
+        with_files(&mut index, &["deploy.ps1"]);
+        type_text(&mut state, &index, "/dep");
+        let ids: Vec<ActionId> = state
+            .available_actions(&index)
+            .iter()
+            .map(|action| action.id)
+            .collect();
+        assert_eq!(ids, [ActionId::Open], "no file behind this bare entry");
+
+        let entry = &index.entries()[state.selected_hit().unwrap().entry as usize];
+        assert!(!actions::applies(ActionId::Reveal, entry), "in no menu");
+        assert!(!actions::applies(ActionId::Edit, entry), "in no file");
+        let hit = state.selected_hit().unwrap();
+        assert_eq!(
+            press(&mut state, &index, Key::Enter),
+            Outcome::Activate(hit, ActionId::Open)
+        );
     }
 
     #[test]

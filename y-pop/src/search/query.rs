@@ -57,6 +57,8 @@ pub enum Scope {
     Menus,
     /// Only what has a hotkey: the list of `#`.
     Hotkeys,
+    /// Only the files of browsed folders: the list of `/`.
+    Files,
 }
 
 /// One result: an entry of the index, how well it matched, and by what.
@@ -114,10 +116,11 @@ impl Searcher {
         }
         for (position, entry) in index.entries().iter().enumerate() {
             let outside = match scope {
-                Scope::All => false,
+                Scope::All => entry.source == Source::BrowsedFile,
                 Scope::Within(group) => !entry.ancestors.contains(&group),
                 Scope::Menus => entry.source != Source::Menu,
                 Scope::Hotkeys => entry.hotkeys().is_empty(),
+                Scope::Files => entry.source != Source::BrowsedFile,
             };
             if outside {
                 continue;

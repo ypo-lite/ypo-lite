@@ -25,13 +25,13 @@ runs it and reports; sessions don't drive the desktop themselves)
 | 6 History, Recent, sections, collapsed mode | 👁 |
 | 6b Windows's history replaces y-pop's | 👁 |
 | 7 Browsing the tray menus | ⬜ |
-| 8 Prefixes and the hotkey check | ⬜ |
+| 8 Prefixes and the hotkey check | 👁 |
 | 9 The Start menu section | ⬜ |
 | 10 Search-only groups and folders | ⬜ |
 | 11 `y-pop-config` support | ⬜ |
 | later | Search layer in the boards; plugins |
 
-**Resume here:** the live check of phase 6b (its "Done when" is the first thing to look at: the launch route changed for every app), then phase 8.4 (`/` files, background thread) is the one open task of phases 6 and 8; everything else through 8 is built (awaiting a live look; 6.4 is the flat-list form, the real views come with phases 7, 9, 10). The user manual is `docs/user-manual.md`: update it with each feature. Still to look at (👁): all of phase 4 (checklist under its "Done when"), the action menu, the row buttons, Reveal and the configured shortcuts of 5.2–5.6, the start-up balloon and the search hotkey (phase 1), icon quality at 32 and 48 px and `y-snap`'s overlays unchanged (phase 3). Task 1.9 (`tray="true"`) is for later.
+**Resume here:** the live check of phase 6b (its "Done when" is the first thing to look at: the launch route changed for every app), then of 8.4 (its checklist is under "8.4 built"). Everything through 8 is built (awaiting a live look; 6.4 is the flat-list form, the real views come with phases 7, 9, 10); the next thing to build is phase 7, 9, 10 or 11. The user manual is `docs/user-manual.md`: update it with each feature. Still to look at (👁): all of phase 4 (checklist under its "Done when"), the action menu, the row buttons, Reveal and the configured shortcuts of 5.2–5.6, the start-up balloon and the search hotkey (phase 1), icon quality at 32 and 48 px and `y-snap`'s overlays unchanged (phase 3). Task 1.9 (`tray="true"`) is for later.
 
 ---
 
@@ -626,10 +626,7 @@ history keys use the raw names, which are the identity.
   the painting, the probe (`RegisterHotKey` on the search window: a key held by a
   program must be seen as taken), the commands and the toggle of Start with
   Windows.
-- **Not done: 8.4, `/` (files in browsed folders)**, and `/` is therefore not in
-  `?` or on the line of prefixes. It needs a background listing thread, a
-  `WM_APP` message to append results without moving the selection, and the
-  `index="true"` rule for network folders.
+- **8.4, `/`** came later: see "8.4 built" under phase 8.
 
 **6.6 built (2026-10-26)** — `collapsed="true"`:
 
@@ -768,10 +765,69 @@ Spec §2.7, §2.14.
 | 8.1 | `>` commands: reload, open settings, edit `y-pop.xml`, open configuration folder, refresh Start menu, start with Windows, about, quit. (Clear history was dropped by 6b.) | 👁 (without Start menu refresh, which has no Start menu yet) |
 | 8.2 | `#` hotkeys: every binding (search's own included), filtered. | 👁 |
 | 8.3 | `#<combination>` check: `RegisterHotKey` probe on the search window, unregistered at once; built-in table of keys Windows reserves; "free" row opens `y-pop-config` ready to assign (plain open until 11.x). | 👁 |
-| 8.4 | `/` files in browsed folders: listed on first `/` per opening on a background thread, results posted back (`WM_APP` pattern) and appended without moving the selection; network folders skipped unless `index="true"`. | ⬜ |
+| 8.4 | `/` files in browsed folders: listed on first `/` per opening on a background thread, results posted back (`WM_APP` pattern) and appended without moving the selection; network folders skipped unless `index="true"`. | 👁 |
 | 8.5 | `?` lists the prefixes. | 👁 |
 
 **Done when:** 👁 each prefix; `/` stays responsive on a slow folder.
+
+**8.4 built (2026-10-30)** — `search::files` (10 tests), and 5 new in `State`, 1
+in `display`:
+
+- **The thread** (`Files::start`) walks with the same `browse::list` as the tray
+  menus, so `filter`, `depth` and `open-folder` mean the same; that moved
+  `browse` into the library. Breadth-first over all the folders at once, local
+  ones before network ones. It sends a folder at a time, so a slow folder does
+  not hold back what is already found, and wakes the window with
+  `WM_SEARCH_FILES` at most once between two takes, so a walk through thousands
+  of small folders does not flood the queue.
+- **Results** append to the `Index` as `Source::BrowsedFile`, `Target::File`, so
+  rows already shown stay valid. `Scope::All` leaves them out and `Scope::Files`
+  is all it sees; `/` is one flat list under **FILES**, in listing order with
+  nothing typed, ranked otherwise. `State::files_changed` keeps the selection on
+  the same result, and an open action menu with it.
+- **Running one** is what the tray menu runs: `Pick::File(App)`, with the
+  folder's `shell` and `elevate`, through the same `run_app_action`.
+- **A note at the end of the list** (`Line::Scan`, not selectable): `Listing
+  folders… N found`, then only if there is something to say: the cap, network
+  folders skipped, or no browsed folders at all. Last, so that no row moves when
+  it goes. On a long list that means scrolling down to read about a skipped
+  folder.
+- **`index="true"`** is on any browsed `<app>`; `Browse::index`. In `y_pop::
+  settings` it round-trips as an unknown attribute until 11.4 gives it an editor.
+
+Decisions, none of them in the spec:
+
+- **Sub-folders are results too**, opened in Explorer. A folder of project
+  checkouts is one of §2.5.3's uses, and it is the folders you look for there.
+- **At most 5000 files per opening** (`files::CAP`), and the note says so.
+- A file's name is searched, its full file name (with the `.exe` the list hides)
+  and the browsed folder's name, so `/scripts dep` narrows.
+- **No icon for a file on a network folder**: icons load on the window's thread,
+  and reading one there would block typing.
+- **No `Run as administrator` on a file** (it needs `Kind::App`). `elevate="true"`
+  on the folder still applies, as in the menu.
+- **A mapped network drive is not a network folder**: only `\\…` is, as the spec
+  says. It is listed, and the thread is what keeps that from blocking.
+- A thread stuck on an unresponsive share cannot be interrupted: it ends when the
+  system gives up. Another opening's `/` starts a thread of its own.
+
+**Fix (2026-10-30) — a crash on `/`.** `Listing folders…` has no second line, and
+`Canvas::draw_text_ellipsis` handed the empty text to `DrawTextW`, which read
+through the dangling pointer of an empty `Vec` (access violation in `user32`).
+Empty text now draws nothing, in `y-core`, for every caller; a test in
+`overlay.rs` reproduced the crash at the same address before the fix.
+
+What to look at for the 👁:
+
+1. `/` lists the files of the tray menus' and the search-only browsed folders,
+   and opens one (a file, then a sub-folder in Explorer). `/scripts dep` narrows.
+   A plain search does not find them.
+2. The action menu on a file: Show in folder, Copy path; no Reveal, no Edit.
+3. A file opened from `/` shows up in Recent, as one from a tray menu does.
+4. A big folder: rows join while the selection stays put, typing stays quick,
+   and closing the window meanwhile is clean.
+5. A `\\…` folder: skipped and said so; with `index="true"`, listed, no icons.
+6. The line of prefixes has four chips and they fit the window.
 
 ---
 
@@ -815,7 +871,7 @@ Can start any time after phase 1; 11.1 and 11.2 unblock 5.7 and 9.5.
 | 11.1 | Command line `--select "<path in tree>"`; if already running, forward through `y_pop::ipc` (a second registered message, or `WM_COPYDATA`) and bring it to the front. | ⬜ |
 | 11.2 | `--new-app` with prefilled fields (from the Start menu); opens the "add" flow of phase 8 of `y-pop-config/docs/plan.md`. | ⬜ |
 | 11.3 | A **Search** node in the outline: hotkey, collapsed, results, row actions, history; the sections list (add, remove, reorder); search-only groups and folders edited like menu items. | ⬜ |
-| 11.4 | `keywords` field in the item inspector. | ⬜ |
+| 11.4 | `keywords` field in the item inspector, and `index` for a browsed folder. | ⬜ |
 
 **Done when:** 👁 search configured entirely from `y-pop-config`.
 

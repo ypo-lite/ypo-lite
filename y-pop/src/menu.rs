@@ -165,7 +165,7 @@ struct PendingFolder {
     shell: Option<bool>,
     elevate: bool,
     /// This folder's own distance from the browse app's root — `0` for the
-    /// root itself. Threaded through to [`crate::browse::list`] so it can
+    /// root itself. Threaded through to [`y_pop::browse::list`] so it can
     /// tell whether *its* children have room left under `browse.depth` to
     /// become their own submenus, or have reached the deepest allowed level
     /// and should be flattened instead — see `Browse::depth`. `u8`, matching
@@ -541,7 +541,7 @@ pub fn on_init_menu_popup(session: &mut Session, hmenu: HMENU) {
         let _ = menu::append_separator(hmenu, session.design);
     }
 
-    let entries = crate::browse::list(&pending.dir, &pending.browse, pending.level);
+    let entries = y_pop::browse::list(&pending.dir, &pending.browse, pending.level);
     if entries.is_empty() {
         let _ = menu::append_disabled_item(hmenu, "(empty)", session.design);
         return;
@@ -613,16 +613,7 @@ pub fn on_init_menu_popup(session: &mut Session, hmenu: HMENU) {
 /// folder in Explorer never needs elevation, and eagerly asking for it here
 /// would be a UAC prompt for something that doesn't need one.
 fn open_folder_app(dir: &str) -> App {
-    App {
-        exe: Some(Arc::from(dir)),
-        app_id: None,
-        param: None,
-        path: None,
-        shell: Some(true),
-        elevate: false,
-        events: EventMask::default(),
-        browse: None,
-    }
+    App::open_folder(dir)
 }
 
 // `on_init_menu_popup` above uses `y_core::menu::append_item`/

@@ -7,6 +7,7 @@ use std::ops::Range;
 use crate::model::{ConfigTree, NodeId, NodeKind};
 
 use super::commands::{Command, Line, PREFIXES};
+use super::files::{CAP, Progress};
 use super::index::{Entry, Field, Kind, Source};
 use super::keycheck::Availability;
 use super::matcher::plain;
@@ -72,6 +73,8 @@ pub struct LineContext<'a> {
     /// The combination `#` is checking and what the system said of it; `None`
     /// for the answer while it is still being asked.
     pub check: Option<(&'a str, Option<Availability>)>,
+    /// How the listing of `/` is going.
+    pub scan: Progress,
 }
 
 /// The words of one row of a prefixed list.
@@ -108,6 +111,39 @@ pub fn line_text(line: Line, context: &LineContext) -> LineText {
             trailing: context.search_hotkey.map(str::to_owned),
             ..plain("Open Search", "The search hotkey")
         },
+        Line::Scan => {
+            let Progress {
+                listing,
+                folders,
+                skipped,
+                found,
+                capped,
+                ..
+            } = context.scan;
+            let left_out = match skipped {
+                0 => String::new(),
+                1 => "1 network folder skipped: index=\"true\" includes it".to_owned(),
+                n => format!("{n} network folders skipped: index=\"true\" includes them"),
+            };
+            if listing {
+                plain(&format!("Listing folders… {found} found"), &left_out)
+            } else if capped {
+                plain(
+                    &format!("Only the first {CAP} files are searched"),
+                    &left_out,
+                )
+            } else if skipped > 0 {
+                let title = left_out.split(':').next().unwrap_or_default();
+                plain(title, "index=\"true\" on a folder lists it anyway")
+            } else if folders == 0 {
+                plain(
+                    "No browsed folders",
+                    "/ searches the folders that have browse=\"true\"",
+                )
+            } else {
+                plain("", "")
+            }
+        }
         Line::Check => {
             let Some((typed, availability)) = context.check else {
                 return plain("Checking…", "");
@@ -438,6 +474,49 @@ mod tests {
                 .starts_with("Checking")
         );
     }
+    #[test]
+    fn the_listing_says_how_it_is_going_and_what_it_left_out() {
+        let say = |scan: Progress| {
+            line_text(
+                Line::Scan,
+                &LineContext {
+                    scan,
+                    ..LineContext::default()
+                },
+            )
+        };
+        let base = Progress {
+            started: true,
+            folders: 2,
+            ..Progress::default()
+        };
+        let listing = say(Progress {
+            listing: true,
+            found: 12,
+            skipped: 1,
+            ..base
+        });
+        assert_eq!(listing.title, "Listing folders… 12 found");
+        assert!(listing.subtitle.starts_with("1 network folder skipped"));
+
+        assert_eq!(
+            say(Progress {
+                capped: true,
+                ..base
+            })
+            .title,
+            format!("Only the first {CAP} files are searched")
+        );
+        assert_eq!(
+            say(Progress { skipped: 2, ..base }).title,
+            "2 network folders skipped"
+        );
+        assert_eq!(
+            say(Progress { folders: 0, ..base }).title,
+            "No browsed folders"
+        );
+    }
+
     #[test]
     fn how_long_ago_is_said_in_a_few_words() {
         assert_eq!(ago(0), "just now");

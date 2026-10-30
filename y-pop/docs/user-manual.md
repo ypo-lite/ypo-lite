@@ -234,7 +234,7 @@ read, and launches are not reported to it.
 
 The **first character** of the box can pick what to search. Under the sections
 the empty box has a line of clickable chips — `> commands`, `# hotkeys`,
-`? help` — and typing the character does the same. A prefix only counts in the
+`/ files`, `? help` — and typing the character does the same. A prefix only counts in the
 outermost box: inside a section or a group, `>` is just text. Erase the
 character (or press `Esc`) to come back.
 
@@ -273,6 +273,30 @@ on the search window for a moment and letting go at once:
   low-level hook.
 
 A combination the file already uses is just found, not checked.
+
+### `/` — files in browsed folders
+
+`/` searches the files and sub-folders inside every browsed folder
+(`browse="true"`), the tray menus' and the ones only in `<search>`. That is the
+only place they are searched, so a plain search never waits for a disk.
+
+The folders are listed the first time you type `/` after opening search, in the
+background: results join the list as they arrive, without moving your selection.
+They follow the folder's `filter` and `depth`, as its tray menu does. Type to
+narrow, by the file's name or the browsed folder's (`/scripts dep`). `Enter`
+opens what is selected, as the tray menu would: a sub-folder opens in Explorer.
+The action menu has **Show in folder** and **Copy path**.
+
+A note at the end of the list says when something was left out:
+
+- **Network folders** (`\\server\share`) are skipped, unless the folder has
+  `index="true"`. A drive letter mapped to a share is not recognised as one, and
+  is listed. Files on a network folder show no icon.
+- **At most 5000** files are listed per opening.
+
+```xml
+<app name="Team share" exe="\\server\share\docs" browse="true" index="true"/>
+```
 
 ### `?` — the prefixes
 
@@ -371,7 +395,7 @@ the search, not in any tray menu:
   result too, and its apps carry its name as their path.
 - An **`<app>` directly in `<search>` must be a browsed folder**
   (`browse="true"`). A plain `<app>` there is ignored with a warning — put it
-  in a `<group>`.
+  in a `<group>`. Its files are searched through `/`.
 
 ### Actions
 
@@ -415,7 +439,6 @@ anything yet:
 - the **real views** of the sections: Miller columns for the tray menus, the
   A–Z lists (today every section is a flat list), and `include=` on `<menus>`;
 - **`<start-menu>`**: Start menu apps are not searched yet;
-- the **`/` prefix** (files inside browsed folders);
 - **plugins** (`<plugin>` is kept but not run);
 - **Add to a menu**;
 - **Edit** selecting the item in `y-pop-config`.

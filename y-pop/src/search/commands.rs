@@ -77,6 +77,9 @@ pub enum Line {
     /// `#` and a free-or-taken answer for the combination typed
     /// (`State::check` has the combination).
     Check,
+    /// How the listing of `/` is going. Says something, does nothing: it cannot
+    /// be selected.
+    Scan,
 }
 
 /// One prefix and what it does, for the line under the sections and for `?`.
@@ -89,7 +92,7 @@ pub struct PrefixInfo {
 }
 
 /// The prefixes that work, in the order they are listed.
-pub const PREFIXES: [PrefixInfo; 3] = [
+pub const PREFIXES: [PrefixInfo; 4] = [
     PrefixInfo {
         prefix: '>',
         name: "commands",
@@ -99,6 +102,11 @@ pub const PREFIXES: [PrefixInfo; 3] = [
         prefix: '#',
         name: "hotkeys",
         description: "Hotkeys: every binding, or check whether a key is free",
+    },
+    PrefixInfo {
+        prefix: '/',
+        name: "files",
+        description: "Files inside browsed folders",
     },
     PrefixInfo {
         prefix: '?',

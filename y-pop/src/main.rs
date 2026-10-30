@@ -12,7 +12,6 @@
 
 #![windows_subsystem = "windows"]
 
-mod browse;
 mod menu;
 mod search_window;
 mod tooltip;
@@ -39,7 +38,7 @@ use search_window::Pick;
 use y_pop::{
     config, ipc,
     launch::Usage,
-    model::{ActionId, ConfigTree, EventMask, NodeId, NodeKind, TrayExtras},
+    model::{ActionId, App, ConfigTree, EventMask, NodeId, NodeKind, TrayExtras},
     search::{commands::Command, history::Item},
 };
 
@@ -157,32 +156,49 @@ impl YPop {
                 let position = monitor::cursor_position().unwrap_or(POINT { x: 0, y: 0 });
                 self.run(hwnd, node, position);
             }
+            // Until the `y-pop-config --select` of task 5.7, the settings app
+            // opens without the entry selected.
+            ActionId::Edit => self.open_settings(),
+            ActionId::Reveal => self.reveal(hwnd, node),
+            _ => {
+                if let NodeKind::App(app) = &self.tree.node(node).kind {
+                    self.run_app_action(hwnd, app, action);
+                }
+            }
+        }
+    }
+
+    /// What the user chose in the search window on a file `/` found. `app` is
+    /// what the tray menu would run for it.
+    fn run_file_pick(&self, hwnd: HWND, app: &App, action: ActionId) {
+        match action {
+            ActionId::Open => launch_and_report(hwnd, app, self.usage()),
+            _ => self.run_app_action(hwnd, app, action),
+        }
+    }
+
+    /// The actions that only need the program: the same for a tree item and a
+    /// file found by `/`.
+    fn run_app_action(&self, hwnd: HWND, app: &App, action: ActionId) {
+        match action {
             // The other way round for the history, this time only.
             ActionId::OpenToggled => {
-                if let NodeKind::App(app) = &self.tree.node(node).kind {
-                    let usage = if app.shell == Some(false) {
-                        Usage::Forced
-                    } else {
-                        Usage::Silent
-                    };
-                    launch_and_report(hwnd, app, usage);
-                }
+                let usage = if app.shell == Some(false) {
+                    Usage::Forced
+                } else {
+                    Usage::Silent
+                };
+                launch_and_report(hwnd, app, usage);
             }
             // The same launch with elevation asked for, this time only.
             ActionId::RunAsAdmin => {
-                if let NodeKind::App(app) = &self.tree.node(node).kind {
-                    let mut app = app.clone();
-                    app.elevate = true;
-                    launch_and_report(hwnd, &app, self.usage());
-                }
+                let mut app = app.clone();
+                app.elevate = true;
+                launch_and_report(hwnd, &app, self.usage());
             }
             ActionId::ShowInFolder => {
-                let entry_file = match &self.tree.node(node).kind {
-                    NodeKind::App(app) => app.exe.as_deref(),
-                    _ => None,
-                };
                 // A bare `notepad.exe` is found the way a launch would find it.
-                let path = entry_file.and_then(|file| {
+                let path = app.exe.as_deref().and_then(|file| {
                     let path = std::path::Path::new(file);
                     if path.is_absolute() {
                         Some(path.to_path_buf())
@@ -195,14 +211,10 @@ impl YPop {
                     None => y_core::log::line("search: no file to show in Explorer"),
                 }
             }
-            // Until the `y-pop-config --select` of task 5.7, the settings app
-            // opens without the entry selected.
-            ActionId::Edit => self.open_settings(),
-            ActionId::Reveal => self.reveal(hwnd, node),
-            // Handled in the window, which has the clipboard.
-            ActionId::CopyPath => {}
-            // Not reachable: a Start-menu item, and what the window does itself.
-            ActionId::AddToMenu | ActionId::Forget => {}
+            // Copying a path is done in the window, which has the clipboard.
+            // The rest are not reached: a Start-menu item, and what the window
+            // does itself.
+            _ => {}
         }
     }
 
@@ -646,6 +658,7 @@ impl TrayApp for YPop {
                 Some((Pick::History(item), action)) => {
                     self.run_history_pick(hwnd, &item, action);
                 }
+                Some((Pick::File(app), action)) => self.run_file_pick(hwnd, &app, action),
                 None => {}
             }
             if let Some(command) = command {
