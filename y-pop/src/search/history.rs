@@ -303,6 +303,7 @@ fn entry_of(item: &Item, number: u32) -> Entry {
                 file: path.is_some(),
                 store: y_core::apps_folder::packaged_id(&launch.id).is_some(),
                 recorded: Some(true),
+                browsable: false,
             };
         }
         Origin::File(_) => {

@@ -248,6 +248,44 @@ pub fn subtitle(tree: &ConfigTree, entry: &Entry, matched: Field) -> String {
     location(tree, id, entry)
 }
 
+/// The lines of text of the details pane of a column (spec §2.4), under the
+/// name: where it is, what it runs, its hotkeys, its tooltip, and what `→` does
+/// on a folder. Nothing for an entry that is not a node: see `Files::detail`.
+pub fn details(tree: &ConfigTree, entry: &Entry) -> Vec<String> {
+    let Some(id) = entry.node() else {
+        return Vec::new();
+    };
+    let node = tree.node(id);
+    let mut lines = Vec::new();
+    if !entry.ancestors.is_empty() {
+        let path: Vec<&str> = entry
+            .ancestors
+            .iter()
+            .map(|&id| tree.node(id).name.as_ref())
+            .collect();
+        lines.push(plain(&path.join(" › ")));
+    }
+    if let Some(target) = target(tree, entry) {
+        lines.push(target);
+    }
+    if entry.kind == Kind::Command {
+        lines.push("Command".to_owned());
+    }
+    for binding in &node.hotkeys {
+        lines.push(binding.hotkey.to_string());
+    }
+    if let Some(tooltip) = &node.tooltip {
+        lines.push(tooltip.to_string());
+    }
+    if entry.facts.browsable {
+        lines.push(FOLDER_HINT.to_owned());
+    }
+    lines
+}
+
+/// What the details of a folder say, as nothing has been read from it yet.
+pub const FOLDER_HINT: &str = "→ lists what is inside";
+
 /// Where an entry is: `Only in search · Work › Servers · C:\Windows\mstsc.exe`.
 fn location(tree: &ConfigTree, id: NodeId, entry: &Entry) -> String {
     let node = tree.node(id);
@@ -317,6 +355,36 @@ mod tests {
             .iter()
             .find(|entry| entry.name() == name)
             .unwrap()
+    }
+
+    #[test]
+    fn the_details_say_where_it_is_what_it_runs_and_what_opens_it() {
+        let tree = tree();
+        let index = Index::from_tree(&tree);
+        assert_eq!(
+            details(&tree, entry(&index, "outlook")),
+            ["Work", r"C:\Office\OUTLOOK.EXE", "Win+O", "Mail client"]
+        );
+        assert_eq!(
+            details(&tree, entry(&index, "remote desktop")),
+            ["Work › Servers", "mstsc.exe"]
+        );
+        assert_eq!(details(&tree, entry(&index, "quit")), ["Work", "Command"]);
+    }
+
+    #[test]
+    fn the_details_of_a_browsed_folder_say_it_has_not_been_read() {
+        let mut builtins: Vec<Variable> = Vec::new();
+        let tree = config::load_str(
+            r#"<y-pop><app name="Scripts" exe="C:\Scripts" browse="true"/></y-pop>"#,
+            &mut builtins,
+        )
+        .unwrap();
+        let index = Index::from_tree(&tree);
+        assert_eq!(
+            details(&tree, &index.entries()[0]),
+            [r"C:\Scripts", FOLDER_HINT]
+        );
     }
 
     #[test]

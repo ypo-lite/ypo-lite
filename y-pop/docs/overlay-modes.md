@@ -265,8 +265,9 @@ on its shape:
 
 | Section | Shows when opened |
 |---|---|
-| Tray menus, `browse="columns"` *(default)* | Miller columns: the tray menus, then the content of what is selected in the column before (group or browsed folder), and a **details pane** for an app (big icon, path in the tree, exe, hotkey, tooltip; Open / Reveal / Edit). `↑`/`↓` move, `→` goes in, `←` comes back (out of the section from the first column). |
-| Tray menus, `browse="a-z"` | Every app of every tray menu in one alphabetical list, letter headers, a clickable letter index. |
+| Tray menus, `browse="columns|a-z|list"`. `include="` *(default)* | Miller columns: the tray menus, then the content of what is selected in the column before, and a **details pane** for an app (big icon, path in the tree, exe, hotkey, tooltip; Open / Reveal / Edit). A group previews its content; a browsed folder shows its details, and is only read when `→` opens its column, so that walking past it touches no disk. `↑`/`↓` move, `→` goes in, `←` comes back (out of the section from the first column), `Esc` leaves the section from any column. |
+| Tray menus, `browse="a-z"` | Every app of every tray menu in one alphabetical list, letter headers, a clickable letter index that stays above the list as it scrolls. |
+| Tray menus, `browse="list"` | The tray icons as a plain list of full rows; a group is entered as a chip, one level at a time. |
 | All recent | Everything Windows remembers, newest first, up to 200; typing filters it. Every row keeps its actions, Forget included. |
 | Start menu | A–Z, like the Start menu's "All apps"; a shortcut inside a Start-menu folder says so on its second line. |
 | A search-only `<group>` | Its items, in config order. |
@@ -300,7 +301,7 @@ plain query, and each can be opened alone (§2.4).
 | Element | Brings in | Notes |
 |---|---|---|
 | `<recent count="5"/>` | What Windows remembers: apps and files | `count` is what the empty box shows; the rest is behind **All recent**. A launch of a tray-menu or search-only item *is* that item. The apps and files nothing else holds are searched too. §2.10. |
-| `<menus/>` | Every tray menu: groups, apps, browsed folders, built-ins | Present implicitly if omitted, placed after `<recent>`. `browse="columns\|a-z"`. `include="y-pop;Work"` limits it to some tray menus, `;`-separated because a menu name may contain spaces (replaces Revision 3's `scope`). |
+| `<menus/>` | Every tray menu: groups, apps, browsed folders, built-ins | Present implicitly if omitted, placed after `<recent>`. `browse="columns|a-z|list"`. `include=\|a-z"`. `include="y-pop;Work"` limits it, and the plain search, to some tray menus, `;`-separated because a menu name may contain spaces (replaces Revision 3's `scope`). `#` and `/` still see the others. |
 | `<start-menu/>` | Shortcuts in the Start menu's Programs folders, and installed Store apps | On by default (§2.2). §2.5.1. |
 | `<group name="…">` | Apps that **only search shows** | §2.5.2. |
 | `<app browse="true" …/>` | A folder that **only search shows** | §2.5.3. |

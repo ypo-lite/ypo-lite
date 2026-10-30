@@ -24,6 +24,9 @@ pub enum Source {
     History,
     /// Found in a browsed folder: only `/` searches these.
     BrowsedFile,
+    /// In a browsed folder a column of the tray menus went into: only that
+    /// column shows these.
+    Column,
 }
 
 /// What an entry stands for.
@@ -64,6 +67,9 @@ pub struct Entry {
     pub ancestors: Vec<NodeId>,
     /// What the entry is made of, for deciding which actions apply to it.
     pub facts: Facts,
+    /// In a tray menu that `<menus include>` leaves out: not in the tray menus
+    /// section, nor in a plain search. `#` and `/` still see it.
+    pub left_out: bool,
     name: Box<str>,
     keywords: Box<str>,
     exe: Box<str>,
@@ -87,6 +93,8 @@ pub struct Facts {
     /// Whether opening it goes into Windows's history. `None` when the history
     /// is off, and for what is not launched.
     pub recorded: Option<bool>,
+    /// A folder that can be listed: a column can go inside it.
+    pub browsable: bool,
 }
 
 /// Which field of an entry a query matched, for the second line of a result
@@ -124,6 +132,7 @@ impl Entry {
             target: Target::Node(id),
             ancestors: Vec::new(),
             facts: Facts::default(),
+            left_out: false,
             name: fold(&plain(name)).into(),
             keywords: "".into(),
             exe: "".into(),
@@ -221,7 +230,16 @@ impl Index {
         let mut index = Self::default();
         let mut groups = Vec::new();
         for &root in &tree.roots {
+            let first = index.entries.len();
             index.add_node(tree, root, Source::Menu, &mut groups);
+            let name = &tree.node(root).name;
+            if let Some(search) = &tree.search
+                && !search.includes_menu(name)
+            {
+                for entry in &mut index.entries[first..] {
+                    entry.left_out = true;
+                }
+            }
         }
         if let Some(search) = &tree.search {
             for node in search.nodes() {
@@ -269,6 +287,7 @@ impl Index {
                 file: app.exe.is_some() && app.app_id.is_none(),
                 store: app.app_id.is_some(),
                 recorded: (kind == Kind::App && history).then_some(app.shell != Some(false)),
+                browsable: kind == Kind::Folder,
             };
         }
         for binding in &data.hotkeys {

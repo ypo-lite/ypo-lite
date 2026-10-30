@@ -24,14 +24,14 @@ runs it and reports; sessions don't drive the desktop themselves)
 | 5 Result actions | 🔨 |
 | 6 History, Recent, sections, collapsed mode | 👁 |
 | 6b Windows's history replaces y-pop's | 👁 |
-| 7 Browsing the tray menus | ⬜ |
+| 7 Browsing the tray menus | 👁 |
 | 8 Prefixes and the hotkey check | 👁 |
 | 9 The Start menu section | ⬜ |
 | 10 Search-only groups and folders | ⬜ |
 | 11 `y-pop-config` support | ⬜ |
 | later | Search layer in the boards; plugins |
 
-**Resume here:** the live check of phase 6b (its "Done when" is the first thing to look at: the launch route changed for every app), then of 8.4 (its checklist is under "8.4 built"). Everything through 8 is built (awaiting a live look; 6.4 is the flat-list form, the real views come with phases 7, 9, 10); the next thing to build is phase 7, 9, 10 or 11. The user manual is `docs/user-manual.md`: update it with each feature. Still to look at (👁): all of phase 4 (checklist under its "Done when"), the action menu, the row buttons, Reveal and the configured shortcuts of 5.2–5.6, the start-up balloon and the search hotkey (phase 1), icon quality at 32 and 48 px and `y-snap`'s overlays unchanged (phase 3). Task 1.9 (`tray="true"`) is for later.
+**Resume here:** the live check of phase 6b (its "Done when" is the first thing to look at: the launch route changed for every app), then of 8.4 (its checklist is under "8.4 built"), then of phase 7 (its checklist is under "What to look at"). Everything through 8 is built (awaiting a live look; the views of the Start menu and of a search-only folder come with phases 9, 10); the next thing to build is phase 9, 10 or 11. The user manual is `docs/user-manual.md`: update it with each feature. Still to look at (👁): all of phase 4 (checklist under its "Done when"), the action menu, the row buttons, Reveal and the configured shortcuts of 5.2–5.6, the start-up balloon and the search hotkey (phase 1), icon quality at 32 and 48 px and `y-snap`'s overlays unchanged (phase 3). Task 1.9 (`tray="true"`) is for later.
 
 ---
 
@@ -574,8 +574,8 @@ entry.
 - Selection rests on section rows as on results (`first_selectable`); they have
   no actions, buttons or menu, and are not counted by `Alt+n`.
 - **Replaced later, section by section**: the tray menus by Miller columns
-  with a details pane (7.1) and the A–Z list (7.2); the `include` filter (7.3) is
-  not read yet, so the section covers every tray menu; the Start menu gets 9.4.
+  with a details pane (7.1) and the A–Z list (7.2), both done; the Start menu
+  gets 9.4.
 - 10 new `State` tests, 1 `Scope` change. Painting a section row (folder glyph,
   name, "N apps", ›) is the window's, so 👁.
 
@@ -747,12 +747,110 @@ Decisions:
 
 | | Task | Status |
 |---|---|---|
-| 7.1 | `<menus browse="columns">`: Miller columns (three visible), breadcrumb, details pane with Open / Reveal / Edit; ← → between columns, ← from the first column leaves the section; browsed folders listed when their column opens (`browse::list`), never in advance. | ⬜ |
-| 7.2 | `browse="a-z"`: alphabetical list with letter headers and a clickable letter index. | ⬜ |
-| 7.3 | `include="…"` limits the section (and the plain search) to some tray menus. | ⬜ |
+| 7.1 | `<menus browse="columns">`: Miller columns (three visible), breadcrumb, details pane with Open / Reveal / Edit; ← → between columns, ← from the first column leaves the section; browsed folders listed when their column opens (`browse::list`), never in advance. | 👁 |
+| 7.2 | `browse="a-z"`: alphabetical list with letter headers and a clickable letter index. | 👁 |
+| 7.3 | `include="…"` limits the section (and the plain search) to some tray menus. | ✅ |
 
 **Done when:** 👁 walking every menu with the keyboard only, and with the
 mouse only.
+
+**7.1 built (2026-10-30)** — `search::columns` (7 tests, pure); with 7.2 and 7.3,
+21 new in `State`, 9 in `layout`, 5 in `files`, 2 in `display`, 2 in `config`:
+
+- **The focused column is `State::rows`.** Moving, shortcuts, the action menu
+  and `Alt+n` needed no change, and a row of it is a `Hit` like any other. Only
+  the columns to its left and the preview are new: `Columns` holds them,
+  `State::column_panes` hands them to the window, which draws them instead of
+  the rows. Typing replaces the columns with results; erasing finds them as they
+  were (`Columns::showing`, and each column keeps its selection). `Tab` into a
+  group from those results stacks on top, and `Backspace` comes back to the columns.
+- **Files of a folder are index entries**, `Source::Column`, which no search
+  scope sees, with `Target::File`. So `Files::app`, `icon`, `detail`, the actions
+  and `Pick::File` work as for `/`, and Reveal and Edit do not apply. Going into a
+  folder twice lists it twice: the index only lives as long as the window.
+- **`Layout::columns`**: a 26 px breadcrumb over 320 px of panes, the height fixed
+  so that the window does not jump, in three equal thirds. `Layout::rows` holds the
+  focused column too, which is what the action menu hangs from. Others are reached
+  by `Hit::Pane(pane, row)`, the buttons by `Hit::Details(n)`. A column other than
+  the focused one scrolls by itself to show its selection, which is also where it
+  starts when it takes the focus (`Open::column_depth`).
+- Rows are 30 px with 20 px icons from the 32 px cache; the details pane has a
+  second cache at 48 px (`IconCache` has one size each).
+
+Decisions, to confirm or change:
+
+- **A browsed folder is read on `→`, on a thread, not when selected** (the mockup
+  previews its files). Previewing would read a folder for every row walked past,
+  and block on a slow share; the plan said "when their column opens". Selected, it
+  shows its details with `→ lists what is inside`. `Files::list_column` runs one
+  listing at a time: a later one replaces it, and a result nobody waits for is
+  dropped. The column says `Listing…` meanwhile. At most `CAP` files.
+- **`Enter` on a group or browsed folder goes in**, as in the mockup. **Open** on
+  the details pane or in the action menu opens the folder in Explorer.
+- **A click selects; a click on a group or folder also goes in.** An app is opened
+  from the **Open** button: the window handles no double click, and opening on a
+  second click would launch things by accident, since going in selects the first
+  row.
+- **Hover does not select in the columns**: it would change the preview, and with
+  it what is under the pointer one column over.
+- **`Esc` leaves the section at once from any column**, as in the mockup;
+  `Backspace` goes back one column, like `←`. **`Home`/`End`** go to the ends of
+  a column.
+- The details buttons are the configured `open`, `reveal`, `edit` that apply, in
+  the configured order, and stay with `row-actions="false"`: they are the pane's,
+  not a row's.
+
+Simplifications: the wheel scrolls the focused column wherever the pointer is; a
+line of the details pane is cut with an ellipsis rather than wrapped; `Reveal`
+from a column closes the window, as it does from a result.
+
+**7.2 built (2026-10-30)**: `Row::Letter` (a `RowKind::Header`), `State::letters`,
+`letter_click`; `Spec::band`, `Layout::with_letters`, `Hit::Letter`,
+`layout::scroll_to_top`.
+
+- **Apps only** (spec §2.4): no groups, no browsed folders, no built-ins. Sorted
+  on the folded name, ties in file order. A name that does not start with a
+  letter goes under `#`, first.
+- **The letters are a band above the list, not a row in it** (the mockup's is
+  sticky): after a jump to `M` they must still be there for a jump to `T`.
+- A jump puts the letter's header on top, unless the window would no longer be
+  full: `Z` does not leave three rows in a shrunken window.
+- Typing searches as usual, and the band goes until the text is erased.
+
+**`browse="list"` added (2026-10-30), after the fact.** 7.1 had replaced the flat
+form of 6.4, the plan having called it temporary; the user wanted to keep it. It is
+`MenusBrowse::List` (and `settings::MenusMode::List`), and needs nothing of its own:
+`Place::Menus` lists the tray icons, and a group is entered as `Place::Group`.
+
+**7.3 built (2026-10-30).** `SearchConfig::includes_menu`, `Entry::left_out`.
+
+- **What is left out stays in the index**, and only `Scope::All` and `Scope::Menus`
+  skip it, with the sections' counts, the columns and A–Z. Dropping it would have
+  made `#` say that a hotkey of a left-out menu is unused, and `/` lose its folders.
+  Recent still lists it: that list is Windows's.
+- Names are compared like search compares: case, accents and `&` aside. A name
+  no tray menu has is a warning; it comes after the load, since `<search>` can
+  stand before the menus.
+
+What to look at for the 👁:
+
+1. **Tray menus** opens on the columns: the tray icons, the first one's content,
+   a breadcrumb, the footer's keys. `↑↓ → ←` walk every menu; `←` from the first
+   column comes out on the **Tray menus** row; `Esc` too, from any depth.
+2. An app shows its details: icon (at 48 px: sharp?), path, program, hotkey,
+   tooltip, Open / Reveal / Edit, each working. `Enter`, `Ctrl+R`, `Ctrl+E` and
+   the action menu work too. Does the text fit a third of the window?
+3. A browsed folder: its details, then `→` lists it (`Listing…` on a slow one),
+   sub-folders go further when `depth` allows; a file opens; **Open** on the
+   folder opens Explorer. A `\\…` folder does not freeze the window.
+4. The same with the mouse only: a click on a group or folder goes in, a click on
+   a column to the left comes back, right click opens the action menu.
+5. Long columns: the selection stays in view, the thumb moves, the wheel scrolls.
+6. Typing inside shows results; erasing brings the columns back where they were.
+7. `browse="a-z"`: the letters, a click on one, the last letter, typing.
+   `browse="list"`: the tray icons, `Enter` into a group as a chip, back out.
+8. `include="…"`: the section's count, the columns, the plain search; `#` still
+   lists a left-out menu's hotkeys.
 
 ---
 

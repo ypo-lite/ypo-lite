@@ -13,6 +13,7 @@ use crate::model::{
     ActionBinding, ActionId, ActionsConfig, App, Browse, Builder, ConfigTree, Defaults, EventMask,
     HotkeyBinding, IconSource, MAX_DEPTH, MenusBrowse, NodeData, NodeFlags, NodeId, NodeKind,
     OpenFolder, PluginSection, PopupMode, PresenterStyle, ResultsLayout, SearchConfig, Section,
+    same_menu,
 };
 use crate::search::keys::Chord;
 use crate::variables::{self, Lookup, Pool, Variable};
@@ -62,6 +63,19 @@ impl<'b> Reader<'b> {
         search: Option<SearchConfig>,
     ) -> ConfigTree {
         let mut tree = self.builder.finish(roots, defaults, self.warnings);
+        // Only now are the tray menus known: `<search>` can come before them.
+        if let Some(search) = &search {
+            let unknown: Vec<String> = search
+                .included_menus()
+                .iter()
+                .filter(|menu| {
+                    let is_menu = |&id: &NodeId| same_menu(menu, &tree.node(id).name);
+                    !tree.roots.iter().any(is_menu)
+                })
+                .map(|menu| format!("<menus include> names {menu:?}, which is not a tray menu"))
+                .collect();
+            tree.warnings.extend(unknown);
+        }
         tree.search = search;
         tree
     }
@@ -518,6 +532,7 @@ impl<'b> Reader<'b> {
         let browse = match element.attr("browse") {
             None | Some("columns") => MenusBrowse::Columns,
             Some("a-z") => MenusBrowse::AZ,
+            Some("list") => MenusBrowse::List,
             Some(other) => {
                 self.warn(element, format!("unknown browse {other:?}"));
                 MenusBrowse::Columns

@@ -116,9 +116,11 @@ impl Searcher {
         }
         for (position, entry) in index.entries().iter().enumerate() {
             let outside = match scope {
-                Scope::All => entry.source == Source::BrowsedFile,
+                Scope::All => {
+                    entry.left_out || matches!(entry.source, Source::BrowsedFile | Source::Column)
+                }
                 Scope::Within(group) => !entry.ancestors.contains(&group),
-                Scope::Menus => entry.source != Source::Menu,
+                Scope::Menus => entry.left_out || entry.source != Source::Menu,
                 Scope::Hotkeys => entry.hotkeys().is_empty(),
                 Scope::Files => entry.source != Source::BrowsedFile,
             };

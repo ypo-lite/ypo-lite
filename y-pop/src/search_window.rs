@@ -46,7 +46,16 @@
 //!
 //! The files of `/` are listed by a thread ([`y_pop::search::files`]), started
 //! by the first `/` of an opening. It only ever posts [`WM_SEARCH_FILES`], with
-//! the generation like the rest, and what it found is taken here.
+//! the generation like the rest, and what it found is taken here. A browsed
+//! folder a column of the tray menus goes into gets a thread of its own the same
+//! way, posting [`WM_SEARCH_LISTED`].
+//!
+//! # Columns
+//!
+//! The Miller columns ([`y_pop::search::columns`]) are drawn in place of the rows,
+//! at a fixed height. The focused column *is* `State`'s rows, so the keys and the
+//! action menu need nothing here. Simplification: the wheel scrolls the focused
+//! column wherever the pointer is.
 
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -76,14 +85,15 @@ use y_core::{
 };
 
 use y_pop::model::{ActionId, ActionsConfig, App, ConfigTree, NodeId, ResultsLayout, Section};
+use y_pop::search::columns::{Columns, PaneView};
 use y_pop::search::commands::{Command, Line, PREFIXES};
 use y_pop::search::display::{self, LineContext};
 use y_pop::search::files::Files;
 use y_pop::search::history::{self, AppNames, Item};
 use y_pop::search::hotkey::KeyCombo;
-use y_pop::search::index::{Index, Target};
+use y_pop::search::index::{Entry, Index, Target};
 use y_pop::search::keycheck::{self, Availability};
-use y_pop::search::layout::{self, Hit, Layout, Placed, Spec};
+use y_pop::search::layout::{self, ColumnsLayout, Hit, Layout, PaneSpec, Placed, Spec};
 use y_pop::search::matcher::plain;
 use y_pop::search::query;
 use y_pop::search::sections::{self, Place, SectionRow};
@@ -124,6 +134,10 @@ pub const WM_SEARCH_CONTEXT: u32 = WM_APP_FIRST + 0x17;
 /// The thread listing the files of `/` has found more
 /// ([`y_pop::search::files`]).
 pub const WM_SEARCH_FILES: u32 = WM_APP_FIRST + 0x18;
+
+/// The folder a column went into has been listed
+/// ([`y_pop::search::files::Files::list_column`]).
+pub const WM_SEARCH_LISTED: u32 = WM_APP_FIRST + 0x19;
 
 const MOD_CTRL: isize = 1;
 const MOD_SHIFT: isize = 2;
@@ -245,6 +259,16 @@ struct Open {
     icon_size: i32,
     /// Icons already loaded, as pixels, by index entry.
     pixels: HashMap<u32, Option<Vec<u32>>>,
+    /// The details pane's icon: a cache has one size, and that one is bigger
+    /// than the rows'.
+    big_icons: IconCache,
+    /// Icons at another size than the rows': a column's, the details pane's.
+    sized_pixels: HashMap<(u32, i32), Option<Vec<u32>>>,
+    /// The panes the columns show, as of the last layout; empty out of them.
+    panes: Vec<PaneView>,
+    /// Which column has the keys, as of the last layout. Another one starts
+    /// from its own scroll position, not this one's.
+    column_depth: Option<usize>,
     /// The first half of a character outside the Basic Multilingual Plane,
     /// waiting for its second.
     high_surrogate: Option<u16>,
@@ -325,6 +349,7 @@ impl SearchWindow {
             // Always, here: the surface is made for the tallest the window gets,
             // and `relayout` drops the footer while the list is folded.
             footer: true,
+            band: false,
         };
         let layout = Layout::new(&spec, &[], 0);
         let visible = Rc::new(Cell::new(layout.size));
@@ -379,6 +404,7 @@ impl SearchWindow {
         )
         .with_row_actions(search.is_none_or(|search| search.row_actions))
         .with_collapsed(search.is_some_and(|search| search.collapsed))
+        .with_menus_browse(search.map_or_else(Default::default, |search| search.menus_browse()))
         .with_recent_shown(recent_count.unwrap_or(0));
         state.start(&index, listing.recent, sections, listing.bonuses);
         let files = Files::of(tree, &index);
@@ -426,6 +452,10 @@ impl SearchWindow {
             icons: IconCache::with_size(icon_size),
             icon_size,
             pixels: HashMap::new(),
+            big_icons: IconCache::with_size(scaled(layout::DETAILS_ICON)),
+            sized_pixels: HashMap::new(),
+            panes: Vec::new(),
+            column_depth: None,
             high_surrogate: None,
         };
 
@@ -473,7 +503,7 @@ impl SearchWindow {
         lparam: LPARAM,
         tree: &ConfigTree,
     ) -> bool {
-        if !(WM_SEARCH_CLOSE..=WM_SEARCH_FILES).contains(&msg) {
+        if !(WM_SEARCH_CLOSE..=WM_SEARCH_LISTED).contains(&msg) {
             return false;
         }
         // A message from a window that is already gone.
@@ -527,7 +557,14 @@ impl SearchWindow {
                         matches!(hit, Some(Hit::Menu(item)) if open.state.menu_select(item))
                     } else {
                         let button = hit.filter(|hit| {
-                            matches!(hit, Hit::Button(_) | Hit::More | Hit::Prefix(_))
+                            matches!(
+                                hit,
+                                Hit::Button(_)
+                                    | Hit::More
+                                    | Hit::Prefix(_)
+                                    | Hit::Letter(_)
+                                    | Hit::Details(_)
+                            )
                         });
                         let lit = std::mem::replace(&mut open.hover, button) != button;
                         matches!(hit, Some(Hit::Row(row)) if open.state.select_row(row)) || lit
@@ -555,6 +592,15 @@ impl SearchWindow {
                     }
                     match hit {
                         Some(Hit::Row(row)) => Some(open.state.click_row(&open.index, row)),
+                        Some(Hit::Pane(pane, row)) => {
+                            Some(open.state.column_click(&open.index, pane, row))
+                        }
+                        Some(Hit::Details(n)) => Some(open.state.details_click(&open.index, n)),
+                        Some(Hit::Letter(n)) => open.state.letter_click(n).map(|header| {
+                            let kinds = open.state.row_kinds();
+                            open.scroll = layout::scroll_to_top(&open.spec, &kinds, header);
+                            Outcome::Redraw
+                        }),
                         Some(Hit::Button(n)) => Some(open.state.button_click(&open.index, n)),
                         Some(Hit::Chevron) => Some(open.state.unfold(&open.index)),
                         Some(Hit::Prefix(n)) => Some(open.state.prefix_click(&open.index, n)),
@@ -569,6 +615,10 @@ impl SearchWindow {
             WM_SEARCH_CONTEXT => {
                 let outcome = self.open.as_mut().map(|open| match open.hit(lparam) {
                     Some(Hit::Row(row)) => open.state.open_menu_at(&open.index, row),
+                    Some(Hit::Pane(pane, row)) => {
+                        open.state.column_select(&open.index, pane, row);
+                        open.state.open_menu(&open.index)
+                    }
                     // A right click on anything else puts an open menu away.
                     _ if open.state.close_menu() => Outcome::Redraw,
                     _ => Outcome::Nothing,
@@ -593,6 +643,9 @@ impl SearchWindow {
                 }
             }
             WM_SEARCH_FILES if self.open.as_mut().is_some_and(Open::take_files) => {
+                self.redraw(tree, true);
+            }
+            WM_SEARCH_LISTED if self.open.as_mut().is_some_and(Open::take_column) => {
                 self.redraw(tree, true);
             }
             _ => {}
@@ -697,6 +750,12 @@ impl SearchWindow {
                     self.close();
                 }
             }
+            Outcome::ListFolder(entry) => {
+                if let Some(open) = self.open.as_mut() {
+                    open.list_column(tree, entry);
+                }
+                self.redraw(tree, follow);
+            }
         }
     }
 
@@ -767,6 +826,65 @@ impl Open {
         changed
     }
 
+    /// A column opened on the browsed folder `entry`: lists it on a thread,
+    /// which only ever posts to the owner.
+    fn list_column(&mut self, tree: &ConfigTree, entry: u32) {
+        let owner = self.owner.0 as isize;
+        let generation = self.generation;
+        let started = self.files.list_column(tree, &self.index, entry, move || {
+            let owner = HWND(owner as *mut _);
+            let _ = unsafe {
+                PostMessageW(Some(owner), WM_SEARCH_LISTED, WPARAM(generation), LPARAM(0))
+            };
+        });
+        if !started {
+            self.state.column_listed(&self.index, entry, Vec::new());
+        }
+    }
+
+    /// What the thread of [`Self::list_column`] found joins its column. `true`
+    /// if there was anything.
+    fn take_column(&mut self) -> bool {
+        match self.files.take_column(&mut self.index) {
+            Some((folder, items)) => {
+                self.state.column_listed(&self.index, folder, items);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The Miller columns, for the state as it is.
+    fn columns_layout(&mut self, panes: Vec<PaneView>, depth: usize, follow: bool) -> Layout {
+        if follow && let Some(selected) = self.state.selected() {
+            self.scroll = layout::scroll_column(&self.spec, self.scroll, selected);
+        }
+        let specs: Vec<PaneSpec> = panes
+            .iter()
+            .map(|pane| PaneSpec {
+                rows: pane.items.len(),
+                selected: pane.selected,
+            })
+            .collect();
+        let layout = Layout::columns(&self.spec, &specs, depth, self.scroll);
+        self.scroll = layout.first;
+        let details = panes.last().is_some_and(|pane| pane.details.is_some());
+        self.panes = panes;
+        if !details {
+            return layout;
+        }
+        let widths: Vec<i32> = self
+            .state
+            .details_buttons(&self.index)
+            .iter()
+            .map(|&id| {
+                let label = self.state.action_short_label(&self.index, id);
+                self.fonts.small.measure(label).0
+            })
+            .collect();
+        layout.with_details_buttons(&widths)
+    }
+
     /// Lays the rows out again for the state as it is. `follow` scrolls the
     /// list to keep the selected row in view (after typing or a key, not
     /// after the wheel or hover).
@@ -775,6 +893,24 @@ impl Open {
             self.start_files();
         }
         self.spec.footer = !self.state.folded();
+        self.spec.band = !self.state.letters().is_empty();
+
+        // Each column has its own scroll position, which is the one its
+        // selection gives: the focus moving starts from there.
+        let depth = self.state.column_depth();
+        let moved = std::mem::replace(&mut self.column_depth, depth) != depth;
+        if moved {
+            self.scroll = 0;
+        }
+        let follow = follow || moved;
+        let panes = self.state.column_panes(&self.index);
+        if let (Some(panes), Some(depth)) = (panes, depth) {
+            self.layout = self.columns_layout(panes, depth, follow);
+            self.attach_menu();
+            return;
+        }
+        self.panes.clear();
+
         let kinds = self.state.row_kinds();
         if follow && let Some(selected) = self.state.selected() {
             self.scroll = layout::scroll_to_show(&self.spec, &kinds, self.scroll, selected);
@@ -784,6 +920,7 @@ impl Open {
         if self.state.folded() && self.state.collapsible() {
             layout = layout.with_chevron();
         }
+        layout = layout.with_letters(self.state.letters().len());
         // The selected row's buttons, each as wide as its label.
         if let Some(selected) = self.state.selected()
             && self.state.has_row_buttons(&self.index)
@@ -809,17 +946,24 @@ impl Open {
                     .0
             })
             .collect();
-        layout = layout.with_prefix_chips(&chips);
-        // An open action menu hangs from its row, and the window grows to hold it.
-        self.layout = match self.state.menu() {
-            Some(menu) => match layout.rect_of(menu.row) {
-                Some(anchor) => layout.with_menu(anchor, menu.items.len(), self.tallest()),
-                None => layout,
-            },
-            None => layout,
-        };
-        self.visible.set(self.layout.size);
+        self.layout = layout.with_prefix_chips(&chips);
+        self.attach_menu();
         self.probe_check();
+    }
+
+    /// An open action menu hangs from its row, and the window grows to hold it.
+    /// Last in a layout: this is also where the window learns its size.
+    fn attach_menu(&mut self) {
+        let anchor = self.state.menu().and_then(|menu| {
+            let anchor = self.layout.rect_of(menu.row)?;
+            Some((anchor, menu.items.len()))
+        });
+        if let Some((anchor, count)) = anchor {
+            let tallest = self.tallest();
+            self.layout = std::mem::replace(&mut self.layout, Layout::new(&self.spec, &[], 0))
+                .with_menu(anchor, count, tallest);
+        }
+        self.visible.set(self.layout.size);
     }
 
     /// Asks the system whether the combination `#` is checking is free, once
@@ -854,6 +998,9 @@ impl Open {
             icons,
             icon_size,
             pixels,
+            big_icons,
+            sized_pixels,
+            panes,
             items,
             details,
             files,
@@ -1041,6 +1188,8 @@ impl Open {
             index,
             icons,
             pixels,
+            big_icons,
+            sized_pixels,
             items,
             details,
             files,
@@ -1066,6 +1215,16 @@ impl Open {
                         TextAlign::Left,
                     )?;
                 }
+                Row::Letter(letter) => {
+                    canvas.draw_text_ellipsis(
+                        &letter.to_string(),
+                        rect(placed.rect.inset(padding, 0)),
+                        &fonts.heading,
+                        dim,
+                        TextAlign::Left,
+                    )?;
+                }
+                Row::Result(_) if layout.columns.is_some() => {}
                 Row::Result(hit) => {
                     let is_selected = state.selected() == Some(placed.index);
                     let number = state
@@ -1085,10 +1244,20 @@ impl Open {
                 Row::Prefixes => painter.prefixes(canvas)?,
             }
         }
-        if let Some(list) = layout.list
+        painter.letters(canvas, state)?;
+        if let Some(columns) = &layout.columns {
+            painter.columns(canvas, state, columns, panes)?;
+        } else if let Some(list) = layout.list
             && (layout.more_above || layout.more_below)
         {
-            scrollbar(canvas, layout, list, rows.len(), line, spec.scale);
+            scrollbar(
+                canvas,
+                list,
+                layout.first..layout.end,
+                rows.len(),
+                line,
+                spec.scale,
+            );
         }
 
         // --- The footer ------------------------------------------------
@@ -1103,6 +1272,15 @@ impl Open {
             );
             let hints = if state.menu().is_some() {
                 "↑↓  Choose        ↵  Do it        Esc  Close the menu".to_owned()
+            } else if state.column_depth().is_some() {
+                let mut hints = "↑↓  Move      ←→  Columns      ↵  Open".to_owned();
+                for id in [ActionId::Reveal, ActionId::Edit] {
+                    if let Some(key) = state.key_of(id) {
+                        hints.push_str(&format!("      {key}  {}", id.short_label()));
+                    }
+                }
+                hints.push_str("      Esc  Back");
+                hints
             } else {
                 format!(
                     "↑↓  Move      ↵  Open      {}  Actions      Tab  Into group      Esc  Back",
@@ -1199,6 +1377,8 @@ struct ItemPainter<'a> {
     index: &'a Index,
     icons: &'a mut IconCache,
     pixels: &'a mut HashMap<u32, Option<Vec<u32>>>,
+    big_icons: &'a mut IconCache,
+    sized_pixels: &'a mut HashMap<(u32, i32), Option<Vec<u32>>>,
     items: &'a [Item],
     details: &'a mut HashMap<u32, String>,
     files: &'a Files,
@@ -1275,16 +1455,9 @@ impl ItemPainter<'_> {
 
         // The icon, loaded the first time its row is shown.
         let size = self.icon_size;
-        let icons = &mut *self.icons;
-        let files = self.files;
+        let (icons, tree, items, files) = (&mut *self.icons, self.tree, self.items, self.files);
         let pixels = self.pixels.entry(hit.entry).or_insert_with(|| {
-            let icon = match (node, item, file) {
-                (Some(node), _, _) => crate::menu::resolve_icon(icons, node),
-                (None, Some((_, item)), _) => item.icon(icons),
-                (None, None, Some(number)) => files.icon(number, icons),
-                (None, None, None) => None,
-            };
-            icon.and_then(|icon| icon.to_pixels(size))
+            load_icon(icons, entry, tree, items, files).and_then(|icon| icon.to_pixels(size))
         });
         if let Some(pixels) = pixels {
             canvas.blit(parts.icon.left, parts.icon.top, size, size, pixels);
@@ -1315,12 +1488,7 @@ impl ItemPainter<'_> {
 
         // The name, the letters the query matched emphasized. A name too
         // long for its box is cut with an ellipsis instead, unemphasized.
-        let label = match (node, item, file) {
-            (Some(node), _, _) => plain(&node.name),
-            (None, Some((_, item)), _) => item.name.clone(),
-            (None, None, Some(number)) => files.get(number).name.clone(),
-            (None, None, None) => String::new(),
-        };
+        let label = entry_name(entry, self.tree, self.items, self.files);
         let label = label.as_str();
         let title_box = RECT {
             left: parts.title.left,
@@ -1537,6 +1705,311 @@ impl ItemPainter<'_> {
     }
 }
 
+/// The icon of `entry`, whatever it stands for, at the size of `icons`.
+fn load_icon(
+    icons: &mut IconCache,
+    entry: &Entry,
+    tree: &ConfigTree,
+    items: &[Item],
+    files: &Files,
+) -> Option<y_core::icon::Icon> {
+    match entry.target {
+        Target::Node(id) => crate::menu::resolve_icon(icons, tree.node(id)),
+        Target::History(number) => items[number as usize].icon(icons),
+        Target::File(number) => files.icon(number, icons),
+    }
+}
+
+/// The name of `entry` as written, whatever it stands for.
+fn entry_name(entry: &Entry, tree: &ConfigTree, items: &[Item], files: &Files) -> String {
+    match entry.target {
+        Target::Node(id) => plain(&tree.node(id).name),
+        Target::History(number) => items[number as usize].name.clone(),
+        Target::File(number) => files.get(number).name.clone(),
+    }
+}
+
+impl ItemPainter<'_> {
+    /// The letters of an A–Z list, across their band: a click jumps to one.
+    fn letters(&self, canvas: &mut Canvas, state: &State) -> Result<()> {
+        let palette = self.palette;
+        let scaled = |logical: i32| (logical as f32 * self.scale).round() as i32;
+        for (n, (cell, letter)) in self.layout.letters.iter().zip(state.letters()).enumerate() {
+            let lit = !self.menu_open && self.hover == Some(Hit::Letter(n));
+            let cell = rect(*cell);
+            canvas.fill_rect(
+                cell,
+                blend(palette.back, palette.text, if lit { 0.16 } else { 0.07 }),
+            );
+            canvas.draw_text(
+                &letter.to_string(),
+                cell,
+                &self.fonts.small,
+                if lit { palette.text } else { palette.dim },
+                TextAlign::Centre,
+            )?;
+            canvas.round_rect_corners(cell, scaled(4), palette.back);
+        }
+        Ok(())
+    }
+
+    /// The Miller columns: the breadcrumb, then each pane on screen, split by a
+    /// thin line.
+    fn columns(
+        &mut self,
+        canvas: &mut Canvas,
+        state: &State,
+        columns: &ColumnsLayout,
+        panes: &[PaneView],
+    ) -> Result<()> {
+        let palette = self.palette;
+        let scale = self.scale;
+        let scaled = |logical: i32| (logical as f32 * scale).round() as i32;
+
+        let mut crumbs = vec![Place::Menus.name(self.tree)];
+        crumbs.extend(state.column_crumbs().iter().map(|&entry| {
+            let entry = &self.index.entries()[entry as usize];
+            entry_name(entry, self.tree, self.items, self.files)
+        }));
+        canvas.draw_text_ellipsis(
+            &crumbs.join(" › "),
+            rect(columns.crumb.inset(scaled(16), 0)),
+            &self.fonts.small,
+            palette.dim,
+            TextAlign::Left,
+        )?;
+        canvas.fill_rect(
+            RECT {
+                top: columns.crumb.bottom - 1,
+                ..rect(columns.crumb)
+            },
+            palette.line,
+        );
+
+        for pane in &columns.panes {
+            if pane.rect.left > 0 {
+                canvas.fill_rect(
+                    RECT {
+                        right: pane.rect.left + 1,
+                        ..rect(pane.rect)
+                    },
+                    palette.line,
+                );
+            }
+            let Some(view) = panes.get(pane.pane) else {
+                continue;
+            };
+            if let Some(entry) = view.details {
+                self.details(canvas, state, columns, pane.rect, entry)?;
+                continue;
+            }
+            for (n, row) in pane.rows.iter().enumerate() {
+                let number = pane.first + n;
+                let lit = (view.selected == Some(number)).then_some(pane.pane == columns.focus);
+                self.column_row(canvas, *row, view.items[number], lit)?;
+            }
+            if pane.rows.is_empty() && (pane.pane <= columns.focus || state.selected().is_some()) {
+                let note = if view.waiting { "Listing…" } else { "Empty" };
+                canvas.draw_text_ellipsis(
+                    note,
+                    rect(pane.rect.inset(scaled(14), scaled(12))),
+                    &self.fonts.small,
+                    palette.dim,
+                    TextAlign::Left,
+                )?;
+            }
+            if pane.total > pane.rows.len() {
+                let shown = pane.first..pane.first + pane.rows.len();
+                scrollbar(
+                    canvas,
+                    pane.rect,
+                    shown,
+                    pane.total,
+                    palette.line,
+                    self.scale,
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// A row of a column. `lit`: it is the selection of its column, `true` when
+    /// that column has the keys.
+    fn column_row(
+        &mut self,
+        canvas: &mut Canvas,
+        row: layout::Rect,
+        position: u32,
+        lit: Option<bool>,
+    ) -> Result<()> {
+        let palette = self.palette;
+        let entry = &self.index.entries()[position as usize];
+        let parts = self.layout.compact_parts(row);
+        let scaled = |logical: i32| (logical as f32 * self.scale).round() as i32;
+        let (title, detail, back) = match lit {
+            Some(true) => {
+                let (back, text) = (palette.selected_back, palette.selected_text);
+                (text, blend(text, back, 0.35), Some(back))
+            }
+            Some(false) => (
+                palette.text,
+                palette.dim,
+                Some(blend(palette.back, palette.text, 0.1)),
+            ),
+            None => (palette.text, palette.dim, None),
+        };
+        let plate = RECT {
+            left: row.left + scaled(ROW_MARGIN),
+            top: row.top + 1,
+            right: row.right - scaled(ROW_MARGIN),
+            bottom: row.bottom - 1,
+        };
+        if let Some(back) = back {
+            canvas.fill_rect(plate, back);
+        }
+
+        let size = parts.icon.width();
+        let (icons, tree, items, files) = (&mut *self.icons, self.tree, self.items, self.files);
+        let pixels = self
+            .sized_pixels
+            .entry((position, size))
+            .or_insert_with(|| {
+                load_icon(icons, entry, tree, items, files).and_then(|icon| icon.to_pixels(size))
+            });
+        if let Some(pixels) = pixels {
+            canvas.blit(parts.icon.left, parts.icon.top, size, size, pixels);
+        }
+
+        // A › where something opens from it; otherwise the hotkey, if any.
+        let mut right = parts.title.right;
+        if Columns::opens(entry) {
+            let (width, _) = self.fonts.glyph.measure(GLYPH_ENTER);
+            canvas.draw_text(
+                GLYPH_ENTER,
+                RECT {
+                    left: right - width,
+                    right,
+                    ..rect(parts.trailing)
+                },
+                &self.fonts.glyph,
+                detail,
+                TextAlign::Right,
+            )?;
+            right -= width + scaled(6);
+        } else if let Some(shortcut) = entry
+            .node()
+            .and_then(|id| crate::menu::shortcut_text(&self.tree.defaults, self.tree.node(id)))
+        {
+            let (width, _) = self.fonts.small.measure(&shortcut);
+            // Rather the name than the hotkey, in so narrow a column.
+            if width * 2 < parts.title.width() {
+                canvas.draw_text(
+                    &shortcut,
+                    RECT {
+                        left: right - width,
+                        right,
+                        ..rect(parts.trailing)
+                    },
+                    &self.fonts.small,
+                    detail,
+                    TextAlign::Right,
+                )?;
+                right -= width + scaled(6);
+            }
+        }
+        canvas.draw_text_ellipsis(
+            &entry_name(entry, self.tree, self.items, self.files),
+            RECT {
+                right,
+                ..rect(parts.title)
+            },
+            &self.fonts.title,
+            title,
+            TextAlign::Left,
+        )?;
+        if back.is_some() {
+            canvas.round_rect_corners(plate, scaled(ROW_RADIUS), palette.back);
+        }
+        Ok(())
+    }
+
+    /// The details pane: a big icon, the name, what is known of it, and the
+    /// buttons along its bottom.
+    fn details(
+        &mut self,
+        canvas: &mut Canvas,
+        state: &State,
+        columns: &ColumnsLayout,
+        pane: layout::Rect,
+        position: u32,
+    ) -> Result<()> {
+        let palette = self.palette;
+        let entry = &self.index.entries()[position as usize];
+        let parts = self.layout.details_parts(pane);
+        let size = parts.icon.width();
+        let (icons, tree, items, files) = (&mut *self.big_icons, self.tree, self.items, self.files);
+        let pixels = self
+            .sized_pixels
+            .entry((position, size))
+            .or_insert_with(|| {
+                load_icon(icons, entry, tree, items, files).and_then(|icon| icon.to_pixels(size))
+            });
+        if let Some(pixels) = pixels {
+            canvas.blit(parts.icon.left, parts.icon.top, size, size, pixels);
+        }
+        canvas.draw_text_ellipsis(
+            &entry_name(entry, self.tree, self.items, self.files),
+            rect(parts.title),
+            &self.fonts.title,
+            palette.text,
+            TextAlign::Left,
+        )?;
+
+        let mut lines = display::details(self.tree, entry);
+        if let Target::File(number) = entry.target {
+            lines.push(self.files.detail(number));
+            if entry.facts.browsable {
+                lines.push(display::FOLDER_HINT.to_owned());
+            }
+        }
+        let mut cell = parts.first_line;
+        for line in &lines {
+            if cell.bottom > parts.bottom {
+                break;
+            }
+            canvas.draw_text_ellipsis(
+                line,
+                rect(cell),
+                &self.fonts.small,
+                palette.dim,
+                TextAlign::Left,
+            )?;
+            cell.top += parts.line;
+            cell.bottom += parts.line;
+        }
+
+        let ids = state.details_buttons(self.index);
+        let radius = (4.0 * self.scale).round() as i32;
+        for (n, (button, id)) in columns.buttons.iter().zip(&ids).enumerate() {
+            let lit = !self.menu_open && self.hover == Some(Hit::Details(n));
+            let cell = rect(*button);
+            canvas.fill_rect(
+                cell,
+                blend(palette.back, palette.text, if lit { 0.2 } else { 0.1 }),
+            );
+            canvas.draw_text(
+                state.action_short_label(self.index, *id),
+                cell,
+                &self.fonts.small,
+                palette.text,
+                TextAlign::Centre,
+            )?;
+            canvas.round_rect_corners(cell, radius, palette.back);
+        }
+        Ok(())
+    }
+}
+
 /// The text of a chip of the line of prefixes: `> commands`.
 fn chip_label(prefix: char, name: &str) -> String {
     format!("{prefix}  {name}")
@@ -1663,12 +2136,12 @@ impl ItemPainter<'_> {
     }
 }
 
-/// A thin thumb on the list's right edge: where the visible rows sit among
+/// A thin thumb on the right edge of `list`: where the rows `visible` sit among
 /// all of them.
 fn scrollbar(
     canvas: &mut Canvas,
-    layout: &Layout,
     list: layout::Rect,
+    visible: Range<usize>,
     total: usize,
     color: Color,
     scale: f32,
@@ -1678,8 +2151,8 @@ fn scrollbar(
     }
     let width = ((SCROLLBAR_WIDTH as f32 * scale).round() as i32).max(2);
     let track = list.height();
-    let top = list.top + (track as usize * layout.first / total) as i32;
-    let height = ((track as usize * (layout.end - layout.first) / total) as i32).max(width * 4);
+    let top = list.top + (track as usize * visible.start / total) as i32;
+    let height = ((track as usize * visible.len() / total) as i32).max(width * 4);
     canvas.fill_rect(
         RECT {
             left: list.right - width - 2,

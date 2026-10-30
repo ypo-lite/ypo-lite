@@ -64,6 +64,8 @@ pub enum RowKind {
     Item,
     /// The line of clickable prefixes under the sections.
     Prefixes,
+    /// A row of a column of the tray menus: small icon, name.
+    Compact,
 }
 
 // Logical pixels, at 100 % scale.
@@ -102,6 +104,22 @@ const BUTTONS_SHARE: f32 = 0.5;
 // The chips of the line of prefixes.
 const CHIP_HEIGHT: i32 = 22;
 const CHIP_GAP: i32 = 6;
+// The index of an A–Z list.
+const BAND_HEIGHT: i32 = 32;
+const LETTER_WIDTH: i32 = 24;
+const LETTER_GAP: i32 = 2;
+// The Miller columns. Fixed, so that the window does not jump while walking.
+const COLUMNS_HEIGHT: i32 = 320;
+const CRUMB_HEIGHT: i32 = 26;
+const COMPACT_HEIGHT: i32 = 30;
+const COMPACT_ICON: i32 = 20;
+/// Three at most: the column before, the focused one, the preview.
+const COLUMNS_SHOWN: usize = 3;
+/// Inside a column, and around what the details pane holds.
+const PANE_PADDING: i32 = 6;
+const DETAILS_PADDING: i32 = 12;
+/// The icon of the details pane, for the window to load it at that size.
+pub const DETAILS_ICON: i32 = 48;
 
 /// What a layout is made from.
 #[derive(Clone, Copy, Debug)]
@@ -114,6 +132,9 @@ pub struct Spec {
     pub max_list_height: i32,
     /// Whether the footer of key hints is shown (not while collapsed).
     pub footer: bool,
+    /// Whether the band of an A–Z list's letters tops the list. It stays put
+    /// while the rows scroll under it, and comes out of `max_list_height`.
+    pub band: bool,
 }
 
 /// The window's width on a monitor `monitor_width` physical pixels wide at
@@ -168,6 +189,12 @@ pub enum Hit {
     Menu(usize),
     /// The action menu, between its items.
     MenuPanel,
+    /// A letter of an A–Z list's index, by index.
+    Letter(usize),
+    /// A row of a column other than the focused one: the column, the row.
+    Pane(usize, usize),
+    /// A button of the details pane, by index.
+    Details(usize),
     /// The window, but nothing in particular (padding, the list's margins).
     Nothing,
 }
@@ -197,7 +224,67 @@ pub struct Layout {
     /// The chips of the line of prefixes, if it is visible
     /// ([`Layout::with_prefix_chips`]).
     pub prefix_chips: Vec<Rect>,
+    /// The band of an A–Z list's letters ([`Spec::band`]).
+    pub band: Option<Rect>,
+    /// The letters in it ([`Layout::with_letters`]).
+    pub letters: Vec<Rect>,
+    /// The Miller columns, when they are shown ([`Layout::columns`]).
+    pub columns: Option<ColumnsLayout>,
     scale: f32,
+}
+
+/// One column as far as the layout cares.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct PaneSpec {
+    pub rows: usize,
+    pub selected: Option<usize>,
+}
+
+/// Where the Miller columns go. [`Layout::rows`] holds the focused column's rows
+/// too, so what hangs from a row works as in a list.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct ColumnsLayout {
+    pub crumb: Rect,
+    /// The panes on screen, left to right.
+    pub panes: Vec<PaneLayout>,
+    /// Which pane the keys are in, by index among all of them.
+    pub focus: usize,
+    /// The details pane's buttons ([`Layout::with_details_buttons`]).
+    pub buttons: Vec<Rect>,
+}
+
+/// One pane on screen.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct PaneLayout {
+    /// Index among all the panes: it may have scrolled off to the left.
+    pub pane: usize,
+    pub rect: Rect,
+    /// The first row shown, then where each row shown goes.
+    pub first: usize,
+    pub rows: Vec<Rect>,
+    /// How many rows it has in all.
+    pub total: usize,
+}
+
+/// Where the pieces of a [`RowKind::Compact`] row go; `trailing` is as in
+/// [`ItemParts`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct CompactParts {
+    pub icon: Rect,
+    pub title: Rect,
+    pub trailing: Rect,
+}
+
+/// Where the pieces of the details pane go. The lines of text follow `title`,
+/// one `line` apart, up to the buttons.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct DetailsParts {
+    pub icon: Rect,
+    pub title: Rect,
+    pub first_line: Rect,
+    pub line: i32,
+    /// Where the text must end.
+    pub bottom: i32,
 }
 
 /// Where the selected row's buttons are: its action buttons in order, then
@@ -234,11 +321,19 @@ impl Layout {
         let first = first.min(rows.len().saturating_sub(1));
         let mut placed = Vec::new();
         let mut list = None;
+        let mut band = None;
         let mut end = first;
         if !rows.is_empty() {
             let top = bottom;
             let padding = px(LIST_PADDING);
-            let mut y = top + padding;
+            let rows_top = if spec.band {
+                let rect = Rect::new(0, top, width, top + px(BAND_HEIGHT));
+                band = Some(rect);
+                rect.bottom
+            } else {
+                top
+            };
+            let mut y = rows_top + padding;
             let limit = top + spec.max_list_height.max(0) - padding;
             for (index, &kind) in rows.iter().enumerate().skip(first) {
                 let height = px(row_height(kind));
@@ -277,8 +372,183 @@ impl Layout {
             buttons: None,
             chevron: None,
             prefix_chips: Vec::new(),
+            band,
+            letters: Vec::new(),
+            columns: None,
             scale,
         }
+    }
+
+    /// The Miller columns: a breadcrumb over the last three of `panes`, of which
+    /// `focus` is where the keys are and `scroll` the first row it shows. Each
+    /// other pane shows its selection. The height does not depend on the rows.
+    pub fn columns(spec: &Spec, panes: &[PaneSpec], focus: usize, scroll: usize) -> Self {
+        let scale = spec.scale;
+        let px = |logical: i32| scaled(logical, scale);
+        let mut layout = Self::new(
+            &Spec {
+                band: false,
+                ..*spec
+            },
+            &[],
+            0,
+        );
+        let width = spec.width;
+        let top = layout.input.bottom;
+        let list = Rect::new(0, top, width, top + columns_height(spec));
+        let crumb = Rect::new(0, top, width, top + px(CRUMB_HEIGHT));
+        let fit = column_fit(spec);
+
+        let hidden = panes.len().saturating_sub(COLUMNS_SHOWN);
+        let third = width / COLUMNS_SHOWN as i32;
+        let mut placed = Vec::new();
+        for (slot, (pane, spec)) in panes.iter().enumerate().skip(hidden).enumerate() {
+            let slot = slot as i32;
+            let right = if slot == COLUMNS_SHOWN as i32 - 1 {
+                width
+            } else {
+                third * (slot + 1)
+            };
+            let rect = Rect::new(third * slot, crumb.bottom, right, list.bottom);
+            let wanted = if pane == focus {
+                scroll
+            } else {
+                spec.selected.map_or(0, |row| (row + 1).saturating_sub(fit))
+            };
+            let first = wanted.min(spec.rows.saturating_sub(fit));
+            let (inset, height) = (px(PANE_PADDING), px(COMPACT_HEIGHT));
+            let shown = fit.min(spec.rows - first) as i32;
+            let rows = (0..shown)
+                .map(|n| {
+                    let row_top = rect.top + inset + n * height;
+                    Rect::new(rect.left, row_top, rect.right, row_top + height)
+                })
+                .collect();
+            placed.push(PaneLayout {
+                pane,
+                rect,
+                first,
+                rows,
+                total: spec.rows,
+            });
+        }
+
+        if let Some(pane) = placed.iter().find(|pane| pane.pane == focus) {
+            layout.rows = pane
+                .rows
+                .iter()
+                .enumerate()
+                .map(|(n, &rect)| Placed {
+                    index: pane.first + n,
+                    kind: RowKind::Compact,
+                    rect,
+                })
+                .collect();
+            layout.first = pane.first;
+            layout.end = pane.first + pane.rows.len();
+            layout.more_above = pane.first > 0;
+            layout.more_below = layout.end < pane.total;
+        }
+        layout.columns = Some(ColumnsLayout {
+            crumb,
+            panes: placed,
+            focus,
+            buttons: Vec::new(),
+        });
+        layout.list = Some(list);
+        let mut bottom = list.bottom;
+        layout.footer = spec.footer.then(|| {
+            let rect = Rect::new(0, bottom, width, bottom + px(FOOTER_HEIGHT));
+            bottom = rect.bottom;
+            rect
+        });
+        layout.size = (width, bottom);
+        layout
+    }
+
+    /// This layout with the buttons of the details pane, the last pane: one for
+    /// each of `widths` — the width of each label, in physical pixels — along its
+    /// bottom, as many as fit.
+    pub fn with_details_buttons(mut self, widths: &[i32]) -> Self {
+        let px = |logical: i32| scaled(logical, self.scale);
+        let Some(columns) = self.columns.as_mut() else {
+            return self;
+        };
+        let Some(pane) = columns.panes.last().map(|pane| pane.rect) else {
+            return self;
+        };
+        let (height, gap, inner) = (px(BUTTON_HEIGHT), px(BUTTON_GAP), px(BUTTON_PADDING));
+        let inset = px(DETAILS_PADDING);
+        let top = pane.bottom - inset - height;
+        let mut x = pane.left + inset;
+        for &label in widths {
+            let width = label + 2 * inner;
+            if x + width > pane.right - inset {
+                break;
+            }
+            columns
+                .buttons
+                .push(Rect::new(x, top, x + width, top + height));
+            x += width + gap;
+        }
+        self
+    }
+
+    /// The parts of a row of a column.
+    pub fn compact_parts(&self, row: Rect) -> CompactParts {
+        let px = |logical: i32| scaled(logical, self.scale);
+        let (inset, icon) = (px(PANE_PADDING) + px(8), px(COMPACT_ICON));
+        let top = row.top + (row.height() - icon) / 2;
+        let icon = Rect::new(row.left + inset, top, row.left + inset + icon, top + icon);
+        let right = row.right - inset;
+        CompactParts {
+            icon,
+            title: Rect::new(icon.right + px(8), row.top, right, row.bottom),
+            trailing: Rect::new(right, row.top, right, row.bottom),
+        }
+    }
+
+    /// The parts of the details pane `pane`.
+    pub fn details_parts(&self, pane: Rect) -> DetailsParts {
+        let px = |logical: i32| scaled(logical, self.scale);
+        let inset = px(DETAILS_PADDING);
+        let (left, right) = (pane.left + inset, pane.right - inset);
+        let icon = Rect::new(
+            left,
+            pane.top + inset,
+            left + px(DETAILS_ICON),
+            pane.top + inset + px(DETAILS_ICON),
+        );
+        let title = Rect::new(left, icon.bottom + px(6), right, icon.bottom + px(30));
+        let line = px(20);
+        DetailsParts {
+            icon,
+            title,
+            first_line: Rect::new(left, title.bottom, right, title.bottom + line),
+            line,
+            bottom: pane.bottom - inset - px(BUTTON_HEIGHT) - px(6),
+        }
+    }
+
+    /// This layout with the `count` letters of an A–Z list's index across its
+    /// band, narrower if they would not otherwise fit.
+    pub fn with_letters(mut self, count: usize) -> Self {
+        let Some(band) = self.band.filter(|_| count > 0) else {
+            return self;
+        };
+        let px = |logical: i32| scaled(logical, self.scale);
+        let (height, gap) = (px(CHIP_HEIGHT), px(LETTER_GAP));
+        let left = band.left + px(PADDING);
+        let room = band.right - px(PADDING) - left;
+        let width = px(LETTER_WIDTH).min((room + gap) / count as i32 - gap);
+        let top = band.top + (band.height() - height) / 2;
+        self.letters = (0..count as i32)
+            .map(|n| {
+                let x = left + n * (width + gap);
+                Rect::new(x, top, x + width, top + height)
+            })
+            .collect();
+        self
     }
 
     /// This layout with the chips of the line of prefixes, if that row is on
@@ -419,6 +689,19 @@ impl Layout {
             .position(|chip| chip.contains(x, y))
         {
             return Some(Hit::Prefix(n));
+        }
+        if let Some(n) = self.letters.iter().position(|letter| letter.contains(x, y)) {
+            return Some(Hit::Letter(n));
+        }
+        if let Some(columns) = &self.columns {
+            if let Some(n) = columns.buttons.iter().position(|b| b.contains(x, y)) {
+                return Some(Hit::Details(n));
+            }
+            for pane in columns.panes.iter().filter(|p| p.pane != columns.focus) {
+                if let Some(n) = pane.rows.iter().position(|row| row.contains(x, y)) {
+                    return Some(Hit::Pane(pane.pane, pane.first + n));
+                }
+            }
         }
         if let Some(buttons) = &self.buttons {
             if buttons.more.contains(x, y) {
@@ -572,11 +855,46 @@ pub fn scroll_to_show(spec: &Spec, rows: &[RowKind], first: usize, selected: usi
     first
 }
 
+/// The first row to show so that the list starts at row `row`, or as near as it
+/// can with the window still full: a jump to the last letter should not leave a
+/// few rows in a window that has shrunk around them.
+pub fn scroll_to_top(spec: &Spec, rows: &[RowKind], row: usize) -> usize {
+    let mut first = row.min(rows.len().saturating_sub(1));
+    while first > 0 && Layout::new(spec, rows, first - 1).end == rows.len() {
+        first -= 1;
+    }
+    first
+}
+
+/// The first row of the focused column so that row `selected` shows, changing
+/// `first` as little as possible.
+pub fn scroll_column(spec: &Spec, first: usize, selected: usize) -> usize {
+    let fit = column_fit(spec);
+    first.min(selected).max((selected + 1).saturating_sub(fit))
+}
+
+/// The height of the columns and their breadcrumb: fixed, less on a monitor too
+/// small for it.
+fn columns_height(spec: &Spec) -> i32 {
+    let px = |logical: i32| scaled(logical, spec.scale);
+    px(CRUMB_HEIGHT + COLUMNS_HEIGHT)
+        .min(spec.max_list_height)
+        .max(px(CRUMB_HEIGHT + COMPACT_HEIGHT + 2 * PANE_PADDING))
+}
+
+/// How many rows a column shows.
+fn column_fit(spec: &Spec) -> usize {
+    let px = |logical: i32| scaled(logical, spec.scale);
+    let room = columns_height(spec) - px(CRUMB_HEIGHT) - 2 * px(PANE_PADDING);
+    (room / px(COMPACT_HEIGHT)).max(1) as usize
+}
+
 fn row_height(kind: RowKind) -> i32 {
     match kind {
         RowKind::Header => HEADER_HEIGHT,
         RowKind::Item => ITEM_HEIGHT,
         RowKind::Prefixes => PREFIXES_HEIGHT,
+        RowKind::Compact => COMPACT_HEIGHT,
     }
 }
 
@@ -595,7 +913,166 @@ mod tests {
             scale: 1.0,
             max_list_height,
             footer: true,
+            band: false,
         }
+    }
+
+    fn pane(rows: usize, selected: Option<usize>) -> PaneSpec {
+        PaneSpec { rows, selected }
+    }
+
+    #[test]
+    fn the_columns_keep_their_height_whatever_they_hold() {
+        let few = Layout::columns(&spec(1000), &[pane(2, Some(0)), pane(0, None)], 0, 0);
+        let many = Layout::columns(&spec(1000), &[pane(90, Some(0)), pane(90, None)], 0, 0);
+        assert_eq!(few.size, many.size);
+        assert_eq!(few.size, (640, 56 + 26 + 320 + 34));
+        assert_eq!(few.list, Some(Rect::new(0, 56, 640, 56 + 346)));
+        assert_eq!(few.footer, Some(Rect::new(0, 402, 640, 436)));
+    }
+
+    #[test]
+    fn the_last_three_panes_show_in_three_thirds() {
+        let panes = [
+            pane(3, Some(0)),
+            pane(3, Some(1)),
+            pane(3, Some(2)),
+            pane(0, None),
+        ];
+        let layout = Layout::columns(&spec(1000), &panes, 2, 0);
+        let columns = layout.columns.as_ref().unwrap();
+        let shown: Vec<(usize, i32, i32)> = columns
+            .panes
+            .iter()
+            .map(|pane| (pane.pane, pane.rect.left, pane.rect.right))
+            .collect();
+        assert_eq!(shown, [(1, 0, 213), (2, 213, 426), (3, 426, 640)]);
+    }
+
+    #[test]
+    fn the_rows_of_the_focused_column_are_the_layouts_rows_and_the_others_are_panes() {
+        let panes = [pane(3, Some(1)), pane(4, Some(0)), pane(2, None)];
+        let layout = Layout::columns(&spec(1000), &panes, 1, 0);
+        assert_eq!(layout.rows.len(), 4);
+        assert!(layout.rows.iter().all(|row| row.kind == RowKind::Compact));
+
+        let columns = layout.columns.as_ref().unwrap();
+        let row = layout.rows[2].rect;
+        assert_eq!(
+            layout.hit_test(row.left + 5, row.top + 5),
+            Some(Hit::Row(2))
+        );
+        let left = columns.panes[0].rows[1];
+        assert_eq!(
+            layout.hit_test(left.left + 5, left.top + 5),
+            Some(Hit::Pane(0, 1))
+        );
+        let preview = columns.panes[2].rows[1];
+        assert_eq!(
+            layout.hit_test(preview.left + 5, preview.top + 5),
+            Some(Hit::Pane(2, 1))
+        );
+    }
+
+    #[test]
+    fn a_column_shows_its_selection_and_the_focused_one_its_scroll() {
+        let fit = column_fit(&spec(1000));
+        assert_eq!(fit, 10, "(320 - 12) / 30");
+        let panes = [pane(50, Some(30)), pane(50, Some(12))];
+        let layout = Layout::columns(&spec(1000), &panes, 1, 7);
+        let columns = layout.columns.as_ref().unwrap();
+        assert_eq!(columns.panes[0].first, 21, "its selection on the last row");
+        assert_eq!(columns.panes[1].first, 7);
+        assert_eq!(layout.first..layout.end, 7..17);
+
+        assert_eq!(scroll_column(&spec(1000), 7, 3), 3, "up");
+        assert_eq!(scroll_column(&spec(1000), 7, 8), 7, "still in view");
+        assert_eq!(scroll_column(&spec(1000), 7, 20), 11, "down");
+
+        let last = Layout::columns(&spec(1000), &panes, 1, 49);
+        assert_eq!(last.first, 40, "no further than a full column");
+    }
+
+    #[test]
+    fn the_columns_shrink_on_a_small_monitor_down_to_one_row() {
+        let height = |max| {
+            let layout = Layout::columns(&spec(max), &[pane(5, Some(0))], 0, 0);
+            layout.list.unwrap().height()
+        };
+        assert_eq!(height(200), 200);
+        assert_eq!(height(10), 26 + 30 + 12);
+        assert_eq!(column_fit(&spec(10)), 1);
+    }
+
+    #[test]
+    fn the_details_buttons_sit_along_the_bottom_of_the_last_pane_as_many_as_fit() {
+        let panes = [pane(3, Some(0)), pane(0, None)];
+        let layout =
+            Layout::columns(&spec(1000), &panes, 0, 0).with_details_buttons(&[40, 40, 40, 40, 40]);
+        let columns = layout.columns.as_ref().unwrap();
+        let last = columns.panes.last().unwrap().rect;
+        assert_eq!(columns.buttons.len(), 3, "three of 60 fit in 213 less 24");
+        assert!(columns.buttons.iter().all(|b| b.right <= last.right - 12));
+        assert_eq!(columns.buttons[0].bottom, last.bottom - 12);
+
+        let button = columns.buttons[1];
+        assert_eq!(
+            layout.hit_test(button.left + 2, button.top + 2),
+            Some(Hit::Details(1))
+        );
+        let parts = layout.details_parts(last);
+        assert!(parts.bottom <= columns.buttons[0].top);
+    }
+
+    #[test]
+    fn the_letter_band_stays_on_top_and_takes_its_height_from_the_list() {
+        let rows = [Header, Item, Item, Item];
+        let plain = spec(190);
+        let banded = Spec {
+            band: true,
+            ..plain
+        };
+        let layout = Layout::new(&banded, &rows, 2).with_letters(3);
+        let band = layout.band.unwrap();
+        assert_eq!(band, Rect::new(0, 56, 640, 88));
+        assert_eq!(layout.rows[0].rect.top, 88 + 6, "the rows start under it");
+        assert!(layout.size.1 - 34 <= 56 + 190, "and the list is no taller");
+
+        let letter = layout.letters[2];
+        assert_eq!(
+            layout.hit_test(letter.left + 1, letter.top + 1),
+            Some(Hit::Letter(2))
+        );
+        assert_eq!(Layout::new(&plain, &rows, 0).band, None);
+        assert!(
+            Layout::new(&plain, &rows, 0)
+                .with_letters(3)
+                .letters
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn twenty_seven_letters_fit_the_narrowest_window() {
+        let spec = Spec {
+            width: 560,
+            band: true,
+            ..spec(400)
+        };
+        let layout = Layout::new(&spec, &[Header, Item], 0).with_letters(27);
+        assert_eq!(layout.letters.len(), 27);
+        assert!(layout.letters[26].right <= 560 - 16);
+    }
+
+    #[test]
+    fn a_jump_puts_the_row_on_top_unless_the_window_would_no_longer_be_full() {
+        let rows = vec![Item; 40];
+        let spec = spec(232); // 4 rows.
+        assert_eq!(scroll_to_top(&spec, &rows, 10), 10);
+        assert_eq!(scroll_to_top(&spec, &rows, 38), 36);
+        assert_eq!(scroll_to_top(&spec, &rows, 36), 36);
+        let few = vec![Item; 2];
+        assert_eq!(scroll_to_top(&spec, &few, 1), 0, "everything fits");
     }
 
     #[test]

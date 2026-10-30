@@ -9,6 +9,7 @@
 //! * [`matcher`]: fuzzy subsequence scoring of one query word against one
 //!   piece of text.
 //! * [`actions`]: which actions apply to which result.
+//! * [`columns`]: the Miller columns the tray menus section opens as.
 //! * [`commands`]: the `>` commands, the `?` prefixes and the rows they make.
 //! * [`keycheck`]: is a key combination free? The table of the keys Windows keeps.
 //! * [`display`]: the text of a result row (matched runs, headings, second line).
@@ -26,6 +27,7 @@
 //! * [`sections`]: the sections the empty box lists, and the places a box can be scoped to.
 
 pub mod actions;
+pub mod columns;
 pub mod commands;
 pub mod display;
 pub mod files;

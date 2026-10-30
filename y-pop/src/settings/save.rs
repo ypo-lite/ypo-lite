@@ -373,6 +373,7 @@ impl MenusMode {
         match self {
             Self::Columns => "columns",
             Self::AZ => "a-z",
+            Self::List => "list",
         }
     }
 }

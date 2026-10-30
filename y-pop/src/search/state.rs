@@ -6,9 +6,10 @@
 //! the window with the Win32 half only: reading the keyboard, the clipboard,
 //! painting.
 
-use crate::model::{ActionId, ActionsConfig, ResultsLayout};
+use crate::model::{ActionId, ActionsConfig, MenusBrowse, ResultsLayout};
 
 use super::actions::{self, Available};
+use super::columns::{Columns, PaneView, Preview};
 use super::commands::{Command, Line, PREFIXES};
 use super::files::Progress;
 use super::hotkey::KeyCombo;
@@ -53,12 +54,17 @@ pub enum Outcome {
     /// Enter on the answer of a key check (`#`): the window knows whether the key
     /// is free.
     CheckKey,
+    /// A column opened on this browsed folder (an entry of the index): list it,
+    /// and answer with [`State::column_listed`].
+    ListFolder(u32),
 }
 
 /// One row of the list, in the order shown.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Row {
     Header(Heading),
+    /// The header of a letter of an A–Z list; `#` for what is not a letter.
+    Letter(char),
     Result(Hit),
     /// A section of the empty box: Enter opens it as a chip.
     Section(SectionRow),
@@ -74,7 +80,7 @@ impl Row {
     pub fn selectable(&self) -> bool {
         !matches!(
             self,
-            Self::Header(_) | Self::Prefixes | Self::Line(Line::Scan)
+            Self::Header(_) | Self::Letter(_) | Self::Prefixes | Self::Line(Line::Scan)
         )
     }
 }
@@ -124,6 +130,12 @@ pub struct State {
     collapsible: bool,
     /// Folded now: no rows, whatever the text. Only ever true when collapsible.
     folded: bool,
+    /// `<menus browse>`: how [`Place::Menus`] opens.
+    menus_browse: MenusBrowse,
+    /// Open while inside [`Place::Menus`], with `browse="columns"`.
+    columns: Option<Columns>,
+    /// The letters of the A–Z list being shown, for its index.
+    letters: Vec<char>,
 }
 
 /// One row of the history: what the empty box lists under **Recent**.
@@ -158,7 +170,16 @@ impl State {
             scan: Progress::default(),
             collapsible: false,
             folded: false,
+            menus_browse: MenusBrowse::default(),
+            columns: None,
+            letters: Vec::new(),
         }
+    }
+
+    /// `<menus browse>`: how the tray menus section opens.
+    pub fn with_menus_browse(mut self, browse: MenusBrowse) -> Self {
+        self.menus_browse = browse;
+        self
     }
 
     /// `<recent count>`: how many rows the empty box shows. A longer history
@@ -349,7 +370,7 @@ impl State {
         self.rows
             .iter()
             .map(|row| match row {
-                Row::Header(_) => RowKind::Header,
+                Row::Header(_) | Row::Letter(_) => RowKind::Header,
                 Row::Result(_) | Row::Section(_) | Row::Line(_) => RowKind::Item,
                 Row::Prefixes => RowKind::Prefixes,
             })
@@ -379,6 +400,11 @@ impl State {
     /// Hover: selects the result at `row`. `false` if it is a header, out of
     /// range, or already selected.
     pub fn select_row(&mut self, row: usize) -> bool {
+        // In the columns the selection decides what is shown to the right, so
+        // it takes a click: the pointer passing over must not change that.
+        if self.showing_columns() {
+            return false;
+        }
         match self.rows.get(row) {
             Some(selectable) if selectable.selectable() && self.selected != Some(row) => {
                 self.selected = Some(row);
@@ -391,6 +417,9 @@ impl State {
     /// A click on `row`: selects it and, if it is a result, opens it the way
     /// Enter would.
     pub fn click_row(&mut self, index: &Index, row: usize) -> Outcome {
+        if let Some(depth) = self.column_depth() {
+            return self.column_click(index, depth, row);
+        }
         match self.rows.get(row) {
             Some(Row::Result(_)) => {
                 self.selected = Some(row);
@@ -630,6 +659,9 @@ impl State {
     /// Tab: enters the selected group, if it is one. The text typed to find
     /// it is cleared — it did its job.
     fn enter_selected(&mut self, index: &Index) -> Outcome {
+        if self.showing_columns() {
+            return self.column_in(index);
+        }
         let Some(hit) = self.selected_hit() else {
             return Outcome::Nothing;
         };
@@ -646,9 +678,241 @@ impl State {
     /// Goes inside `place`: it becomes a chip, and the search looks only there.
     fn enter(&mut self, index: &Index, place: Place) -> Outcome {
         self.scopes.push(place);
+        if place == Place::Menus && self.menus_browse == MenusBrowse::Columns {
+            self.columns = Some(Columns::new(index));
+        }
         self.input.clear();
         self.refresh(index);
         Outcome::Redraw
+    }
+
+    /// Whether the rows are the focused column of the tray menus.
+    fn showing_columns(&self) -> bool {
+        self.column_depth().is_some()
+    }
+
+    /// How many columns are left of the focused one, while the columns are
+    /// what is shown: nothing typed, and no group entered from a search.
+    pub fn column_depth(&self) -> Option<usize> {
+        let columns = self.columns.as_ref().filter(|columns| columns.showing)?;
+        Some(columns.depth())
+    }
+
+    /// The columns to draw, left to right: all of them, then the preview of the
+    /// selected row. `None` unless the columns are shown.
+    pub fn column_panes(&self, index: &Index) -> Option<Vec<PaneView>> {
+        let columns = self.columns.as_ref().filter(|columns| columns.showing)?;
+        let (focused, left) = columns.panes().split_last()?;
+        let mut panes: Vec<PaneView> = left
+            .iter()
+            .map(|pane| PaneView {
+                items: pane.items.clone(),
+                selected: Some(pane.selected),
+                ..PaneView::default()
+            })
+            .collect();
+        panes.push(PaneView {
+            items: focused.items.clone(),
+            selected: self.selected,
+            waiting: focused.waiting.is_some(),
+            details: None,
+        });
+        let selected = self.selected_hit().map(|hit| hit.entry);
+        panes.push(match Columns::preview(index, selected) {
+            Preview::Items(items) => PaneView {
+                items,
+                ..PaneView::default()
+            },
+            Preview::Details(entry) => PaneView {
+                details: Some(entry),
+                ..PaneView::default()
+            },
+            Preview::Nothing => PaneView::default(),
+        });
+        Some(panes)
+    }
+
+    /// The entries the focused column was reached through: the breadcrumb.
+    pub fn column_crumbs(&self) -> Vec<u32> {
+        self.columns.as_ref().map_or_else(Vec::new, Columns::crumbs)
+    }
+
+    /// `→`: the column of the selected group or browsed folder opens, focused.
+    fn column_in(&mut self, index: &Index) -> Outcome {
+        let Some(hit) = self.selected_hit() else {
+            return Outcome::Nothing;
+        };
+        let selected = self.selected.unwrap_or(0);
+        let Some(columns) = self.columns.as_mut() else {
+            return Outcome::Nothing;
+        };
+        columns.focused_mut().selected = selected;
+        let Some(pane) = columns.open(index, hit.entry) else {
+            return Outcome::Nothing;
+        };
+        let waiting = pane.waiting;
+        self.show_column(index);
+        waiting.map_or(Outcome::Redraw, Outcome::ListFolder)
+    }
+
+    /// `←`: back to the column before, its selection where it was.
+    fn column_back(&mut self, index: &Index) -> Outcome {
+        if !self.columns.as_mut().is_some_and(Columns::back) {
+            return Outcome::Nothing;
+        }
+        self.show_column(index);
+        Outcome::Redraw
+    }
+
+    /// Makes the last column the rows, at its own selection.
+    fn show_column(&mut self, index: &Index) {
+        self.selected = self
+            .columns
+            .as_ref()
+            .map(|columns| columns.focused().selected);
+        self.refresh(index);
+    }
+
+    /// A folder's listing is here: `items` are its files, as index entries. The
+    /// column may be gone by now, and then nothing happens.
+    pub fn column_listed(&mut self, index: &Index, folder: u32, items: Vec<u32>) {
+        let Some(columns) = self.columns.as_mut() else {
+            return;
+        };
+        if columns.listed(folder, items) && columns.showing {
+            self.show_column(index);
+        }
+    }
+
+    /// Row `row` of column `pane` becomes the selection, closing the columns
+    /// right of it. `pane` one past the last is the preview, which opens first.
+    pub fn column_select(&mut self, index: &Index, pane: usize, row: usize) -> Outcome {
+        let Some(depth) = self.column_depth() else {
+            return Outcome::Nothing;
+        };
+        if pane == depth + 1 && self.column_in(index) == Outcome::Nothing {
+            return Outcome::Nothing;
+        }
+        let Some(columns) = self.columns.as_mut() else {
+            return Outcome::Nothing;
+        };
+        let holds = |pane: &super::columns::Pane| row < pane.items.len();
+        if !columns.panes().get(pane).is_some_and(holds) {
+            return Outcome::Nothing;
+        }
+        columns.focus(pane);
+        columns.focused_mut().selected = row;
+        self.show_column(index);
+        Outcome::Redraw
+    }
+
+    /// A click on a row of a column: selects it, and goes in if something opens
+    /// from it. An app is opened from the details, whose buttons say so.
+    pub fn column_click(&mut self, index: &Index, pane: usize, row: usize) -> Outcome {
+        let selected = self.column_select(index, pane, row);
+        match self.selected_hit() {
+            Some(hit)
+                if selected != Outcome::Nothing
+                    && Columns::opens(&index.entries()[hit.entry as usize]) =>
+            {
+                match self.column_in(index) {
+                    Outcome::Nothing => selected,
+                    outcome => outcome,
+                }
+            }
+            _ => selected,
+        }
+    }
+
+    /// The keys that mean something else in the columns. `None`: the box's
+    /// usual meaning, which is what moves the selection and runs the actions.
+    fn column_key(&mut self, index: &Index, key: Key, mods: Mods) -> Option<Outcome> {
+        let plain = mods == Mods::default();
+        let back_key = (plain && matches!(key, Key::Left | Key::Backspace))
+            || (key == Key::Tab && mods.shift && !mods.ctrl && !mods.alt);
+        let opens = self
+            .selected_hit()
+            .is_some_and(|hit| Columns::opens(&index.entries()[hit.entry as usize]));
+        match key {
+            Key::Right | Key::Tab if plain => Some(self.column_in(index)),
+            Key::Enter if plain && opens => Some(self.column_in(index)),
+            // From the first column these leave the section, as anywhere.
+            _ if back_key && self.column_depth().is_some_and(|depth| depth > 0) => {
+                Some(self.column_back(index))
+            }
+            Key::Home if plain => Some(self.step(isize::MIN)),
+            Key::End if plain => Some(self.step(isize::MAX)),
+            _ => None,
+        }
+    }
+
+    /// The actions the details of the selected row show as buttons.
+    pub fn details_buttons(&self, index: &Index) -> Vec<ActionId> {
+        self.available_actions(index)
+            .into_iter()
+            .map(|action| action.id)
+            .filter(|id| matches!(id, ActionId::Open | ActionId::Reveal | ActionId::Edit))
+            .collect()
+    }
+
+    /// A click on the `n`th of [`Self::details_buttons`].
+    pub fn details_click(&mut self, index: &Index, n: usize) -> Outcome {
+        match self.details_buttons(index).get(n) {
+            Some(&id) => self.perform(index, id),
+            None => Outcome::Nothing,
+        }
+    }
+
+    /// The shortcut of `id`, for the footer.
+    pub fn key_of(&self, id: ActionId) -> Option<Chord> {
+        self.actions
+            .actions
+            .iter()
+            .find(|binding| binding.id == id)
+            .and_then(|binding| binding.key)
+    }
+
+    /// The letters of the A–Z list being shown; empty when none is.
+    pub fn letters(&self) -> &[char] {
+        &self.letters
+    }
+
+    /// A click on the `n`th of [`Self::letters`]: the first row under that letter
+    /// is selected. Gives the row of its header, for the list to start there.
+    pub fn letter_click(&mut self, n: usize) -> Option<usize> {
+        let letter = *self.letters.get(n)?;
+        let header = self
+            .rows
+            .iter()
+            .position(|row| *row == Row::Letter(letter))?;
+        self.selected = Some(header + 1);
+        Some(header)
+    }
+
+    /// `browse="a-z"`: every app of the tray menus by name, under its letter.
+    fn list_a_to_z(&mut self, index: &Index) {
+        let mut apps: Vec<(char, &str, u32)> = index
+            .entries()
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| {
+                entry.source == Source::Menu && entry.kind == Kind::App && !entry.left_out
+            })
+            .map(|(position, entry)| (letter_of(entry.name()), entry.name(), position as u32))
+            .collect();
+        // Ties stay in file order: the position comes last.
+        apps.sort_unstable();
+        for (letter, _, entry) in apps {
+            if self.letters.last() != Some(&letter) {
+                self.letters.push(letter);
+                self.rows.push(Row::Letter(letter));
+            }
+            self.rows.push(Row::Result(Hit {
+                entry,
+                score: 0,
+                matched: Field::Name,
+            }));
+        }
     }
 
     /// Enter, `→` or `Tab` on a section row of the empty box.
@@ -764,6 +1028,9 @@ impl State {
         let Some(left) = self.scopes.pop() else {
             return Outcome::Nothing;
         };
+        if left == Place::Menus {
+            self.columns = None;
+        }
         self.refresh(index);
         let row = self
             .rows
@@ -792,6 +1059,12 @@ impl State {
 
     fn key(&mut self, index: &Index, key: Key, mods: Mods) -> Outcome {
         let Mods { ctrl, shift, .. } = mods;
+
+        if self.showing_columns()
+            && let Some(outcome) = self.column_key(index, key, mods)
+        {
+            return outcome;
+        }
 
         // On a line of a prefixed list Enter does what it says.
         if self.on_line() && mods == Mods::default() && key == Key::Enter {
@@ -925,6 +1198,12 @@ impl State {
     /// launches, if there are any, then the **Browse** sections. Inside a place,
     /// an empty box lists what it holds, in file order.
     fn refresh(&mut self, index: &Index) {
+        // The rows are about to go: a column keeps its selection for later.
+        if let Some(columns) = self.columns.as_mut().filter(|columns| columns.showing) {
+            columns.focused_mut().selected = self.selected.unwrap_or(0);
+            columns.showing = false;
+        }
+        self.letters.clear();
         self.menu = None;
         self.query = Query::new(self.input.text());
         self.rows.clear();
@@ -980,9 +1259,16 @@ impl State {
                     }
                     self.rows.push(Row::Prefixes);
                 }
-                // The tray menus: the tray icons, whose menus Tab goes into.
+                Some(Place::Menus) if self.columns.is_some() => {
+                    self.list_column();
+                    return;
+                }
+                Some(Place::Menus) if self.menus_browse == MenusBrowse::AZ => {
+                    self.list_a_to_z(index);
+                }
+                // The tray icons; a group is entered as a chip, like anywhere.
                 Some(Place::Menus) => self.rows.extend(listed(&|entry| {
-                    entry.source == super::index::Source::Menu && entry.ancestors.is_empty()
+                    entry.source == Source::Menu && entry.ancestors.is_empty() && !entry.left_out
                 })),
                 Some(Place::Group(group)) => self
                     .rows
@@ -1012,6 +1298,24 @@ impl State {
             }
         }
         self.selected = self.first_selectable();
+    }
+
+    /// The focused column as the rows, at its own selection.
+    fn list_column(&mut self) {
+        let Some(columns) = self.columns.as_mut() else {
+            return;
+        };
+        columns.showing = true;
+        let pane = columns.focused();
+        self.rows.extend(pane.items.iter().map(|&entry| {
+            Row::Result(Hit {
+                entry,
+                score: 0,
+                matched: Field::Name,
+            })
+        }));
+        let last = pane.items.len().checked_sub(1);
+        self.selected = last.map(|last| pane.selected.min(last));
     }
 
     fn recent_result(recent: &Recent) -> Row {
@@ -1158,6 +1462,14 @@ impl State {
             self.rows.extend(rows);
         }
     }
+}
+
+/// The header a name goes under in an A–Z list. Names are folded already.
+fn letter_of(name: &str) -> char {
+    name.chars()
+        .next()
+        .filter(|c| c.is_alphabetic())
+        .map_or('#', |c| c.to_uppercase().next().unwrap_or(c))
 }
 
 #[cfg(test)]
@@ -2100,6 +2412,7 @@ mod tests {
             .iter()
             .filter_map(|row| match row {
                 Row::Header(heading) => Some(format!("[{heading:?}]")),
+                Row::Letter(letter) => Some(format!("[{letter}]")),
                 Row::Result(hit) => Some(index.entries()[hit.entry as usize].name().to_owned()),
                 Row::Section(section) => Some(format!("<{:?}>", section.place)),
                 Row::Line(line) => Some(format!("{line:?}")),
@@ -2567,6 +2880,397 @@ mod tests {
             press(&mut state, &index, Key::Backspace);
         }
         assert!(matches!(state.rows()[1], Row::Section(_)));
+    }
+
+    const WALKED: &str = r#"<y-pop>
+        <search hotkey="Alt+Space"/>
+        <group name="Work">
+            <app name="Mail" exe="m.exe"/>
+            <group name="Servers">
+                <app name="Putty" exe="p.exe"/>
+                <group name="Deep"><app name="Bottom" exe="b.exe"/></group>
+            </group>
+            <group name="Hollow"/>
+            <app name="Scripts" exe="C:\Scripts" browse="true"/>
+            <app name="Zed" exe="z.exe"/>
+        </group>
+        <app name="Alone" exe="a.exe"/>
+        <group name="Play"><app name="Chess" exe="c.exe"/><app name="1942" exe="n.exe"/></group>
+    </y-pop>"#;
+
+    /// A state inside the tray menus section, on `WALKED`.
+    fn walking(browse: MenusBrowse) -> (State, Index) {
+        let tree = config::load_str(WALKED, &mut Vec::<Variable>::new()).unwrap();
+        let index = Index::from_tree(&tree);
+        let mut state = state().with_menus_browse(browse);
+        let sections = super::super::sections::rows(&tree, &index);
+        state.start(&index, Vec::new(), sections, Vec::new());
+        press(&mut state, &index, Key::Enter);
+        assert_eq!(state.scopes(), [Place::Menus]);
+        (state, index)
+    }
+
+    fn selected_name(state: &State, index: &Index) -> Option<String> {
+        let hit = state.selected_hit()?;
+        Some(name_of(index, hit).to_owned())
+    }
+
+    fn panes_of(state: &State, index: &Index) -> Vec<Vec<String>> {
+        state
+            .column_panes(index)
+            .unwrap()
+            .iter()
+            .map(|pane| {
+                pane.items
+                    .iter()
+                    .map(|&item| index.entries()[item as usize].name().to_owned())
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_columns_open_on_the_tray_menus_with_the_first_one_previewed() {
+        let (state, index) = walking(MenusBrowse::Columns);
+        assert_eq!(state.column_depth(), Some(0));
+        assert_eq!(selected_name(&state, &index).unwrap(), "work");
+        assert_eq!(
+            panes_of(&state, &index),
+            [
+                vec!["work", "alone", "play"],
+                vec!["mail", "servers", "hollow", "scripts", "zed"],
+            ]
+        );
+    }
+
+    #[test]
+    fn moving_the_selection_changes_the_preview() {
+        let (mut state, index) = walking(MenusBrowse::Columns);
+        press(&mut state, &index, Key::Down);
+        let panes = state.column_panes(&index).unwrap();
+        assert_eq!(selected_name(&state, &index).unwrap(), "alone");
+        assert_eq!(
+            panes.last().unwrap().details,
+            state.selected_hit().map(|hit| hit.entry),
+            "an app previews its details"
+        );
+    }
+
+    #[test]
+    fn right_tab_and_enter_go_in_and_left_comes_back_to_the_same_row() {
+        for key in [Key::Right, Key::Tab, Key::Enter] {
+            let (mut state, index) = walking(MenusBrowse::Columns);
+            press(&mut state, &index, key);
+            assert_eq!(state.column_depth(), Some(1), "{key:?}");
+            assert_eq!(selected_name(&state, &index).unwrap(), "mail");
+
+            press(&mut state, &index, Key::Down);
+            press(&mut state, &index, Key::Right);
+            assert_eq!(state.column_depth(), Some(2));
+            assert_eq!(selected_name(&state, &index).unwrap(), "putty");
+
+            press(&mut state, &index, Key::Left);
+            assert_eq!(selected_name(&state, &index).unwrap(), "servers");
+            press(&mut state, &index, Key::Backspace);
+            assert_eq!(selected_name(&state, &index).unwrap(), "work");
+            assert_eq!(state.scopes(), [Place::Menus], "{key:?}: still inside");
+        }
+    }
+
+    #[test]
+    fn left_from_the_first_column_leaves_the_section() {
+        let (mut state, index) = walking(MenusBrowse::Columns);
+        press(&mut state, &index, Key::Left);
+        assert!(state.scopes().is_empty());
+        assert_eq!(state.column_depth(), None);
+        assert!(matches!(
+            state.rows()[state.selected().unwrap()],
+            Row::Section(_)
+        ));
+    }
+
+    #[test]
+    fn esc_leaves_the_section_from_any_column_and_coming_back_starts_afresh() {
+        let (mut state, index) = walking(MenusBrowse::Columns);
+        press(&mut state, &index, Key::Right);
+        press(&mut state, &index, Key::Escape);
+        assert!(state.scopes().is_empty());
+
+        press(&mut state, &index, Key::Enter);
+        assert_eq!(state.column_depth(), Some(0));
+        assert_eq!(selected_name(&state, &index).unwrap(), "work");
+    }
+
+    #[test]
+    fn nothing_opens_from_an_app_or_an_empty_group_and_right_stays_put() {
+        let (mut state, index) = walking(MenusBrowse::Columns);
+        press(&mut state, &index, Key::Down);
+        assert_eq!(press(&mut state, &index, Key::Right), Outcome::Nothing);
+        assert_eq!(state.column_depth(), Some(0));
+
+        press(&mut state, &index, Key::Up);
+        press(&mut state, &index, Key::Right);
+        press(&mut state, &index, Key::Down);
+        press(&mut state, &index, Key::Down);
+        assert_eq!(selected_name(&state, &index).unwrap(), "hollow");
+        assert_eq!(press(&mut state, &index, Key::Enter), Outcome::Nothing);
+        assert_eq!(state.column_depth(), Some(1));
+    }
+
+    #[test]
+    fn enter_on_an_app_opens_it_and_its_shortcuts_work() {
+        let (mut state, index) = walking(MenusBrowse::Columns);
+        press(&mut state, &index, Key::Right);
+        assert!(matches!(
+            press(&mut state, &index, Key::Enter),
+            Outcome::Activate(hit, ActionId::Open) if name_of(&index, hit) == "mail"
+        ));
+        assert!(matches!(
+            state.handle(&index, shortcut("Ctrl+R")),
+            Outcome::Activate(hit, ActionId::Reveal) if name_of(&index, hit) == "mail"
+        ));
+    }
+
+    #[test]
+    fn home_and_end_go_to_the_ends_of_the_column() {
+        let (mut state, index) = walking(MenusBrowse::Columns);
+        press(&mut state, &index, Key::End);
+        assert_eq!(selected_name(&state, &index).unwrap(), "play");
+        press(&mut state, &index, Key::Home);
+        assert_eq!(selected_name(&state, &index).unwrap(), "work");
+    }
+
+    #[test]
+    fn typing_searches_and_erasing_finds_the_columns_as_they_were() {
+        let (mut state, index) = walking(MenusBrowse::Columns);
+        press(&mut state, &index, Key::Right);
+        press(&mut state, &index, Key::Down);
+        type_text(&mut state, &index, "put");
+        assert_eq!(state.column_depth(), None, "the results replace them");
+        assert_eq!(selected_name(&state, &index).unwrap(), "putty");
+
+        press(&mut state, &index, Key::Down);
+        for _ in 0..3 {
+            press(&mut state, &index, Key::Backspace);
+        }
+        assert_eq!(state.column_depth(), Some(1));
+        assert_eq!(selected_name(&state, &index).unwrap(), "servers");
+    }
+
+    #[test]
+    fn a_group_entered_from_a_search_keeps_the_columns_underneath() {
+        let (mut state, index) = walking(MenusBrowse::Columns);
+        press(&mut state, &index, Key::Down);
+        type_text(&mut state, &index, "serv");
+        press(&mut state, &index, Key::Tab);
+        assert_eq!(state.scopes().len(), 2);
+        assert_eq!(state.column_depth(), None);
+
+        press(&mut state, &index, Key::Backspace);
+        assert_eq!(state.scopes(), [Place::Menus]);
+        assert_eq!(state.column_depth(), Some(0));
+        assert_eq!(
+            selected_name(&state, &index).unwrap(),
+            "alone",
+            "the group's rows did not touch the column's selection"
+        );
+    }
+
+    #[test]
+    fn a_browsed_folder_is_not_read_until_its_column_opens_and_then_waits() {
+        let (mut state, index) = walking(MenusBrowse::Columns);
+        press(&mut state, &index, Key::Right);
+        press(&mut state, &index, Key::End);
+        press(&mut state, &index, Key::Up);
+        assert_eq!(selected_name(&state, &index).unwrap(), "scripts");
+        let folder = state.selected_hit().unwrap().entry;
+        assert_eq!(
+            state.column_panes(&index).unwrap().last().unwrap().details,
+            Some(folder),
+            "selected, it shows its details"
+        );
+
+        assert_eq!(
+            press(&mut state, &index, Key::Enter),
+            Outcome::ListFolder(folder)
+        );
+        assert_eq!(state.column_depth(), Some(2));
+        assert!(state.column_panes(&index).unwrap()[2].waiting);
+        assert!(state.selected_hit().is_none());
+
+        // Two of the index's entries stand in for the files.
+        let files: Vec<u32> = vec![0, 1];
+        state.column_listed(&index, folder, files.clone());
+        assert_eq!(state.selected_hit().unwrap().entry, files[0]);
+        assert!(!state.column_panes(&index).unwrap()[2].waiting);
+    }
+
+    #[test]
+    fn a_listing_nobody_waits_for_any_more_changes_nothing() {
+        let (mut state, index) = walking(MenusBrowse::Columns);
+        press(&mut state, &index, Key::Right);
+        press(&mut state, &index, Key::End);
+        press(&mut state, &index, Key::Up);
+        let folder = state.selected_hit().unwrap().entry;
+        press(&mut state, &index, Key::Right);
+        press(&mut state, &index, Key::Left);
+
+        state.column_listed(&index, folder, vec![0]);
+        assert_eq!(state.column_depth(), Some(1));
+        assert_eq!(selected_name(&state, &index).unwrap(), "scripts");
+    }
+
+    #[test]
+    fn a_click_goes_into_a_group_and_only_selects_an_app() {
+        let (mut state, index) = walking(MenusBrowse::Columns);
+        // A row of the preview: the group it shows opens first.
+        assert_eq!(state.column_click(&index, 1, 1), Outcome::Redraw);
+        assert_eq!(state.column_depth(), Some(2), "work, then servers");
+        assert_eq!(selected_name(&state, &index).unwrap(), "putty");
+
+        // A row of a column to the left closes what is right of it.
+        assert_eq!(state.column_click(&index, 1, 0), Outcome::Redraw);
+        assert_eq!(state.column_depth(), Some(1));
+        assert_eq!(selected_name(&state, &index).unwrap(), "mail");
+
+        // The focused column's row, as the window reports it.
+        assert_eq!(state.click_row(&index, 4), Outcome::Redraw);
+        assert_eq!(selected_name(&state, &index).unwrap(), "zed");
+        assert_eq!(state.column_depth(), Some(1), "an app stays where it is");
+    }
+
+    #[test]
+    fn hovering_a_column_does_not_move_the_selection() {
+        let (mut state, _) = walking(MenusBrowse::Columns);
+        assert!(!state.select_row(1));
+        assert_eq!(state.selected(), Some(0));
+    }
+
+    #[test]
+    fn the_details_buttons_are_open_reveal_and_edit_when_they_apply() {
+        let (mut state, index) = walking(MenusBrowse::Columns);
+        press(&mut state, &index, Key::Right);
+        assert_eq!(
+            state.details_buttons(&index),
+            [ActionId::Open, ActionId::Reveal, ActionId::Edit]
+        );
+        assert!(matches!(
+            state.details_click(&index, 1),
+            Outcome::Activate(_, ActionId::Reveal)
+        ));
+        assert_eq!(state.details_click(&index, 9), Outcome::Nothing);
+    }
+
+    #[test]
+    fn the_crumbs_name_the_way_in() {
+        let (mut state, index) = walking(MenusBrowse::Columns);
+        press(&mut state, &index, Key::Right);
+        press(&mut state, &index, Key::Down);
+        press(&mut state, &index, Key::Right);
+        let names: Vec<&str> = state
+            .column_crumbs()
+            .iter()
+            .map(|&entry| index.entries()[entry as usize].name())
+            .collect();
+        assert_eq!(names, ["work", "servers"]);
+    }
+
+    #[test]
+    fn the_action_menu_works_on_the_focused_column() {
+        let (mut state, index) = walking(MenusBrowse::Columns);
+        press(&mut state, &index, Key::Right);
+        assert_eq!(state.open_menu(&index), Outcome::Redraw);
+        assert_eq!(state.menu().unwrap().row, 0);
+        let up = press(&mut state, &index, Key::Enter);
+        assert!(matches!(up, Outcome::Activate(_, ActionId::Open)));
+    }
+
+    #[test]
+    fn a_z_lists_every_app_of_every_menu_under_its_letter() {
+        let (state, index) = walking(MenusBrowse::AZ);
+        assert_eq!(state.column_depth(), None);
+        assert_eq!(
+            row_names(&state, &index),
+            [
+                "[#]", "1942", "[A]", "alone", "[B]", "bottom", "[C]", "chess", "[M]", "mail",
+                "[P]", "putty", "[Z]", "zed",
+            ],
+            "apps only: no group, no browsed folder"
+        );
+        assert_eq!(state.letters(), ['#', 'A', 'B', 'C', 'M', 'P', 'Z']);
+        assert_eq!(state.selected(), Some(1), "the headers are skipped");
+    }
+
+    #[test]
+    fn a_click_on_a_letter_selects_its_first_row_and_gives_its_header() {
+        let (mut state, index) = walking(MenusBrowse::AZ);
+        assert_eq!(state.letter_click(4), Some(8));
+        assert_eq!(selected_name(&state, &index).unwrap(), "mail");
+        assert_eq!(state.letter_click(99), None);
+    }
+
+    #[test]
+    fn typing_in_a_z_searches_and_the_letters_go_away_until_it_is_erased() {
+        let (mut state, index) = walking(MenusBrowse::AZ);
+        type_text(&mut state, &index, "m");
+        assert!(state.letters().is_empty());
+        press(&mut state, &index, Key::Backspace);
+        assert!(!state.letters().is_empty());
+    }
+
+    #[test]
+    fn include_limits_the_section_and_the_plain_search_but_not_the_hotkeys() {
+        let tree = config::load_str(
+            r#"<y-pop>
+                <search><menus browse="a-z" include="Work"/></search>
+                <group name="Work"><app name="Mail" exe="m.exe"/></group>
+                <group name="Play"><app name="Mailer" exe="g.exe"><hotkey key="Win+G"/></app></group>
+            </y-pop>"#,
+            &mut Vec::<Variable>::new(),
+        )
+        .unwrap();
+        assert!(tree.warnings.is_empty(), "{:?}", tree.warnings);
+        let index = Index::from_tree(&tree);
+        let mut state = state().with_menus_browse(tree.search.as_ref().unwrap().menus_browse());
+        let sections = super::super::sections::rows(&tree, &index);
+        assert_eq!(sections[0].apps, 1);
+        state.start(&index, Vec::new(), sections, Vec::new());
+
+        type_text(&mut state, &index, "mail");
+        assert_eq!(row_names(&state, &index), ["[TopHit]", "mail"]);
+
+        state.handle(&index, Event::Key(Key::Escape, Mods::default()));
+        type_text(&mut state, &index, "#");
+        assert!(row_names(&state, &index).contains(&"mailer".to_owned()));
+
+        state.handle(&index, Event::Key(Key::Escape, Mods::default()));
+        press(&mut state, &index, Key::Enter);
+        assert_eq!(row_names(&state, &index), ["[M]", "mail"]);
+    }
+
+    #[test]
+    fn the_list_shows_the_tray_icons_and_tab_goes_into_a_group_as_a_chip() {
+        let (mut state, index) = walking(MenusBrowse::List);
+        assert_eq!(state.column_depth(), None);
+        assert!(state.letters().is_empty());
+        assert_eq!(row_names(&state, &index), ["work", "alone", "play"]);
+
+        press(&mut state, &index, Key::Tab);
+        assert_eq!(state.scopes().len(), 2, "a chip for the group");
+        assert_eq!(
+            row_names(&state, &index),
+            ["mail", "servers", "hollow", "scripts", "zed"]
+        );
+        press(&mut state, &index, Key::Backspace);
+        assert_eq!(state.scopes(), [Place::Menus]);
+        assert_eq!(row_names(&state, &index), ["work", "alone", "play"]);
+    }
+
+    #[test]
+    fn the_list_searches_like_the_other_views() {
+        let (mut state, index) = walking(MenusBrowse::List);
+        type_text(&mut state, &index, "putty");
+        assert_eq!(selected_name(&state, &index).unwrap(), "putty");
     }
 
     const KEYED: &str = r#"<y-pop>

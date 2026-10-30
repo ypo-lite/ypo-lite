@@ -656,7 +656,10 @@ mod tests {
                 <recent count="9"/>
                 <menus browse="a-z" include="y-pop; Admin tools"/>
                 <start-menu exclude="*uninstall*;Help"/>
-            </search></y-pop>"#,
+            </search>
+            <group name="y-pop"><quit/></group>
+            <group name="Admin tools"><quit/></group>
+            </y-pop>"#,
             &mut builtins(),
         )
         .expect("valid");
@@ -684,6 +687,44 @@ mod tests {
             exclude.iter().map(|name| name.as_ref()).collect::<Vec<_>>(),
             ["*uninstall*", "Help"]
         );
+    }
+
+    #[test]
+    fn include_is_checked_against_the_tray_menus_wherever_search_stands_in_the_file() {
+        let tree = load_str(
+            r#"<y-pop>
+                <search><menus include="&amp;wörk;Nope"/></search>
+                <group name="W&amp;ork"><quit/></group>
+            </y-pop>"#,
+            &mut builtins(),
+        )
+        .expect("valid");
+        assert_eq!(tree.warnings.len(), 1, "{:?}", tree.warnings);
+        assert!(tree.warnings[0].contains("\"Nope\""), "{:?}", tree.warnings);
+
+        let search = tree.search.unwrap();
+        assert!(search.includes_menu("Work"), "case, accents and & aside");
+        assert!(!search.includes_menu("Play"));
+    }
+
+    #[test]
+    fn browse_reads_each_view() {
+        for (text, browse) in [
+            ("columns", MenusBrowse::Columns),
+            ("a-z", MenusBrowse::AZ),
+            ("list", MenusBrowse::List),
+        ] {
+            let xml = format!(r#"<y-pop><search><menus browse="{text}"/></search></y-pop>"#);
+            let tree = load_str(&xml, &mut builtins()).expect("valid");
+            assert!(tree.warnings.is_empty(), "{:?}", tree.warnings);
+            assert_eq!(tree.search.unwrap().menus_browse(), browse);
+        }
+    }
+
+    #[test]
+    fn no_include_means_every_tray_menu() {
+        let tree = load_str(r#"<y-pop><search/></y-pop>"#, &mut builtins()).expect("valid");
+        assert!(tree.search.unwrap().includes_menu("Anything"));
     }
 
     #[test]

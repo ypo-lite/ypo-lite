@@ -367,11 +367,12 @@ impl SectionKind {
     }
 }
 
-/// `<menus browse="columns|a-z">`.
+/// `<menus browse="columns|a-z|list">`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum MenusMode {
     Columns,
     AZ,
+    List,
 }
 
 /// A whole `y-pop.xml`.

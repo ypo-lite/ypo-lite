@@ -15,6 +15,7 @@ use std::sync::Arc;
 use y_core::hotkey::Hotkey;
 
 use crate::search::keys::Chord;
+use crate::search::matcher::{fold, plain};
 use crate::theme::{Theme, ThemeOverrides};
 
 /// Index into a [`ConfigTree`]'s node arena. `u32` rather than `usize`: half
@@ -308,6 +309,34 @@ impl SearchConfig {
         ]
     }
 
+    /// How the tray menus section opens.
+    pub fn menus_browse(&self) -> MenusBrowse {
+        self.sections
+            .iter()
+            .find_map(|section| match section {
+                Section::Menus { browse, .. } => Some(*browse),
+                _ => None,
+            })
+            .unwrap_or_default()
+    }
+
+    /// The names `<menus include>` lists; empty means every tray menu.
+    pub fn included_menus(&self) -> &[Arc<str>] {
+        self.sections
+            .iter()
+            .find_map(|section| match section {
+                Section::Menus { include, .. } => Some(include.as_slice()),
+                _ => None,
+            })
+            .unwrap_or_default()
+    }
+
+    /// Whether the tray menu called `name` is in the tray menus section.
+    pub fn includes_menu(&self, name: &str) -> bool {
+        let included = self.included_menus();
+        included.is_empty() || included.iter().any(|menu| same_menu(menu, name))
+    }
+
     /// The nodes of the search-only groups and folders, in section order.
     pub fn nodes(&self) -> impl Iterator<Item = NodeId> + '_ {
         self.sections.iter().filter_map(|section| match section {
@@ -315,6 +344,12 @@ impl SearchConfig {
             _ => None,
         })
     }
+}
+
+/// Whether two tray menu names are the same to `<menus include>`: compared as
+/// search compares, so case, accents and a menu's `&` marker make no difference.
+pub(crate) fn same_menu(a: &str, b: &str) -> bool {
+    fold(&plain(a)) == fold(&plain(b))
 }
 
 /// `results="sections|flat"`.
@@ -326,12 +361,14 @@ pub enum ResultsLayout {
     Flat,
 }
 
-/// `<menus browse="columns|a-z"/>`: how the tray menus section opens.
+/// `<menus browse="columns|a-z|list"/>`: how the tray menus section opens.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum MenusBrowse {
     #[default]
     Columns,
     AZ,
+    /// The tray icons as a plain list; a group is entered as a chip.
+    List,
 }
 
 /// One child of `<search>`.

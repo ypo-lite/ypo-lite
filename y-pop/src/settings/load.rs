@@ -658,6 +658,7 @@ impl MenusMode {
         match text {
             "columns" => Some(Self::Columns),
             "a-z" => Some(Self::AZ),
+            "list" => Some(Self::List),
             _ => None,
         }
     }

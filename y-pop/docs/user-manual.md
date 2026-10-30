@@ -315,15 +315,43 @@ each with the number of apps it holds and a ›:
 
 `Enter`, `→`, `Tab` or a click on a row goes **inside**: the section becomes a
 chip in the box, the list shows what is in it, and typing searches only there.
-Inside *Tray menus* you see the tray icons; `Tab` on a group goes down into it,
-as anywhere. `←` or `Backspace` on an empty box comes back to the section you
-left. A section row has no actions.
+`←` or `Backspace` on an empty box comes back to the section you left. A section
+row has no actions.
 
-This is the simple form: a flat list. The tray menus will become Miller
-columns with a details pane, the Start menu an A–Z list, and a folder will
-list its files, as those parts get built. A section with nothing to open yet
-(the Start menu, a browsed folder, a plugin) is not listed, and `include=` on
-`<menus>` is not read yet.
+The Start menu will become an A–Z list and a folder will list its files, as
+those parts get built. A section with nothing to open yet (the Start menu, a
+browsed folder, a plugin) is not listed.
+
+### Browsing the tray menus
+
+*Tray menus* opens as **columns** by default (see [`browse`](#the-tray-menus-section-menus) for the other views): the tray menus on the left, what
+the selected one holds next to it, and so on, with the way you came above them.
+Three show at a time.
+
+| Key | In the columns |
+| --- | --- |
+| `↑` `↓` `PgUp` `PgDn` `Home` `End` | move in the column |
+| `→`, `Tab` | go into the selected group or browsed folder |
+| `Enter` | the same on a group or folder; opens anything else |
+| `←`, `Backspace`, `Shift+Tab` | back one column; from the first, out of the section |
+| `Esc` | out of the section, from any column |
+| typing | search the tray menus; erase the text to find the columns as you left them |
+
+The rest of the keys work as on any result: `Ctrl+R`, `Ctrl+E`, the action menu.
+
+- An **app** shows its **details** in the last column: what it runs, where it is,
+  its hotkey and tooltip, and buttons for **Open**, **Reveal** and **Edit**.
+- A **group** shows what it holds. A **browsed folder** shows its details and is
+  not read until you go in with `→`, so walking past a slow folder costs nothing;
+  it says `Listing…` until its files arrive. To open the folder itself in
+  Explorer, use its **Open** button or the action menu.
+- With the **mouse**: a click selects, and goes in if it is a group or a folder.
+  An app is opened with its **Open** button. A click in a column to the left
+  comes back to it, a right click opens the action menu, and the wheel scrolls the
+  column that has the selection.
+
+To open it as an alphabetical list instead, or to limit it to some tray menus, see
+[The tray menus section: `<menus>`](#the-tray-menus-section-menus).
 
 ---
 
@@ -352,6 +380,8 @@ All of it is inside the `<search>` element, which goes at the top level of
 
 ```xml
 <search hotkey="Alt+Space" results="sections" row-actions="true">
+    <recent count="5"/>
+    <menus browse="columns"/>
     <actions menu-key="Alt+Enter" quick-pick="true">
         <action do="open" key="Enter"/>
         <action do="run-as-admin" key="Ctrl+Enter" button="true"/>
@@ -376,6 +406,130 @@ All of it is inside the `<search>` element, which goes at the top level of
 | `history` | `true` | `false` neither remembers launches nor lists them nor lets them rank results (see [History](#history-and-recent)) |
 | `collapsed` | `false` | `true` opens the box as its input row alone, with a ⌄ button (see [Collapsed mode](#collapsed-mode)) |
 
+### Which sections exist
+
+The children of `<search>` decide what the empty box lists, and in what order:
+
+| In `<search>` | You get |
+| --- | --- |
+| nothing, or only `<actions>` | the defaults: `<recent/>`, `<menus/>`, `<start-menu/>` |
+| any other child | **exactly what you wrote**, plus `<menus/>` if you left it out (after `<recent>`, or first) |
+
+> **Watch out:** the moment you write one section, the defaults are off. A
+> `<search>` holding only `<menus include="Work"/>`, or only a `<group>`, has **no
+> Recent**. Write `<recent/>` too if you want it.
+
+```xml
+<!-- No Recent: only <menus> was written. -->
+<search hotkey="Alt+Space">
+    <menus include="Work"/>
+</search>
+
+<!-- Recent kept, then the tray menus. -->
+<search hotkey="Alt+Space">
+    <recent/>
+    <menus include="Work"/>
+    <start-menu/>
+</search>
+```
+
+`<start-menu/>` does nothing yet, but writing it now keeps the Start menu once it
+exists.
+
+### The tray menus section: `<menus>`
+
+`<menus>` is about the **Tray menus** section: how it opens, and which tray menus
+count. It changes nothing in the tray itself: your icons, their menus and their
+hotkeys stay as they are.
+
+| Attribute | Values | Default | Meaning |
+| --- | --- | --- | --- |
+| `browse` | `columns`, `a-z`, `list` | `columns` | how the section looks when opened |
+| `include` | tray menu names, separated by `;` | every tray menu | which tray menus are in the section and in the plain search |
+
+Only the first `<menus>` is read.
+
+**`browse`: columns or A–Z.** It only changes what you see after opening the
+section with nothing typed. Typing inside it gives the same results either way.
+
+| | `browse="columns"` | `browse="a-z"` | `browse="list"` |
+| --- | --- | --- | --- |
+| Shows | the menus as you built them, one level per column | every app in one list, under letter headers | the tray icons, one row each, with their second line |
+| Groups | yes, you walk through them | no: their apps are listed directly | yes: `Enter` or `Tab` goes in, as a chip, and shows one level as a list |
+| Browsed folders and their files | yes, listed when you go in | no | the folder is a row, `Enter` opens it in Explorer; its files are not listed |
+| About, Quit, Settings | yes | no | yes |
+| Good for | "it's somewhere under Work" | "I know its name, not where I put it" | one thing at a time, in full-width rows with their actions |
+
+```xml
+<menus browse="a-z"/>
+```
+
+**`include`: which tray menus count.** Each name is the `name` of a **top-level**
+element of the file, that is, of a tray icon. A group inside a menu is not one.
+Case, accents and a menu's `&` marker do not matter, and spaces around a `;` are
+ignored. `;` is the separator because a name may contain spaces.
+
+```xml
+<search hotkey="Alt+Space">
+    <recent/>
+    <menus include="Work;Admin tools"/>
+</search>
+<group name="Work">…</group>
+<group name="Admin tools">…</group>
+<group name="Games">…</group>   <!-- left out of the search -->
+```
+
+What a left-out tray menu, *Games* here, still does:
+
+| | Left-out menu |
+| --- | --- |
+| Its tray icon, menu and hotkeys | **work as usual** |
+| The *Tray menus* section (columns or A–Z) and its app count | not there |
+| Plain search | **not found** |
+| A search inside *Tray menus* | not found |
+| `#` hotkeys | listed: the key is still in use |
+| `/` files | its browsed folders are still searched |
+| Recent | a launch of it is still listed: that list is Windows's |
+
+Without `include`, or with `include=""`, every tray menu counts.
+
+A name that matches no tray menu is a warning at start-up, and the other names
+still apply. If **none** of them match, every tray menu is left out: the section
+disappears and a plain search finds nothing from your menus, so read that warning.
+
+`browse` and `include` work together: `<menus browse="a-z" include="Work"/>`. In
+`y-pop-config` neither has a field yet: edit `y-pop.xml` by hand. Saving from
+`y-pop-config` keeps what you wrote. After editing the file by hand, run
+`>Reload configuration`.
+
+### Browsed folders: `browse="true"`
+
+Not to be confused with `browse` on `<menus>`: the same word for two unrelated
+settings. `browse="true"` on `<menus>` is a warning, and the section opens as
+columns. This one goes on an **`<app>`**, and turns it into a folder whose content
+is listed:
+
+```xml
+<app name="Scripts" exe="%mydocs%\Scripts" browse="true" filter="ps1;bat" depth="1"/>
+```
+
+| Attribute | Default | Meaning |
+| --- | --- | --- |
+| `browse="true"` | off | `exe` is a folder: list what is in it |
+| `filter` | every file | the extensions to list, separated by `;` or `,` (`ps1`, `*.ps1` and `.ps1` are the same). Folders are not filtered. |
+| `depth` | `0` | how many levels of sub-folders you can go into. `0` shows files only, no sub-folders. |
+| `open-folder` | `max-depth` | what a tray menu does for opening a folder itself: `all` adds an entry in every submenu, `max-depth` shows the folders at the last level as items that open in Explorer, `never` leaves those out |
+| `index="true"` | off | lets `/` list this folder even on a network share (`\\…`) |
+
+Where a browsed folder shows, and what each setting does there:
+
+| | Tray menu | `/` | Columns of *Tray menus* |
+| --- | --- | --- | --- |
+| Listed | when its submenu opens | the first `/` of an opening | when you go in with `→` |
+| `filter`, `depth` | apply | apply | apply |
+| `open-folder` | applies | `max-depth`, `never` apply | `max-depth`, `never` apply. `all` adds nothing: the folder has its **Open** button. |
+| Network folder | listed | skipped without `index="true"` | listed, `index` or not, without icons |
+
 ### Search-only items
 
 Children of `<search>` that are not settings are results that are *only* in
@@ -394,8 +548,13 @@ the search, not in any tray menu:
 - A **`<group>`** holds apps (and groups) like in a tray menu. The group is a
   result too, and its apps carry its name as their path.
 - An **`<app>` directly in `<search>` must be a browsed folder**
-  (`browse="true"`). A plain `<app>` there is ignored with a warning — put it
-  in a `<group>`. Its files are searched through `/`.
+  (`browse="true"`, see [Browsed folders](#browsed-folders-browsetrue)). A plain
+  `<app>` there is ignored with a warning — put it in a `<group>`. Its files are
+  searched through `/`; it has no section of its own yet, and being outside the
+  tray menus, it is not in the columns.
+
+Any of these children means you are listing the sections yourself: see
+[Which sections exist](#which-sections-exist).
 
 ### Actions
 
@@ -436,9 +595,9 @@ Not search settings, but they feed it: the `name`, `keywords`, `tooltip`,
 Written in the spec, parsed from the file where it makes sense, but not doing
 anything yet:
 
-- the **real views** of the sections: Miller columns for the tray menus, the
-  A–Z lists (today every section is a flat list), and `include=` on `<menus>`;
 - **`<start-menu>`**: Start menu apps are not searched yet;
+- **hiding a section** while still searching it (`browse="false"` and
+  `global="false"` in the spec): these are not read, and only warn;
 - **plugins** (`<plugin>` is kept but not run);
 - **Add to a menu**;
 - **Edit** selecting the item in `y-pop-config`.

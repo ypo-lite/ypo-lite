@@ -776,6 +776,22 @@ fn search_items_keep_a_hotkey_the_reader_ignores() {
 }
 
 #[test]
+fn every_view_of_the_tray_menus_is_written_back_as_it_was() {
+    for view in ["columns", "a-z", "list"] {
+        let text = format!(
+            "<y-pop>
+	<search>
+		<menus browse=\"{view}\"/>
+	</search>
+</y-pop>
+"
+        );
+        let saved = load(&text).to_xml();
+        assert!(saved.contains(&format!("browse=\"{view}\"")), "{saved}");
+    }
+}
+
+#[test]
 fn a_second_search_and_a_search_in_a_group_are_kept_as_comments() {
     let settings = load(
         r#"<y-pop><search hotkey="Alt+Space"/><search hotkey="Alt+Q"/><group name="G"><search/><quit/></group></y-pop>"#,

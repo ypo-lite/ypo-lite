@@ -26,9 +26,9 @@ use std::sync::mpsc::{Receiver, TryRecvError, channel};
 use y_core::icon::{Icon, IconCache};
 
 use crate::browse;
-use crate::model::{App, Browse, ConfigTree, EventMask, NodeKind};
+use crate::model::{App, Browse, ConfigTree, EventMask, NodeId, NodeKind};
 
-use super::index::{Entry, Facts, Index, Kind};
+use super::index::{Entry, Facts, Index, Kind, Source, Target};
 use super::matcher::plain;
 
 /// How many files and folders one opening lists at most. Search stays quick
@@ -50,6 +50,27 @@ struct Folder {
     network: bool,
 }
 
+impl Folder {
+    /// The browsed folder node `id` is, if it is one.
+    fn of(tree: &ConfigTree, id: NodeId) -> Option<Self> {
+        let history = tree.search.as_ref().is_some_and(|search| search.history);
+        let node = tree.node(id);
+        let NodeKind::App(app) = &node.kind else {
+            return None;
+        };
+        let (dir, browse) = (app.exe.as_ref()?, app.browse.as_ref()?);
+        Some(Self {
+            name: plain(&node.name),
+            dir: dir.to_string(),
+            browse: browse.clone(),
+            shell: app.shell,
+            elevate: app.elevate,
+            recorded: history.then_some(app.shell != Some(false)),
+            network: is_network(dir),
+        })
+    }
+}
+
 /// One file or sub-folder found.
 #[derive(Clone, Debug)]
 pub struct File {
@@ -57,7 +78,11 @@ pub struct File {
     pub name: String,
     pub path: String,
     pub is_dir: bool,
-    /// Position in [`Files::folders`].
+    /// A sub-folder [`crate::browse::list`] can go further into.
+    browsable: bool,
+    /// How far under its browsed folder the listing it came from was.
+    level: u8,
+    /// Whose it is: see [`Files::folder`].
     folder: u32,
 }
 
@@ -94,18 +119,22 @@ enum Found {
 #[derive(Default)]
 pub struct Files {
     folders: Arc<[Folder]>,
+    /// The folders columns went into, which `folders` need not hold: it skips
+    /// network folders and a second item on the same folder.
+    column_folders: Vec<Folder>,
     files: Vec<File>,
     progress: Progress,
     receiver: Option<Receiver<Found>>,
     /// True while a wake-up is on its way: see [`Files::start`].
     woken: Arc<AtomicBool>,
+    /// The listing a column is waiting for, and the entry of its folder.
+    column: Option<(u32, Receiver<Vec<File>>)>,
 }
 
 impl Files {
     /// What `/` would list: every browsed folder of `index`, in configuration
     /// order, each once. Lists nothing yet.
     pub fn of(tree: &ConfigTree, index: &Index) -> Self {
-        let history = tree.search.as_ref().is_some_and(|search| search.history);
         let mut seen = HashSet::new();
         let mut skipped = 0;
         let mut folders = Vec::new();
@@ -114,31 +143,17 @@ impl Files {
             if entry.kind != Kind::Folder {
                 continue;
             }
-            let Some(id) = entry.node() else { continue };
-            let node = tree.node(id);
-            let NodeKind::App(app) = &node.kind else {
+            let Some(folder) = entry.node().and_then(|id| Folder::of(tree, id)) else {
                 continue;
             };
-            let (Some(dir), Some(browse)) = (&app.exe, &app.browse) else {
-                continue;
-            };
-            if !seen.insert(dir.to_lowercase()) {
+            if !seen.insert(folder.dir.to_lowercase()) {
                 continue;
             }
-            let network = is_network(dir);
-            if network && !browse.index {
+            if folder.network && !folder.browse.index {
                 skipped += 1;
                 continue;
             }
-            folders.push(Folder {
-                name: plain(&node.name),
-                dir: dir.to_string(),
-                browse: browse.clone(),
-                shell: app.shell,
-                elevate: app.elevate,
-                recorded: history.then_some(app.shell != Some(false)),
-                network,
-            });
+            folders.push(folder);
         }
 
         Self {
@@ -205,6 +220,7 @@ impl Files {
             match receiver.try_recv() {
                 Ok(Found::Files(found)) => {
                     changed = true;
+                    self.progress.found += found.len();
                     for file in found {
                         let number = self.files.len() as u32;
                         index.push(entry_of(&file, &self.folders[file.folder as usize], number));
@@ -220,7 +236,6 @@ impl Files {
                 }
             }
         }
-        self.progress.found = self.files.len();
         if let Some(capped) = done {
             self.progress.listing = false;
             self.progress.capped = capped;
@@ -230,9 +245,105 @@ impl Files {
         changed
     }
 
+    /// Starts listing the folder `entry` stands for, on a thread, for a column
+    /// to show. A later call replaces this one, whose result is then dropped.
+    /// `wake` is called from the thread when [`take_column`](Self::take_column)
+    /// has something. `false` if it cannot be listed: nothing will come.
+    pub fn list_column(
+        &mut self,
+        tree: &ConfigTree,
+        index: &Index,
+        entry: u32,
+        wake: impl FnOnce() + Send + 'static,
+    ) -> bool {
+        let (dir, browse, level, folder) = match index.entries()[entry as usize].target {
+            Target::Node(id) => {
+                let Some(folder) = Folder::of(tree, id) else {
+                    return false;
+                };
+                let number = self.folders.len() + self.column_folders.len();
+                let request = (folder.dir.clone(), folder.browse.clone(), 0, number as u32);
+                self.column_folders.push(folder);
+                request
+            }
+            Target::File(number) => {
+                let file = self.get(number);
+                let browse = self.folder(file.folder).browse.clone();
+                (file.path.clone(), browse, file.level + 1, file.folder)
+            }
+            Target::History(_) => return false,
+        };
+
+        let (sender, receiver) = channel();
+        let started = std::thread::Builder::new()
+            .name("y-pop column".to_owned())
+            .spawn(move || {
+                let mut listed = browse::list(&dir, &browse, level);
+                listed.truncate(CAP);
+                let files = listed
+                    .into_iter()
+                    .map(|entry| File {
+                        browsable: entry.is_dir && entry.browsable,
+                        level,
+                        folder,
+                        name: entry.name,
+                        path: entry.path,
+                        is_dir: entry.is_dir,
+                    })
+                    .collect();
+                if sender.send(files).is_ok() {
+                    wake();
+                }
+            });
+        match started {
+            Ok(_) => {
+                self.column = Some((entry, receiver));
+                true
+            }
+            Err(error) => {
+                y_core::log::line(format_args!("search: cannot list a folder: {error}"));
+                false
+            }
+        }
+    }
+
+    /// The listing [`list_column`](Self::list_column) asked for, once it is
+    /// there: appended to `index` for the column's rows to be results like any
+    /// others, and given back as the folder's entry and the rows' entries.
+    pub fn take_column(&mut self, index: &mut Index) -> Option<(u32, Vec<u32>)> {
+        let (folder_entry, receiver) = self.column.as_ref()?;
+        let folder_entry = *folder_entry;
+        let listed = match receiver.try_recv() {
+            Ok(listed) => listed,
+            Err(TryRecvError::Empty) => return None,
+            // The thread is gone without a word: it panicked.
+            Err(TryRecvError::Disconnected) => Vec::new(),
+        };
+        self.column = None;
+        let mut entries = Vec::with_capacity(listed.len());
+        for file in listed {
+            let number = self.files.len() as u32;
+            entries.push(index.len() as u32);
+            let mut entry = entry_of(&file, self.folder(file.folder), number);
+            entry.source = Source::Column;
+            index.push(entry);
+            self.files.push(file);
+        }
+        Some((folder_entry, entries))
+    }
+
     /// The file behind [`super::index::Target::File`].
     pub fn get(&self, number: u32) -> &File {
         &self.files[number as usize]
+    }
+
+    /// The browsed folder a [`File`] belongs to: one of `/`'s, or after them one
+    /// a column went into.
+    fn folder(&self, number: u32) -> &Folder {
+        let number = number as usize;
+        self.folders
+            .get(number)
+            .unwrap_or_else(|| &self.column_folders[number - self.folders.len()])
     }
 
     /// What opens file `number`: what the tray menu would run for it.
@@ -241,7 +352,7 @@ impl Files {
         if file.is_dir {
             return App::open_folder(&file.path);
         }
-        let folder = &self.folders[file.folder as usize];
+        let folder = self.folder(file.folder);
         App {
             exe: Some(Arc::from(file.path.as_str())),
             app_id: None,
@@ -267,7 +378,7 @@ impl Files {
         let file = self.get(number);
         if file.is_dir {
             icons.for_directory()
-        } else if self.folders[file.folder as usize].network {
+        } else if self.folder(file.folder).network {
             None
         } else {
             icons.for_file(&file.path, None)
@@ -300,6 +411,7 @@ fn entry_of(file: &File, folder: &Folder, number: u32) -> Entry {
         file: true,
         store: false,
         recorded: folder.recorded.filter(|_| !file.is_dir),
+        browsable: file.browsable,
     };
     entry
 }
@@ -332,13 +444,16 @@ fn walk(folders: &[Folder], send: impl Fn(Found) -> bool) {
                     return;
                 }
                 found += 1;
-                if entry.is_dir && entry.browsable {
+                let browsable = entry.is_dir && entry.browsable;
+                if browsable {
                     queue.push_back((number, entry.path.clone(), level + 1));
                 }
                 batch.push(File {
                     name: entry.name,
                     path: entry.path,
                     is_dir: entry.is_dir,
+                    browsable,
+                    level,
                     folder: number,
                 });
             }
@@ -622,6 +737,126 @@ mod tests {
         let mut files = Files::of(&tree, &index);
         listed(&mut files, &mut index);
         assert_eq!(found_names(&index), ["r&d notes.txt"]);
+    }
+
+    /// `entry`'s listing for a column, the thread having finished.
+    fn column(files: &mut Files, tree: &ConfigTree, index: &mut Index, entry: u32) -> Vec<u32> {
+        assert!(files.list_column(tree, index, entry, || {}));
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            if let Some((folder, items)) = files.take_column(index) {
+                assert_eq!(folder, entry);
+                return items;
+            }
+            assert!(Instant::now() < deadline, "the thread did not finish");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    #[test]
+    fn a_column_lists_one_level_and_each_folder_only_when_asked() {
+        let dir = TempDir::new("column");
+        dir.touch("top.txt");
+        dir.mkdir("Sub");
+        std::fs::write(dir.0.join("Sub").join("inner.txt"), b"").unwrap();
+        let tree = tree(&format!(
+            "<y-pop>{}</y-pop>",
+            browsed(&dir.path(), r#"depth="1""#)
+        ));
+        let mut index = Index::from_tree(&tree);
+        let mut files = Files::of(&tree, &index);
+
+        let items = column(&mut files, &tree, &mut index, 0);
+        let names = |index: &Index, items: &[u32]| -> Vec<String> {
+            items
+                .iter()
+                .map(|&item| index.entries()[item as usize].name().to_owned())
+                .collect()
+        };
+        assert_eq!(names(&index, &items), ["sub", "top.txt"], "folders first");
+        let sub = &index.entries()[items[0] as usize];
+        assert_eq!(sub.source, Source::Column);
+        assert!(sub.facts.browsable);
+        assert!(!index.entries()[items[1] as usize].facts.browsable);
+
+        let inner = column(&mut files, &tree, &mut index, items[0]);
+        assert_eq!(names(&index, &inner), ["inner.txt"]);
+        assert_eq!(files.progress().found, 0, "not what / counts");
+    }
+
+    #[test]
+    fn a_columns_files_open_like_the_tray_menus_and_stay_out_of_every_search() {
+        let dir = TempDir::new("column-search");
+        dir.touch("deploy.ps1");
+        let tree = tree(&format!(
+            "<y-pop>{}</y-pop>",
+            browsed(&dir.path(), r#"shell="false""#)
+        ));
+        let mut index = Index::from_tree(&tree);
+        let mut files = Files::of(&tree, &index);
+        let items = column(&mut files, &tree, &mut index, 0);
+
+        let Target::File(number) = index.entries()[items[0] as usize].target else {
+            panic!("a file of the opening")
+        };
+        assert_eq!(files.app(number).shell, Some(false), "the folder's own");
+
+        let mut searcher = Searcher::new();
+        let query = Query::new("deploy");
+        for scope in [Scope::All, Scope::Menus, Scope::Files] {
+            assert!(
+                searcher.search(&index, &query, scope).is_empty(),
+                "{scope:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_column_lists_a_network_folder_that_slash_skips() {
+        let dir = TempDir::new("column-network");
+        dir.touch("a.txt");
+        let tree = tree(&format!(
+            r#"<y-pop><app name="Share" exe="\\server\share" browse="true"/>{}</y-pop>"#,
+            browsed(&dir.path(), "")
+        ));
+        let mut index = Index::from_tree(&tree);
+        let mut files = Files::of(&tree, &index);
+        assert_eq!(files.progress().skipped, 1);
+
+        // The folder after the skipped one: its number follows `/`'s folders.
+        let items = column(&mut files, &tree, &mut index, 1);
+        let Target::File(number) = index.entries()[items[0] as usize].target else {
+            panic!("a file of the opening")
+        };
+        assert_eq!(
+            files.app(number).exe.as_deref(),
+            Some(files.get(number).path.as_str())
+        );
+    }
+
+    #[test]
+    fn a_later_column_replaces_the_listing_it_was_waiting_for() {
+        let (one, two) = (TempDir::new("column-one"), TempDir::new("column-two"));
+        one.touch("one.txt");
+        two.touch("two.txt");
+        let tree = tree(&format!(
+            "<y-pop>{}{}</y-pop>",
+            browsed(&one.path(), ""),
+            browsed(&two.path(), "")
+        ));
+        let mut index = Index::from_tree(&tree);
+        let mut files = Files::of(&tree, &index);
+        assert!(files.list_column(&tree, &index, 0, || {}));
+        let items = column(&mut files, &tree, &mut index, 1);
+        assert_eq!(index.entries()[items[0] as usize].name(), "two.txt");
+    }
+
+    #[test]
+    fn something_that_is_no_folder_is_refused() {
+        let tree = tree(r#"<y-pop><app name="Plain" exe="p.exe"/></y-pop>"#);
+        let index = Index::from_tree(&tree);
+        let mut files = Files::of(&tree, &index);
+        assert!(!files.list_column(&tree, &index, 0, || {}));
     }
 
     #[test]

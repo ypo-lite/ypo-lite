@@ -1,11 +1,11 @@
 //! The sections the empty box lists under **Browse** (spec §2.4, §2.5), and
 //! the places a box can be inside.
 //!
-//! This is the flat form of task 6.4: opening a section puts it in the box as
-//! a chip and lists what is in it, the way entering a group does. The richer
-//! views — Miller columns for the tray menus (phase 7), the A–Z list of the Start
-//! menu (phase 9), a folder's files (phase 10) — replace the list section by
-//! section later. A section that has nothing to open yet is not listed.
+//! Opening a section puts it in the box as a chip and lists what is in it, the
+//! way entering a group does. The tray menus open as Miller columns or an A–Z
+//! list ([`crate::model::MenusBrowse`]); the A–Z list of the Start menu (phase 9)
+//! and a folder's files (phase 10) come later. A section that has nothing to open
+//! yet is not listed.
 
 use crate::model::{ConfigTree, NodeId, Section};
 
@@ -62,7 +62,7 @@ pub fn rows(tree: &ConfigTree, index: &Index) -> Vec<SectionRow> {
         .filter_map(|section| match section {
             Section::Menus { .. } => Some(SectionRow {
                 place: Place::Menus,
-                apps: apps(&|entry| entry.source == Source::Menu),
+                apps: apps(&|entry| entry.source == Source::Menu && !entry.left_out),
             }),
             Section::Group(group) => Some(SectionRow {
                 place: Place::Group(*group),
