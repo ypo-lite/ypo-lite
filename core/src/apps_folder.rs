@@ -52,11 +52,38 @@ pub fn display_name_of(app_id: &str) -> Option<String> {
 }
 
 fn enumerate() -> Option<Vec<StoreApp>> {
+    let mut apps = Vec::new();
+    for_each_item(|parsing, name| {
+        if let Some(app_id) = packaged_id(&parsing) {
+            apps.push(StoreApp {
+                name,
+                app_id: app_id.to_owned(),
+            });
+        }
+    })?;
+    Some(apps)
+}
+
+/// Every app of the folder, desktop programs too: what the Start menu's "All
+/// apps" lists. Each is `(id, name)`, the id being what follows
+/// `shell:AppsFolder\`: an AppUserModelID, a path, or a known-folder id and a
+/// path (`{1AC14E77-…}\notepad.exe`). Empty when the folder cannot be read.
+pub fn all_apps() -> Vec<(String, String)> {
+    let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+    let mut apps = Vec::new();
+    let read = for_each_item(|parsing, name| apps.push((bare_id(&parsing).to_owned(), name)));
+    if read.is_none() {
+        apps.clear();
+    }
+    apps
+}
+
+/// Calls `visit` with each item's absolute parsing name and display name.
+fn for_each_item(mut visit: impl FnMut(String, String)) -> Option<()> {
     let folder: IShellItem =
         unsafe { SHCreateItemFromParsingName(&HSTRING::from(FOLDER), None) }.ok()?;
     let items: IEnumShellItems = unsafe { folder.BindToHandler(None, &BHID_EnumItems) }.ok()?;
 
-    let mut apps = Vec::new();
     loop {
         let mut next = [None];
         let mut fetched = 0;
@@ -66,16 +93,19 @@ fn enumerate() -> Option<Vec<StoreApp>> {
         let Some(item) = next[0].take() else { break };
         let parsing = display_name(&item, SIGDN_DESKTOPABSOLUTEPARSING);
         let name = display_name(&item, SIGDN_NORMALDISPLAY);
-        if let (Some(parsing), Some(name)) = (parsing, name)
-            && let Some(app_id) = packaged_id(&parsing)
-        {
-            apps.push(StoreApp {
-                name,
-                app_id: app_id.to_owned(),
-            });
+        if let (Some(parsing), Some(name)) = (parsing, name) {
+            visit(parsing, name);
         }
     }
-    Some(apps)
+    Some(())
+}
+
+/// `parsing` without the folder before it.
+fn bare_id(parsing: &str) -> &str {
+    match parsing.split_once('\\') {
+        Some((folder, id)) if folder.eq_ignore_ascii_case(FOLDER) => id,
+        _ => parsing,
+    }
 }
 
 fn display_name(item: &IShellItem, kind: windows::Win32::UI::Shell::SIGDN) -> Option<String> {
@@ -91,10 +121,7 @@ fn display_name(item: &IShellItem, kind: windows::Win32::UI::Shell::SIGDN) -> Op
 /// hash) and a `!`. A desktop program's is a path, a known-folder id or a bare
 /// name with neither.
 pub fn packaged_id(parsing: &str) -> Option<&str> {
-    let id = match parsing.split_once('\\') {
-        Some((folder, id)) if folder.eq_ignore_ascii_case(FOLDER) => id,
-        _ => parsing,
-    };
+    let id = bare_id(parsing);
     let (family, app) = id.split_once('!')?;
     let well_formed = family.contains('_')
         && !app.is_empty()
@@ -126,6 +153,30 @@ mod tests {
         ] {
             assert_eq!(packaged_id(parsing), None, "{parsing}");
         }
+    }
+
+    /// How long it takes and how it matches the launches Windows remembers:
+    /// counts only, and nothing asserted about a given machine's speed.
+    #[test]
+    fn the_real_folder_matches_launches_by_id() {
+        let started = std::time::Instant::now();
+        let apps = all_apps();
+        let listing = started.elapsed();
+        let started = std::time::Instant::now();
+        let launches = crate::recent::launches();
+        let reading = started.elapsed();
+        let ids: std::collections::HashSet<String> =
+            apps.iter().map(|(id, _)| id.to_lowercase()).collect();
+        let matched = launches
+            .iter()
+            .filter(|launch| ids.contains(&launch.id.to_lowercase()))
+            .count();
+        eprintln!(
+            "{} apps in {listing:?}; {} launches in {reading:?}; {matched} matched",
+            apps.len(),
+            launches.len()
+        );
+        assert!(apps.iter().all(|(id, _)| !id.starts_with(FOLDER)));
     }
 
     /// Reads the real folder: only what a machine has, so it asserts the

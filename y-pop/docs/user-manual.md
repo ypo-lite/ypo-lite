@@ -82,7 +82,7 @@ second line saying where it comes from, and its hotkey if it has one.
 | `Ctrl+V`, `Ctrl+X`, `Ctrl+A` | paste, cut, select all (in the box) |
 | `Ctrl+←` `Ctrl+→`, `Ctrl+Backspace`, `Ctrl+Del` | by word |
 | `Alt+Enter`, `Shift+F10`, the Menu key | the [action menu](#the-action-menu) |
-| `Ctrl+Del` | forget the selected row of Recent |
+| `Ctrl+Del` | forget the selected row of Recent (in Windows too) |
 
 With the mouse: hovering selects a row, a click opens it, a right click opens
 the action menu, the wheel scrolls. Clicking outside the window, or on another
@@ -101,6 +101,7 @@ the result:
 | Action | Menu label | Applies to |
 | --- | --- | --- |
 | `open` | Open | everything. On a group it goes inside it, like `Tab`. |
+| `open-toggle-history` | Open without history, or Open and add to history | apps and files, unless `history="false"` |
 | `run-as-admin` | Run as administrator | programs (not ones already `elevate="true"`, not Store apps) |
 | `show-in-folder` | Show in folder | programs and folders that are files |
 | `copy-path` | Copy path | programs and folders (a Store app copies its `shell:AppsFolder\…` address) |
@@ -171,32 +172,61 @@ Opens `y-pop-config`. It does not yet jump to the item.
 
 ## History and Recent
 
-y-pop remembers what you launch from the search: `open` and `run-as-admin`
-(copying a path, revealing or editing are not launches). It does two things
-with it.
+The history is **Windows's own**, the one the Start menu's lists are made of:
+apps and files you opened anywhere, from y-pop or not. y-pop keeps no list of
+its own. (A `y-pop.history` left by an earlier version is no longer read, and
+can be deleted.)
 
-**Recent.** With nothing typed, the box lists your last launches under
-**RECENT**, newest first, each saying when (*2 min ago · Work › Servers · …*).
-The first row is already selected, so *hotkey, then Enter* relaunches the last
-thing. How many: `<recent count="5"/>` in `<search>` (without a `<recent>`
-element there is no list). Typing replaces the list; erasing the text brings
-it back. Inside a group (after `Tab`) it is not shown.
+**Recent.** With nothing typed, the box lists the latest under **RECENT**,
+newest first, each saying when (*2 min ago · C:\Docs*). The first row is already
+selected, so *hotkey, then Enter* opens the last thing again. How many:
+`<recent count="5"/>` in `<search>` (without a `<recent>` element there is no
+list). Typing replaces the list; erasing the text brings it back. Inside a
+group (after `Tab`) it is not shown.
 
-**Ranking.** What you launch often and lately rises a little in the results:
+A row for something in your tray menus or search-only groups *is* that item,
+with its name, hotkey and actions. Anything else is listed only if the Start
+menu knows it as an app, so installers and one-off programs stay out. Apps and
+files that only the history knows are found by a plain search too.
+
+**All recent.** If Windows remembers more than `count`, a last row says how many.
+`↓` to it then `Enter`, `→` or `Tab`, or a click, opens the whole list (200 at
+most) as a chip: scroll it, or type to filter it. `←` or `Backspace` on an empty
+box comes back.
+
+**What y-pop tells Windows.** What you launch from a tray menu, a hotkey or
+search goes into that history, which takes the shell, so an app with no `shell`
+attribute is launched through it. An app with **`shell="false"`** is launched
+directly, as it asks, and is not recorded. (`shell-execute` on `<y-pop>` has no
+say in this.) `start`/`exit` events and the Run button of `y-pop-config` do not
+count.
+
+**The other way, this once.** `Ctrl+Shift+Enter` in search opens the selected
+app or file the other way round: *Open without history* for what is normally
+recorded, *Open and add to history* for a `shell="false"` app, which then goes
+through the shell for that launch. The action menu says which it is. The action
+is `open-toggle-history`, so `<actions>` can rebind it. It is search only: the
+tray menus and hotkeys always launch the normal way.
+
+**Ranking.** What was launched often and lately rises a little in the results:
 up to 60 points on a 0–1000 scale, so it settles ties and near-ties but never
 puts a vague match above an exact one. It is worked out once, when the window
 opens, so the results do not shuffle while you type.
 
 **Forgetting.** `Ctrl+Del` (or *Forget* in the action menu or its button) takes
-the selected row off the list and out of the history. It is offered only on
-rows of Recent.
+the selected row off the list **and out of Windows's history**, like *Remove
+from list* in the Start menu. The file or app itself is not touched. It is
+offered only on rows of Recent and All recent. To clear everything, use the
+Windows setting; y-pop has no command for it.
 
-The history is the file `y-pop.history` next to `y-pop.xml`, written when the
-window closes: one line per item, at most 200. An item is known by the names of
-the groups above it and its own name, so **renaming or moving an item starts
-its history over**; an item that no longer exists is dropped. You can delete
-the file at any time. `history="false"` on `<search>` turns all of this off: no
-file is read or written.
+**If the list stays short.** Windows has two switches, in Settings,
+Personalization, Start: *Show most used apps* and *Show recently opened items*
+(the second also decides whether Explorer shows recent files). When recent items
+are off, Windows records no file, from y-pop or anything else, so none can be
+listed; the *All recent* row says so. y-pop does not keep them behind your back.
+
+`history="false"` on `<search>` turns all of this off: Windows's history is not
+read, and launches are not reported to it.
 
 ---
 
@@ -216,7 +246,6 @@ character (or press `Esc`) to come back.
 | Open settings | opens `y-pop-config` |
 | Edit y-pop.xml | opens the file in its editor |
 | Open configuration folder | shows the folder in Explorer |
-| Clear search history | forgets what was launched, and deletes `y-pop.history` |
 | Start with Windows | turns running y-pop at logon on or off (the row says which) |
 | About, Quit | what they say |
 
@@ -353,7 +382,7 @@ leave it out).
 
 | Attribute of `<action>` | Meaning |
 | --- | --- |
-| `do` | one of `open`, `run-as-admin`, `show-in-folder`, `copy-path`, `reveal`, `edit`, `add-to-menu`, `forget` |
+| `do` | one of `open`, `open-toggle-history`, `run-as-admin`, `show-in-folder`, `copy-path`, `reveal`, `edit`, `add-to-menu`, `forget` |
 | `key` | its shortcut in the result list |
 | `button="true"` | show it as a button on the selected row (default `false`) |
 

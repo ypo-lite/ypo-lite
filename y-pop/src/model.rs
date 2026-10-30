@@ -136,6 +136,9 @@ pub struct TrayExtras {
 pub enum ActionId {
     /// Launch it; on a group, go inside it.
     Open,
+    /// Launch it the other way round for Windows's history, this once: not
+    /// recorded if it normally is, recorded if it normally is not.
+    OpenToggled,
     /// Launch it elevated, this once.
     RunAsAdmin,
     /// Show the file in Explorer.
@@ -154,8 +157,9 @@ pub enum ActionId {
 
 impl ActionId {
     /// Every action, in the order of the default menu.
-    pub const ALL: [ActionId; 8] = [
+    pub const ALL: [ActionId; 9] = [
         Self::Open,
+        Self::OpenToggled,
         Self::RunAsAdmin,
         Self::ShowInFolder,
         Self::CopyPath,
@@ -169,6 +173,7 @@ impl ActionId {
     pub fn name(self) -> &'static str {
         match self {
             Self::Open => "open",
+            Self::OpenToggled => "open-toggle-history",
             Self::RunAsAdmin => "run-as-admin",
             Self::ShowInFolder => "show-in-folder",
             Self::CopyPath => "copy-path",
@@ -183,6 +188,7 @@ impl ActionId {
     pub fn label(self) -> &'static str {
         match self {
             Self::Open => "Open",
+            Self::OpenToggled => "Open without history",
             Self::RunAsAdmin => "Run as administrator",
             Self::ShowInFolder => "Show in folder",
             Self::CopyPath => "Copy path",
@@ -197,6 +203,7 @@ impl ActionId {
     pub fn short_label(self) -> &'static str {
         match self {
             Self::Open => "Open",
+            Self::OpenToggled => "No history",
             Self::RunAsAdmin => "Admin",
             Self::ShowInFolder => "Folder",
             Self::CopyPath => "Copy",
@@ -251,6 +258,7 @@ impl Default for ActionsConfig {
             quick_pick: true,
             actions: vec![
                 bind(ActionId::Open, chord("Enter"), false),
+                bind(ActionId::OpenToggled, chord("Ctrl+Shift+Enter"), false),
                 bind(ActionId::RunAsAdmin, None, false),
                 bind(ActionId::ShowInFolder, None, false),
                 bind(ActionId::CopyPath, None, false),
@@ -274,7 +282,7 @@ pub struct SearchConfig {
     pub results: ResultsLayout,
     /// Buttons on the selected result row; the keys work either way.
     pub row_actions: bool,
-    /// Whether launches are remembered (`y-pop.history`).
+    /// Whether Windows's history is read, and told about launches.
     pub history: bool,
     /// In the order the empty box lists them; always contains a
     /// [`Section::Menus`].
@@ -529,7 +537,11 @@ pub struct App {
     pub app_id: Option<Arc<str>>,
     pub param: Option<Arc<str>>,
     pub path: Option<Arc<str>>,
-    pub shell: bool,
+    /// `shell=""` as written. `None` launches through the shell like
+    /// `Some(true)` when the launch is recorded, and directly otherwise;
+    /// `Some(false)` is always direct, and is never recorded unless the user
+    /// asks for it ([`crate::launch::Usage`]).
+    pub shell: Option<bool>,
     pub elevate: bool,
     pub events: EventMask,
     pub browse: Option<Browse>,

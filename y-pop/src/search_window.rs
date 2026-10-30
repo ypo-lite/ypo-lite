@@ -72,9 +72,9 @@ use y_core::{
 use y_pop::model::{ActionId, ActionsConfig, ConfigTree, NodeId, ResultsLayout, Section};
 use y_pop::search::commands::{Command, Line, PREFIXES};
 use y_pop::search::display::{self, LineContext};
-use y_pop::search::history::{self, History};
+use y_pop::search::history::{self, AppNames, Item};
 use y_pop::search::hotkey::KeyCombo;
-use y_pop::search::index::Index;
+use y_pop::search::index::{Index, Target};
 use y_pop::search::keycheck::{self, Availability};
 use y_pop::search::layout::{self, Hit, Layout, Placed, Spec};
 use y_pop::search::matcher::plain;
@@ -135,6 +135,8 @@ const GLYPH_FOLDER: &str = "\u{E8B7}";
 const GLYPH_ENTER: &str = "\u{E76C}";
 /// "ChevronDown" (⌄): unfolds a collapsed box.
 const GLYPH_CHEVRON: &str = "\u{E70D}";
+/// "History": the row that opens everything Windows remembers.
+const GLYPH_HISTORY: &str = "\u{E81C}";
 // Logical pixels, like the layout's.
 const INPUT_FONT: i32 = 18;
 const TITLE_FONT: i32 = 15;
@@ -161,15 +163,24 @@ const ACCENT: Color = Color::rgb(0x00, 0x78, 0xD4);
 const PLACEHOLDER: &str = "Search apps, menus, hotkeys…";
 const PLACEHOLDER_UNFOCUSED: &str = "Click here, then type to search";
 
+/// What the user picked in the window.
+pub enum Pick {
+    Node(NodeId),
+    /// An item of Windows's history that no node stands for.
+    History(Item),
+}
+
 /// What the owner keeps: nothing while closed, the open window otherwise.
 pub struct SearchWindow {
     owner: HWND,
     open: Option<Open>,
+    /// The Start menu's apps, kept between openings: reading them is slow.
+    apps: AppNames,
     /// Bumped by every opening; see the module doc.
     generation: usize,
-    /// The node the user picked, closed over and waiting for the owner to
-    /// act on it ([`SearchWindow::take_activation`]).
-    activation: Option<(NodeId, ActionId)>,
+    /// What the user picked, closed over and waiting for the owner to act on
+    /// it ([`SearchWindow::take_activation`]).
+    activation: Option<(Pick, ActionId)>,
     /// The y-pop command the user ran with `>`, waiting for the owner
     /// ([`SearchWindow::take_command`]).
     command: Option<Command>,
@@ -195,10 +206,14 @@ struct Open {
     /// now, and dropped with the window.
     index: Index,
     state: State,
-    /// What was launched before, plus this opening's launches; written when
-    /// the window closes. Empty, and left alone, with `history="false"`.
-    history: History,
-    history_on: bool,
+    /// What Windows remembers, as of this opening; [`Target::History`] and
+    /// the Recent rows point into it. Empty with `history="false"`.
+    items: Vec<Item>,
+    /// The second lines of those items, as far as they were shown: one means
+    /// reading a shortcut.
+    details: HashMap<u32, String>,
+    /// Whether Windows keeps recent files at all.
+    tracks_files: bool,
     /// Whether y-pop starts with Windows, for the line in `>`; read once.
     startup: bool,
     /// The search hotkey as written, for the line in `#`.
@@ -225,10 +240,17 @@ struct Fonts {
 }
 
 impl SearchWindow {
-    pub fn new(owner: HWND) -> Self {
+    /// `history`: the file wants the history, so its list of apps is read now,
+    /// for the first opening not to wait for it.
+    pub fn new(owner: HWND, history: bool) -> Self {
+        let mut apps = AppNames::default();
+        if history {
+            apps.refresh();
+        }
         Self {
             owner,
             open: None,
+            apps,
             generation: 0,
             activation: None,
             command: None,
@@ -245,12 +267,11 @@ impl SearchWindow {
     /// settings), or runs it elevated, or shows it in Explorer. Closing first
     /// matters for launching: the window gives the foreground back to what
     /// had it, which the new program can then take.
-    pub fn take_activation(&mut self) -> Option<(NodeId, ActionId)> {
+    pub fn take_activation(&mut self) -> Option<(Pick, ActionId)> {
         self.activation.take()
     }
 
-    /// The command chosen with `>`, once, after the window has closed. (Clearing
-    /// the history is done by the window itself and never comes out here.)
+    /// The command chosen with `>`, once, after the window has closed.
     pub fn take_command(&mut self) -> Option<Command> {
         self.command.take()
     }
@@ -304,40 +325,43 @@ impl SearchWindow {
         let design = skins::resolve_design(tree.defaults.theme, tree.defaults.theme_overrides);
         let scaled = |logical: i32| monitor.scaled(logical);
         let icon_size = scaled(ICON_SIZE);
-        // What was launched before: it orders the results and fills Recent.
-        let index = Index::from_tree(tree);
-        let history_on = search.is_some_and(|search| search.history);
-        let mut history = if history_on {
-            history::load()
-        } else {
-            History::default()
-        };
-        let live = history::live_keys(tree, index.entries());
-        history.prune(|key| live.contains(key));
-        let recent_count = search
-            .filter(|_| history_on)
-            .and_then(|search| {
-                search.sections.iter().find_map(|section| match section {
-                    Section::Recent { count } => Some(*count as usize),
-                    _ => None,
-                })
-            })
-            .unwrap_or(0);
-        let (recent, bonuses) = history::listing(
-            tree,
-            index.entries(),
-            &history,
-            recent_count,
-            history::now(),
-        );
+        // What Windows remembers: it orders the results and fills Recent.
+        let mut index = Index::from_tree(tree);
         let sections = sections::rows(tree, &index);
+        let history_on = search.is_some_and(|search| search.history);
+        let recent_count = search.filter(|_| history_on).and_then(|search| {
+            search.sections.iter().find_map(|section| match section {
+                Section::Recent { count } => Some(*count as usize),
+                _ => None,
+            })
+        });
+        let listing = if history_on {
+            let listed = recent_count.is_some();
+            let files = if listed {
+                y_core::recent::files()
+            } else {
+                Vec::new()
+            };
+            history::listing(
+                tree,
+                &mut index,
+                y_core::recent::launches(),
+                files,
+                self.apps.current(),
+                listed,
+                history::now(),
+            )
+        } else {
+            history::Listing::default()
+        };
         let mut state = State::new(
             search.map_or(ResultsLayout::Sections, |search| search.results),
             search.map_or_else(ActionsConfig::default, |search| search.actions.clone()),
         )
         .with_row_actions(search.is_none_or(|search| search.row_actions))
-        .with_collapsed(search.is_some_and(|search| search.collapsed));
-        state.start(&index, recent, sections, bonuses);
+        .with_collapsed(search.is_some_and(|search| search.collapsed))
+        .with_recent_shown(recent_count.unwrap_or(0));
+        state.start(&index, listing.recent, sections, listing.bonuses);
 
         let mut open = Open {
             palette: Palette::of(design.as_ref()),
@@ -367,8 +391,9 @@ impl SearchWindow {
             focused: true,
             index,
             state,
-            history,
-            history_on,
+            items: listing.items,
+            details: HashMap::new(),
+            tracks_files: y_core::recent::tracks_files(),
             startup: y_core::startup::is_enabled(ipc::STARTUP_NAME),
             search_hotkey: tree
                 .search_hotkey()
@@ -412,11 +437,6 @@ impl SearchWindow {
 
     /// Closes the window without acting. Safe when already closed.
     pub fn close(&mut self) {
-        if let Some(open) = &self.open
-            && open.history_on
-        {
-            history::save(&open.history);
-        }
         // Dropping the overlay destroys its window and frees its pixels.
         self.open = None;
     }
@@ -575,35 +595,46 @@ impl SearchWindow {
             Outcome::Redraw => self.redraw(tree, follow),
             Outcome::Close => self.close(),
             Outcome::Activate(hit, ActionId::Forget) => {
-                if let Some(open) = self.open.as_mut() {
-                    let entry = &open.index.entries()[hit.entry as usize];
-                    if let Some(key) = history::key_of(tree, entry) {
-                        open.history.forget(&key);
+                if let Some(open) = self.open.as_mut()
+                    && let Some(row) = open.state.recent_row(hit)
+                {
+                    // What Windows forgets, y-pop no longer lists: the two
+                    // cannot disagree, as there is no second list.
+                    if open.items[row.item as usize].forget() {
+                        open.state.remove_recent(&open.index, hit.entry);
+                    } else {
+                        y_core::log::line("search: Windows did not forget that item");
                     }
-                    open.state.remove_recent(&open.index, hit.entry);
                 }
                 self.redraw(tree, true);
             }
             Outcome::Activate(hit, action) => {
                 if let Some(open) = self.open.as_mut() {
                     let entry = &open.index.entries()[hit.entry as usize];
-                    // Launching is what history remembers; copying a path or
-                    // showing a file is not.
-                    if open.history_on
-                        && matches!(action, ActionId::Open | ActionId::RunAsAdmin)
-                        && let Some(key) = history::key_of(tree, entry)
-                    {
-                        open.history.record(&key, history::now());
-                    }
+                    let item = match entry.target {
+                        Target::Node(_) => None,
+                        Target::History(number) => Some(&open.items[number as usize]),
+                    };
                     match action {
                         // Done here: the clipboard needs only a window of
                         // ours, and the tree says what the path is.
                         ActionId::CopyPath => {
-                            if let Some(path) = display::target(tree, entry) {
+                            let path = match item {
+                                Some(item) => item.file().or_else(|| Some(item.address())),
+                                None => display::target(tree, entry),
+                            };
+                            if let Some(path) = path {
                                 clipboard::set_text(self.owner, &path);
                             }
                         }
-                        _ => self.activation = Some((entry.id, action)),
+                        _ => {
+                            let pick = match (entry.node(), item) {
+                                (Some(node), _) => Some(Pick::Node(node)),
+                                (None, Some(item)) => Some(Pick::History(item.clone())),
+                                (None, None) => None,
+                            };
+                            self.activation = pick.map(|pick| (pick, action));
+                        }
                     }
                 }
                 self.close();
@@ -616,14 +647,6 @@ impl SearchWindow {
                 if let Some(text) = clipboard::text() {
                     self.event(tree, Event::Paste(text));
                 }
-            }
-            Outcome::Command(Command::ClearHistory) => {
-                // The window holds the history, so it does this one itself.
-                if let Some(open) = self.open.as_mut() {
-                    open.history.clear();
-                }
-                let _ = std::fs::remove_file(history::path());
-                self.close();
             }
             Outcome::Command(command) => {
                 self.command = Some(command);
@@ -709,7 +732,10 @@ impl Open {
                 .state
                 .row_buttons(&self.index)
                 .iter()
-                .map(|id| self.fonts.small.measure(id.short_label()).0)
+                .map(|&id| {
+                    let label = self.state.action_short_label(&self.index, id);
+                    self.fonts.small.measure(label).0
+                })
                 .collect();
             layout = layout.with_row_buttons(selected, &widths);
         }
@@ -768,6 +794,9 @@ impl Open {
             icons,
             icon_size,
             pixels,
+            items,
+            details,
+            tracks_files,
             radius,
             border,
             caret_width,
@@ -950,6 +979,9 @@ impl Open {
             index,
             icons,
             pixels,
+            items,
+            details,
+            tracks_files: *tracks_files,
             icon_size: *icon_size,
             scale: spec.scale,
             hover: *hover,
@@ -1065,7 +1097,7 @@ impl Open {
                     name_right -= width + pad;
                 }
                 canvas.draw_text_ellipsis(
-                    item.id.label(),
+                    state.action_label(index, item.id),
                     RECT {
                         left: cell.left + pad,
                         right: name_right,
@@ -1104,6 +1136,9 @@ struct ItemPainter<'a> {
     index: &'a Index,
     icons: &'a mut IconCache,
     pixels: &'a mut HashMap<u32, Option<Vec<u32>>>,
+    items: &'a [Item],
+    details: &'a mut HashMap<u32, String>,
+    tracks_files: bool,
     icon_size: i32,
     scale: f32,
     /// The row button under the pointer.
@@ -1124,7 +1159,11 @@ impl ItemPainter<'_> {
     ) -> Result<()> {
         let palette = self.palette;
         let entry = &self.index.entries()[hit.entry as usize];
-        let node = self.tree.node(entry.id);
+        let node = entry.node().map(|id| self.tree.node(id));
+        let item = match entry.target {
+            Target::Node(_) => None,
+            Target::History(number) => Some((number, &self.items[number as usize])),
+        };
         let row = placed.rect;
         let mut parts = self.layout.item_parts(row);
         let scaled = |logical: i32| (logical as f32 * self.scale).round() as i32;
@@ -1170,7 +1209,12 @@ impl ItemPainter<'_> {
         let size = self.icon_size;
         let icons = &mut *self.icons;
         let pixels = self.pixels.entry(hit.entry).or_insert_with(|| {
-            crate::menu::resolve_icon(icons, node).and_then(|icon| icon.to_pixels(size))
+            let icon = match (node, item) {
+                (Some(node), _) => crate::menu::resolve_icon(icons, node),
+                (None, Some((_, item))) => item.icon(icons),
+                (None, None) => None,
+            };
+            icon.and_then(|icon| icon.to_pixels(size))
         });
         if let Some(pixels) = pixels {
             canvas.blit(parts.icon.left, parts.icon.top, size, size, pixels);
@@ -1179,7 +1223,8 @@ impl ItemPainter<'_> {
         // The hotkey, right aligned; the texts end before it.
         let mut right = parts.title.right;
         // The hotkey that opens it or, failing one, the key that picks it.
-        let trailing = crate::menu::shortcut_text(&self.tree.defaults, node)
+        let trailing = node
+            .and_then(|node| crate::menu::shortcut_text(&self.tree.defaults, node))
             .or_else(|| number.filter(|&n| n <= 9).map(|n| format!("Alt+{n}")));
         if let Some(shortcut) = trailing {
             let (width, _) = self.fonts.small.measure(&shortcut);
@@ -1200,7 +1245,11 @@ impl ItemPainter<'_> {
 
         // The name, the letters the query matched emphasized. A name too
         // long for its box is cut with an ellipsis instead, unemphasized.
-        let label = plain(&node.name);
+        let label = match (node, item) {
+            (Some(node), _) => plain(&node.name),
+            (None, Some((_, item))) => item.name.clone(),
+            (None, None) => String::new(),
+        };
         let label = label.as_str();
         let title_box = RECT {
             left: parts.title.left,
@@ -1236,9 +1285,16 @@ impl ItemPainter<'_> {
         }
 
         // The second line; under Recent, led by when it was launched.
-        let mut subtitle = display::subtitle(self.tree, entry, hit.matched);
-        if let Some(last) = state.last_launch(hit) {
-            let since = history::now().saturating_sub(last);
+        let mut subtitle = match item {
+            Some((number, item)) => self
+                .details
+                .entry(number)
+                .or_insert_with(|| item.detail())
+                .clone(),
+            None => display::subtitle(self.tree, entry, hit.matched),
+        };
+        if let Some(row) = state.recent_row(hit) {
+            let since = history::now().saturating_sub(row.last);
             subtitle = format!("{} · {subtitle}", display::ago(since));
         }
         canvas.draw_text_ellipsis(
@@ -1265,7 +1321,7 @@ impl ItemPainter<'_> {
                 let cell = rect(*cell);
                 canvas.fill_rect(cell, pill(lit(Hit::Button(n))));
                 canvas.draw_text(
-                    id.short_label(),
+                    state.action_short_label(self.index, *id),
                     cell,
                     &self.fonts.small,
                     text,
@@ -1323,22 +1379,31 @@ impl ItemPainter<'_> {
         // The same icon a group has in the tray menu, loaded once per opening;
         // the folder glyph only if the system gives none.
         let (key, node) = match section.place {
-            Place::Menus => (SECTIONS_ICON, None),
+            Place::Menus | Place::Recent => (SECTIONS_ICON, None),
             Place::Group(group) => (SECTION_ICON_BASE | group.as_u32(), Some(group)),
         };
         let size = self.icon_size;
         let (icons, tree) = (&mut *self.icons, self.tree);
-        let pixels = self.pixels.entry(key).or_insert_with(|| {
-            let icon = match node {
-                Some(group) => crate::menu::resolve_icon(icons, tree.node(group)),
-                None => icons.for_directory(),
-            };
-            icon.and_then(|icon| icon.to_pixels(size))
-        });
+        let is_recent = section.place == Place::Recent;
+        let pixels = if is_recent {
+            &None
+        } else {
+            &*self.pixels.entry(key).or_insert_with(|| {
+                let icon = match node {
+                    Some(group) => crate::menu::resolve_icon(icons, tree.node(group)),
+                    None => icons.for_directory(),
+                };
+                icon.and_then(|icon| icon.to_pixels(size))
+            })
+        };
         match pixels {
             Some(pixels) => canvas.blit(parts.icon.left, parts.icon.top, size, size, pixels),
             None => canvas.draw_text(
-                GLYPH_FOLDER,
+                if is_recent {
+                    GLYPH_HISTORY
+                } else {
+                    GLYPH_FOLDER
+                },
                 rect(parts.icon),
                 &self.fonts.glyph,
                 detail,
@@ -1371,9 +1436,17 @@ impl ItemPainter<'_> {
             title,
             TextAlign::Left,
         )?;
-        let noun = if section.apps == 1 { "app" } else { "apps" };
+        let noun = match (is_recent, section.apps) {
+            (true, _) => "items",
+            (false, 1) => "app",
+            (false, _) => "apps",
+        };
+        let mut line = format!("{} {noun}", section.apps);
+        if is_recent && !self.tracks_files {
+            line.push_str(" · Windows is not keeping recent files");
+        }
         canvas.draw_text_ellipsis(
-            &format!("{} {noun}", section.apps),
+            &line,
             RECT {
                 right: text_right,
                 ..rect(parts.subtitle)

@@ -162,7 +162,7 @@ struct PendingFolder {
     browse: Browse,
     /// Inherited by every file (and, recursively, every subfolder) this
     /// folder turns out to contain — see the module doc's second section.
-    shell: bool,
+    shell: Option<bool>,
     elevate: bool,
     /// This folder's own distance from the browse app's root — `0` for the
     /// root itself. Threaded through to [`crate::browse::list`] so it can
@@ -618,7 +618,7 @@ fn open_folder_app(dir: &str) -> App {
         app_id: None,
         param: None,
         path: None,
-        shell: true,
+        shell: Some(true),
         elevate: false,
         events: EventMask::default(),
         browse: None,
@@ -955,8 +955,9 @@ mod tests {
 
         match resolve_selection(id, &mut session).expect("a known id") {
             Selection::Launch(app) => {
-                assert!(
+                assert_eq!(
                     app.shell,
+                    Some(true),
                     "inherited from the browse node's own shell=\"true\""
                 );
                 assert!(app.exe.unwrap().ends_with("notes.txt"));
@@ -1029,7 +1030,11 @@ mod tests {
         let id = unsafe { GetMenuItemID(sub, 0) };
         match resolve_selection(id, &mut session).expect("a known id") {
             Selection::Launch(app) => {
-                assert!(app.shell, "a directory can only be launched via the shell");
+                assert_eq!(
+                    app.shell,
+                    Some(true),
+                    "a directory can only be launched via the shell"
+                );
                 assert!(app.exe.unwrap().ends_with("SubSub"));
             }
             Selection::Node(_) | Selection::Extra(_) => {
@@ -1088,7 +1093,7 @@ mod tests {
         let id = unsafe { GetMenuItemID(top, 0) };
         match resolve_selection(id, &mut session).expect("a known id") {
             Selection::Launch(app) => {
-                assert!(app.shell);
+                assert_eq!(app.shell, Some(true));
                 assert!(app.exe.unwrap().ends_with("open-folder-all"));
             }
             Selection::Node(_) | Selection::Extra(_) => {

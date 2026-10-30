@@ -20,6 +20,8 @@ pub enum Place {
     Menus,
     /// A group (a search-only section, or one entered with `Tab`).
     Group(NodeId),
+    /// Everything Windows remembers: the list behind the few rows of Recent.
+    Recent,
 }
 
 impl Place {
@@ -28,6 +30,7 @@ impl Place {
         match self {
             Self::Menus => "Tray menus".to_owned(),
             Self::Group(group) => plain(&tree.node(group).name),
+            Self::Recent => "All recent".to_owned(),
         }
     }
 }
@@ -36,7 +39,7 @@ impl Place {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct SectionRow {
     pub place: Place,
-    /// The apps in it, for the second line.
+    /// The apps in it (in [`Place::Recent`], the items), for the second line.
     pub apps: usize,
 }
 

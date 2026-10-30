@@ -778,7 +778,7 @@ impl<'b> Reader<'b> {
             app_id,
             param: self.opt_text(element, "param"),
             path: self.opt_text(element, "path"),
-            shell: element.attr_bool("shell").unwrap_or(false),
+            shell: element.attr_bool("shell"),
             elevate: element.attr_bool("elevate").unwrap_or(false),
             events,
             browse,

@@ -362,7 +362,8 @@ impl ConfigApp {
 
         let label = roots::label(item);
         let app = settings.launch_app(fields, &mut *self.builtins.borrow_mut());
-        self.run_status = Some(match y_pop::launch::launch(HWND::default(), &app) {
+        let launched = y_pop::launch::launch(HWND::default(), &app, y_pop::launch::Usage::Silent);
+        self.run_status = Some(match launched {
             Ok(()) => (format!("Ran {label}"), true),
             Err(error) => (format!("Couldn't run {label}: {error}"), false),
         });

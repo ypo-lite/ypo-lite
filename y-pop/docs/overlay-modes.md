@@ -246,10 +246,12 @@ The input row never moves; the results grow downwards.
 
 The box opens with nothing typed and shows, top to bottom:
 
-1. **Recent** (if `<recent>` is present): the last `count` launches (default
-   5), from any section, newest first, each with when it was launched. The
-   first row is selected, so `Alt+Space`, `Enter` relaunches the last thing.
-   `Ctrl+Del` (or the ✕ button) forgets one.
+1. **Recent** (if `<recent>` is present): the last `count` things Windows
+   remembers (default 5), apps and files, newest first, each with when it was
+   opened (§2.10). The first row is selected, so `Alt+Space`, `Enter`
+   relaunches the last thing. `Ctrl+Del` (or the ✕ button) forgets one. If
+   Windows remembers more than `count`, an **All recent** row follows, saying
+   how many; it opens like a section.
 2. **Browse**: one row per section, in config order, each with a count
    ("Start menu · 23 apps"). A section from a plugin carries a *plugin*
    badge.
@@ -265,6 +267,7 @@ on its shape:
 |---|---|
 | Tray menus, `browse="columns"` *(default)* | Miller columns: the tray menus, then the content of what is selected in the column before (group or browsed folder), and a **details pane** for an app (big icon, path in the tree, exe, hotkey, tooltip; Open / Reveal / Edit). `↑`/`↓` move, `→` goes in, `←` comes back (out of the section from the first column). |
 | Tray menus, `browse="a-z"` | Every app of every tray menu in one alphabetical list, letter headers, a clickable letter index. |
+| All recent | Everything Windows remembers, newest first, up to 200; typing filters it. Every row keeps its actions, Forget included. |
 | Start menu | A–Z, like the Start menu's "All apps"; a shortcut inside a Start-menu folder says so on its second line. |
 | A search-only `<group>` | Its items, in config order. |
 | A search-only folder | Its files and sub-folders, listed when opened; `→` on a sub-folder goes in. |
@@ -296,7 +299,7 @@ plain query, and each can be opened alone (§2.4).
 
 | Element | Brings in | Notes |
 |---|---|---|
-| `<recent count="5"/>` | The last launches | Not a source of its own: it lists items from the other sections. Needs the history file (§2.10). |
+| `<recent count="5"/>` | What Windows remembers: apps and files | `count` is what the empty box shows; the rest is behind **All recent**. A launch of a tray-menu or search-only item *is* that item. The apps and files nothing else holds are searched too. §2.10. |
 | `<menus/>` | Every tray menu: groups, apps, browsed folders, built-ins | Present implicitly if omitted, placed after `<recent>`. `browse="columns\|a-z"`. `include="y-pop;Work"` limits it to some tray menus, `;`-separated because a menu name may contain spaces (replaces Revision 3's `scope`). |
 | `<start-menu/>` | Shortcuts in the Start menu's Programs folders, and installed Store apps | On by default (§2.2). §2.5.1. |
 | `<group name="…">` | Apps that **only search shows** | §2.5.2. |
@@ -409,7 +412,7 @@ box's prefix line.
 | Prefix | Searches | Enter does | Notes |
 |---|---|---|---|
 | *(none)* | Every section with `global="true"` (the default), and commands, ranked lower | Launch / open | |
-| `>` | y-pop commands | Run it | Reload configuration, Open settings, Edit `y-pop.xml`, Open configuration folder, Clear search history, Refresh the Start menu, Reload plugins, Start with Windows, About, Quit. |
+| `>` | y-pop commands | Run it | Reload configuration, Open settings, Edit `y-pop.xml`, Open configuration folder, Refresh the Start menu, Reload plugins, Start with Windows, About, Quit. |
 | `#` | Hotkeys | Launch what the key opens | `#` alone lists every binding in the file, including the search hotkey and each tray menu's. `#ctrl+alt+x` with no match **checks the key** (§2.14). |
 | `/` | Files inside browsed folders: the menus' and the search-only ones (§2.5.3) | Open the file | Folders are listed on first use of `/` per opening, in the background; results join as they arrive. Network folders (`\\…`) are skipped unless `index="true"` is set on them, and say so. |
 | `?` | The prefixes | Type that prefix | Lists every prefix, the plugins' included. |
@@ -441,6 +444,7 @@ selected row with their shortcuts.
 | `do=` | Menu label | Applies to | What it does |
 |---|---|---|---|
 | `open` | Open | all | Launch; on a menu, group, folder or section: open it in the box. Always present. |
+| `open-toggle-history` | Open without history / Open and add to history | apps and files, with the history on | Enter's launch, the other way round for Windows's history, this once (§2.10). The label says which way. |
 | `run-as-admin` | Run as administrator | programs that do not already have `elevate="true"` | The launch with `elevate`, for this once. y-pop already knows which programs need it; this is for the others. |
 | `show-in-folder` | Show in folder | programs with a file, folders, files | Explorer, with the file selected. |
 | `copy-path` | Copy path | programs, folders, files | The path, `%vars%` expanded (a Store app: its `shell:AppsFolder\…` address). |
@@ -489,22 +493,40 @@ shortcut does nothing.
 
 ### 2.10 History
 
-`<recent>` lists it; the ranking bonus uses it whether `<recent>` is shown
-or not. `<search history="false">` turns both off and writes nothing.
+**The history is Windows's** (rev. 2026-10-30): what the Start menu's lists are
+made of. y-pop keeps no list of its own, so the box and the Start menu cannot
+disagree, and what was opened elsewhere shows up too. `<recent>` lists it; the
+ranking bonus uses it whether `<recent>` is shown or not.
+`<search history="false">` turns both off and tells Windows nothing.
 
-- Stored next to the config as `y-pop.history`: a short text file, one line
-  per item (key, count, last launch), capped at 200 lines, written when
-  search closes.
-- Keyed by **source and identity**, never `NodeId`, which changes on every
-  reload: `menu:Work/Outlook` (path in the tree; renaming an item resets
-  its history), `start:<target exe or AUMID>`, `plugin:<name>:<id the
-  plugin gives>`. A plugin result is only remembered if the plugin marks it
-  as stable.
-- An entry whose item no longer exists is skipped when listing and dropped
-  at the next write.
+- **Files**: the shortcuts of the `Recent` folder, name and time taken from
+  the listing. No shortcut is opened until its row is on screen.
+- **Programs**: `UserAssist`, which is **undocumented** though unchanged since
+  Windows 7. Only a value's name (ROT13 of a path, a known-folder path or an
+  AppUserModelID) and its last-run time are relied on; its run count is often
+  0. It is read, never written.
+- **Filtered**: `UserAssist` holds everything that ever ran, installers
+  included, so a launch is kept only if it is a tray-menu or search-only item,
+  or an app of `shell:AppsFolder`, which is the Start menu's "All apps".
+- **Told**: a launch the user asks for (a tray menu, a hotkey, search) goes
+  through `ShellExecuteExW` with `SEE_MASK_FLAG_LOG_USAGE`, and a document
+  through `SHAddToRecentDocs`. `start`/`exit` events and `y-pop-config`'s Run
+  do not count. **An app's `shell="false"` is respected**: it is launched
+  directly and not recorded. (The global `shell-execute` does not count: the
+  shipped file sets it to `false`.)
+- **Either way, this once**: the action `open-toggle-history`
+  (`Ctrl+Shift+Enter`) does the opposite of what `Enter` would do to the
+  selected item: not recorded, or recorded through the shell.
+- **Off in Windows**: Settings can turn either list off. Windows then records
+  nothing, and y-pop does not make up for it: the **All recent** row says
+  when recent files are off.
 - The bonus is computed once per opening, so rows don't reorder between
   keystrokes for reasons the user can't see.
-- Cleared with `>Clear search history`; one entry with `Ctrl+Del`.
+- `Ctrl+Del` forgets one entry **in Windows**, as *Remove from list* does in
+  the Start menu; the file itself stays. There is no command to clear
+  everything: that is a Windows setting, and it reaches far beyond y-pop.
+- A plugin result has no place in Windows's history. How plugins are
+  remembered is to be settled with §2.11.
 
 ### 2.11 Plugins (WebAssembly)
 

@@ -35,10 +35,12 @@ use y_core::{
     window,
 };
 
+use search_window::Pick;
 use y_pop::{
     config, ipc,
+    launch::Usage,
     model::{ActionId, ConfigTree, EventMask, NodeId, NodeKind, TrayExtras},
-    search::commands::Command,
+    search::{commands::Command, history::Item},
 };
 
 const APP: AppInfo = AppInfo::new("Y-Pop", ipc::CLASS).single_instance();
@@ -113,7 +115,7 @@ impl YPop {
             if let NodeKind::App(app) = &self.tree.node(id).kind
                 && app.events.contains(event)
             {
-                launch_and_report(HWND::default(), app);
+                launch_and_report(HWND::default(), app, Usage::Silent);
             }
         }
     }
@@ -125,7 +127,7 @@ impl YPop {
     fn run(&mut self, hwnd: HWND, node: NodeId, position: POINT) {
         match &self.tree.node(node).kind {
             NodeKind::Group => self.show_menu(hwnd, Some(node), position, None),
-            NodeKind::App(app) => launch_and_report(hwnd, app),
+            NodeKind::App(app) => launch_and_report(hwnd, app, self.usage()),
             NodeKind::Quit => window::quit(0),
             NodeKind::About => show_about(),
             NodeKind::Settings => self.open_settings(),
@@ -155,12 +157,23 @@ impl YPop {
                 let position = monitor::cursor_position().unwrap_or(POINT { x: 0, y: 0 });
                 self.run(hwnd, node, position);
             }
+            // The other way round for the history, this time only.
+            ActionId::OpenToggled => {
+                if let NodeKind::App(app) = &self.tree.node(node).kind {
+                    let usage = if app.shell == Some(false) {
+                        Usage::Forced
+                    } else {
+                        Usage::Silent
+                    };
+                    launch_and_report(hwnd, app, usage);
+                }
+            }
             // The same launch with elevation asked for, this time only.
             ActionId::RunAsAdmin => {
                 if let NodeKind::App(app) = &self.tree.node(node).kind {
                     let mut app = app.clone();
                     app.elevate = true;
-                    launch_and_report(hwnd, &app);
+                    launch_and_report(hwnd, &app, self.usage());
                 }
             }
             ActionId::ShowInFolder => {
@@ -188,13 +201,53 @@ impl YPop {
             ActionId::Reveal => self.reveal(hwnd, node),
             // Handled in the window, which has the clipboard.
             ActionId::CopyPath => {}
-            // Not reachable yet: a Start-menu item and a history row.
+            // Not reachable: a Start-menu item, and what the window does itself.
             ActionId::AddToMenu | ActionId::Forget => {}
         }
     }
 
+    /// What the user chose in the search window on an item of Windows's history
+    /// that no tree node stands for.
+    fn run_history_pick(&mut self, hwnd: HWND, item: &Item, action: ActionId) {
+        let elevate = action == ActionId::RunAsAdmin;
+        match action {
+            ActionId::Open | ActionId::OpenToggled | ActionId::RunAsAdmin => {
+                // Elevating needs the program itself, not the Start menu's
+                // address for it.
+                let target = item
+                    .file()
+                    .filter(|_| elevate)
+                    .unwrap_or_else(|| item.address());
+                let logged = action != ActionId::OpenToggled;
+                if let Err(error) = y_pop::launch::open_item(hwnd, &target, elevate, logged) {
+                    y_core::log::line(format_args!("launch failed: {error}"));
+                }
+            }
+            ActionId::ShowInFolder => match item.file() {
+                Some(path) => y_core::shell::reveal(std::path::Path::new(&path)),
+                None => y_core::log::line("search: no file to show in Explorer"),
+            },
+            // None of these applies to an item with no node.
+            _ => {}
+        }
+    }
+
+    /// Whether launches go into Windows's history: unless `history="false"`.
+    fn usage(&self) -> Usage {
+        if self
+            .tree
+            .search
+            .as_ref()
+            .is_none_or(|search| search.history)
+        {
+            Usage::Logged
+        } else {
+            Usage::Silent
+        }
+    }
+
     /// A y-pop command chosen with `>` in the search window, once it has
-    /// closed. (*Clear search history* is done by the window.)
+    /// closed.
     fn run_command(&mut self, hwnd: HWND, command: Command) {
         match command {
             Command::Reload => self.reload(hwnd),
@@ -213,7 +266,6 @@ impl YPop {
             }
             Command::About => show_about(),
             Command::Quit => window::quit(0),
-            Command::ClearHistory => {}
         }
     }
 
@@ -318,7 +370,7 @@ impl YPop {
         {
             match selection {
                 menu::Selection::Node(node) => self.run(hwnd, node, position),
-                menu::Selection::Launch(app) => launch_and_report(hwnd, &app),
+                menu::Selection::Launch(app) => launch_and_report(hwnd, &app, self.usage()),
                 menu::Selection::Extra(extra) => self.run_extra(extra),
             }
         }
@@ -470,8 +522,8 @@ impl YPop {
     }
 }
 
-fn launch_and_report(hwnd: HWND, app: &y_pop::model::App) {
-    if let Err(error) = y_pop::launch::launch(hwnd, app) {
+fn launch_and_report(hwnd: HWND, app: &y_pop::model::App, usage: Usage) {
+    if let Err(error) = y_pop::launch::launch(hwnd, app, usage) {
         y_core::log::line(format_args!("launch failed: {error}"));
     }
 }
@@ -491,7 +543,12 @@ fn show_about() {
 
 impl TrayApp for YPop {
     fn on_create(&mut self, hwnd: HWND) -> Result<()> {
-        self.search = Some(search_window::SearchWindow::new(hwnd));
+        let history = self
+            .tree
+            .search
+            .as_ref()
+            .is_some_and(|search| search.history);
+        self.search = Some(search_window::SearchWindow::new(hwnd, history));
         self.install(hwnd)?;
         self.fire_events(EventMask::START);
         Ok(())
@@ -584,8 +641,12 @@ impl TrayApp for YPop {
             .map(|search| (search.on_message(msg, wparam, lparam, &self.tree), search));
         if let Some((true, search)) = handled_by_search {
             let command = search.take_command();
-            if let Some((node, action)) = search.take_activation() {
-                self.run_search_pick(hwnd, node, action);
+            match search.take_activation() {
+                Some((Pick::Node(node), action)) => self.run_search_pick(hwnd, node, action),
+                Some((Pick::History(item), action)) => {
+                    self.run_history_pick(hwnd, &item, action);
+                }
+                None => {}
             }
             if let Some(command) = command {
                 self.run_command(hwnd, command);

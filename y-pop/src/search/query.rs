@@ -409,7 +409,8 @@ mod tests {
             .iter()
             .find(|entry| entry.name() == "servers")
             .unwrap()
-            .id;
+            .node()
+            .unwrap();
         assert_eq!(
             find(&index, "e", Scope::Within(servers)),
             ["remote desktop"]

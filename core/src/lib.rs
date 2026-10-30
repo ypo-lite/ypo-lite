@@ -51,7 +51,8 @@
 //! | [`config`] | portable `.ini` settings next to the executable |
 //! | [`xml`] | a small XML reader and writer (comments kept), for settings files that are not `.ini` |
 //! | [`file_info`] | where a `.lnk` points; an executable's `FileDescription` |
-//! | [`apps_folder`] | the packaged (Store) apps in `shell:AppsFolder` |
+//! | [`apps_folder`] | the apps in `shell:AppsFolder`, packaged (Store) ones apart |
+//! | [`recent`] | what Windows remembers having opened: recent files, launched programs |
 //! | [`open_windows`] | the programs with a window open now, as the taskbar lists them |
 //! | [`shell`] | "open this file/folder/program" through `ShellExecute` |
 //! | [`theme`] | whether Windows is asking for a dark palette |
@@ -106,6 +107,8 @@ pub mod png;
 pub mod prelude;
 #[cfg(feature = "win")]
 pub mod process;
+#[cfg(feature = "win")]
+pub mod recent;
 #[cfg(feature = "win")]
 pub mod resources;
 #[cfg(feature = "win")]

@@ -347,7 +347,7 @@ impl Settings {
             app_id: fields.app_id.as_deref().map(Arc::<str>::from),
             param: expand(&fields.param),
             path: expand(&fields.path),
-            shell: fields.shell.or(self.globals.shell_execute).unwrap_or(false),
+            shell: fields.shell.or(self.globals.shell_execute),
             elevate: fields.elevate,
             events,
             browse: None,

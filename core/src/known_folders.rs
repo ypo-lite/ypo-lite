@@ -14,7 +14,7 @@ use windows::Win32::UI::Shell::{
     FOLDERID_CommonPrograms, FOLDERID_Desktop, FOLDERID_Documents, FOLDERID_LocalAppData,
     FOLDERID_Music, FOLDERID_Profile, FOLDERID_ProgramFiles, FOLDERID_ProgramFilesX86,
     FOLDERID_Programs, FOLDERID_RoamingAppData, FOLDERID_System, FOLDERID_SystemX86,
-    FOLDERID_Videos, FOLDERID_Windows, KF_FLAG_DEFAULT, SHGetKnownFolderPath,
+    FOLDERID_Videos, FOLDERID_Windows, KF_FLAG_DEFAULT, KNOWN_FOLDER_FLAG, SHGetKnownFolderPath,
 };
 use windows::core::GUID;
 
@@ -89,7 +89,13 @@ impl KnownFolders {
 }
 
 fn resolve(id: &GUID) -> Option<Box<str>> {
-    let path = unsafe { SHGetKnownFolderPath(id, KF_FLAG_DEFAULT, None) }.ok()?;
+    resolve_id(id, KF_FLAG_DEFAULT)
+}
+
+/// The path of the known folder `id`, for a folder that is not a
+/// [`KnownFolder`]: one read from data rather than named in code. Not cached.
+pub(crate) fn resolve_id(id: &GUID, flags: KNOWN_FOLDER_FLAG) -> Option<Box<str>> {
+    let path = unsafe { SHGetKnownFolderPath(id, flags, None) }.ok()?;
     let text = unsafe { path.to_string() }.ok();
     unsafe { CoTaskMemFree(Some(path.0.cast())) };
     text.map(String::into_boxed_str)

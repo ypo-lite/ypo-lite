@@ -11,9 +11,12 @@ use super::keys::Chord;
 
 /// Whether `id` can be done to `entry`.
 pub fn applies(id: ActionId, entry: &Entry) -> bool {
-    let has_path = matches!(entry.kind, Kind::App | Kind::Folder);
+    let has_path = matches!(entry.kind, Kind::App | Kind::Folder | Kind::File);
     match id {
         ActionId::Open => true,
+        ActionId::OpenToggled => {
+            matches!(entry.kind, Kind::App | Kind::File) && entry.facts.recorded.is_some()
+        }
         // y-pop already knows which programs need elevation; this is for the
         // others. A Store app is launched by identity, which has none.
         ActionId::RunAsAdmin => {
@@ -26,6 +29,22 @@ pub fn applies(id: ActionId, entry: &Entry) -> bool {
         ActionId::AddToMenu => entry.source == Source::StartMenu,
         // Only a row of the history can be forgotten: `available` adds it there.
         ActionId::Forget => false,
+    }
+}
+
+/// What the action menu calls `id` on `entry`.
+pub fn label(id: ActionId, entry: &Entry) -> &'static str {
+    match (id, entry.facts.recorded) {
+        (ActionId::OpenToggled, Some(false)) => "Open and add to history",
+        _ => id.label(),
+    }
+}
+
+/// What a row button calls `id` on `entry`.
+pub fn short_label(id: ActionId, entry: &Entry) -> &'static str {
+    match (id, entry.facts.recorded) {
+        (ActionId::OpenToggled, Some(false)) => "Add to history",
+        _ => id.short_label(),
     }
 }
 
@@ -67,6 +86,7 @@ mod tests {
                 <search><group name="Admin"><app name="Regedit" exe="regedit.exe"/></group></search>
                 <group name="Work">
                     <app name="Plain" exe="plain.exe"/>
+                    <app name="Direct" exe="d.exe" shell="false"/>
                     <app name="Elevated" exe="e.exe" elevate="true"/>
                     <app name="Store" app-id="Pub.App_x!App"/>
                     <app name="Files" exe="C:\Files" browse="true"/>
@@ -102,6 +122,7 @@ mod tests {
             applying(&index, "plain"),
             [
                 "open",
+                "open-toggle-history",
                 "run-as-admin",
                 "show-in-folder",
                 "copy-path",
@@ -124,7 +145,7 @@ mod tests {
         let index = index();
         assert_eq!(
             applying(&index, "store"),
-            ["open", "copy-path", "reveal", "edit"]
+            ["open", "open-toggle-history", "copy-path", "reveal", "edit"]
         );
     }
 
@@ -173,8 +194,37 @@ mod tests {
                 ("reveal", Some("Ctrl+R".to_owned())),
                 ("show-in-folder", None),
                 ("run-as-admin", None),
+                ("open-toggle-history", Some("Ctrl+Shift+Enter".to_owned())),
                 ("open", Some("Enter".to_owned())),
             ]
         );
+    }
+
+    #[test]
+    fn the_history_action_says_which_way_it_goes() {
+        let index = index();
+        let id = ActionId::OpenToggled;
+        assert_eq!(label(id, entry(&index, "plain")), "Open without history");
+        assert_eq!(
+            label(id, entry(&index, "direct")),
+            "Open and add to history"
+        );
+        assert_eq!(short_label(id, entry(&index, "plain")), "No history");
+        assert_eq!(short_label(id, entry(&index, "direct")), "Add to history");
+        assert_eq!(
+            label(ActionId::Edit, entry(&index, "direct")),
+            "Edit in settings"
+        );
+    }
+
+    #[test]
+    fn with_the_history_off_there_is_no_way_round_to_choose() {
+        let tree = config::load_str(
+            r#"<y-pop><search history="false"/><app name="Plain" exe="plain.exe"/></y-pop>"#,
+            &mut Vec::<Variable>::new(),
+        )
+        .unwrap();
+        let index = Index::from_tree(&tree);
+        assert!(!applies(ActionId::OpenToggled, entry(&index, "plain")));
     }
 }

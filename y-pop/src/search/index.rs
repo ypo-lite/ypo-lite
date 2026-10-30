@@ -20,6 +20,18 @@ pub enum Source {
     SearchOnly,
     /// The Windows Start menu (phase 9).
     StartMenu,
+    /// Windows's history, for what no tray menu or search-only group holds.
+    History,
+}
+
+/// What an entry stands for.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Target {
+    /// A node of the tree.
+    Node(NodeId),
+    /// An item of this opening's history
+    /// ([`super::history::Listing::items`]), by position.
+    History(u32),
 }
 
 /// What an entry is. Decides its group and whether it is ranked lower.
@@ -29,6 +41,8 @@ pub enum Kind {
     Group,
     /// A browsed folder; its files are only searched through `/`.
     Folder,
+    /// A file Windows remembers having opened.
+    File,
     /// A y-pop command: About, Quit, Settings… (and, phase 8, the `>` ones).
     /// Ranked below everything else.
     Command,
@@ -39,9 +53,7 @@ pub enum Kind {
 pub struct Entry {
     pub source: Source,
     pub kind: Kind,
-    /// The tree node it stands for. (Entries of other sources get their own
-    /// kind of id when they exist.)
-    pub id: NodeId,
+    pub target: Target,
     /// The groups it sits in, outermost first. Empty for a tray icon's own
     /// group or app.
     pub ancestors: Vec<NodeId>,
@@ -67,6 +79,9 @@ pub struct Facts {
     pub file: bool,
     /// A Store app, launched by its identity rather than a file.
     pub store: bool,
+    /// Whether opening it goes into Windows's history. `None` when the history
+    /// is off, and for what is not launched.
+    pub recorded: Option<bool>,
 }
 
 /// Which field of an entry a query matched, for the second line of a result
@@ -101,7 +116,7 @@ impl Entry {
         Self {
             source,
             kind,
-            id,
+            target: Target::Node(id),
             ancestors: Vec::new(),
             facts: Facts::default(),
             name: fold(&plain(name)).into(),
@@ -110,6 +125,21 @@ impl Entry {
             path: "".into(),
             tooltip: "".into(),
             hotkeys: Vec::new(),
+        }
+    }
+
+    /// The entry of item `number` of the history.
+    pub fn from_history(number: u32, kind: Kind, name: &str) -> Self {
+        let mut entry = Self::new(Source::History, NodeId::from_u32(0), kind, name);
+        entry.target = Target::History(number);
+        entry
+    }
+
+    /// The tree node it stands for, if it stands for one.
+    pub fn node(&self) -> Option<NodeId> {
+        match self.target {
+            Target::Node(id) => Some(id),
+            Target::History(_) => None,
         }
     }
 
@@ -196,6 +226,7 @@ impl Index {
         groups: &mut Vec<(NodeId, String)>,
     ) {
         let data = tree.node(node);
+        let history = tree.search.as_ref().is_some_and(|search| search.history);
         let kind = match &data.kind {
             NodeKind::Separator | NodeKind::Break => return,
             NodeKind::Group => Kind::Group,
@@ -223,6 +254,7 @@ impl Index {
                 elevated: app.elevate,
                 file: app.exe.is_some() && app.app_id.is_none(),
                 store: app.app_id.is_some(),
+                recorded: (kind == Kind::App && history).then_some(app.shell != Some(false)),
             };
         }
         for binding in &data.hotkeys {

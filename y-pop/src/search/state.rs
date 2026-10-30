@@ -102,8 +102,11 @@ pub struct State {
     menu: Option<ActionMenu>,
     /// Whether the selected row shows buttons (`row-actions`).
     row_actions: bool,
-    /// The last launches, newest first, listed by the empty box.
+    /// What Windows remembers, newest first. The empty box lists the first
+    /// [`Self::recent_shown`]; [`Place::Recent`] lists them all.
     recent: Vec<Recent>,
+    /// `<recent count>`.
+    recent_shown: usize,
     /// The sections the empty box lists under Browse.
     sections: Vec<SectionRow>,
     /// The search hotkey, listed by `#`.
@@ -117,12 +120,13 @@ pub struct State {
     folded: bool,
 }
 
-/// One launch of the history that still has an entry: what the empty box
-/// lists under **Recent**.
+/// One row of the history: what the empty box lists under **Recent**.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Recent {
     /// Position in [`Index::entries`].
     pub entry: u32,
+    /// Position in [`super::history::Listing::items`].
+    pub item: u32,
     /// Seconds since 1970.
     pub last: u64,
 }
@@ -141,6 +145,7 @@ impl State {
             menu: None,
             row_actions: true,
             recent: Vec::new(),
+            recent_shown: usize::MAX,
             sections: Vec::new(),
             search_hotkey: None,
             check: None,
@@ -149,8 +154,15 @@ impl State {
         }
     }
 
-    /// Sets what the empty box lists under **Recent** and what history adds to
-    /// the scores, and shows the empty box. Called once, as the window opens.
+    /// `<recent count>`: how many rows the empty box shows. A longer history
+    /// is reached through a row that opens [`Place::Recent`].
+    pub fn with_recent_shown(mut self, shown: usize) -> Self {
+        self.recent_shown = shown;
+        self
+    }
+
+    /// Sets what the history lists and what it adds to the scores, and shows
+    /// the empty box. Called once, as the window opens.
     pub fn start(
         &mut self,
         index: &Index,
@@ -164,20 +176,23 @@ impl State {
         self.refresh(index);
     }
 
-    /// Whether `hit` is a row of Recent: the empty box, outside any group.
+    /// Whether `hit` is a row of the history.
     fn is_recent(&self, hit: Hit) -> bool {
-        self.last_launch(hit).is_some()
+        self.recent_row(hit).is_some()
     }
 
-    /// When `hit` was launched, if it is listed under Recent right now.
-    pub fn last_launch(&self, hit: Hit) -> Option<u64> {
-        if !self.query.is_empty() || !self.scopes.is_empty() || self.prefix().is_some() {
+    /// The history's line for `hit`, if it is listed as such right now: on the
+    /// empty box, or anywhere in [`Place::Recent`].
+    pub fn recent_row(&self, hit: Hit) -> Option<Recent> {
+        let on_empty_box =
+            self.query.is_empty() && self.scopes.is_empty() && self.prefix().is_none();
+        if !on_empty_box && self.scopes.last() != Some(&Place::Recent) {
             return None;
         }
         self.recent
             .iter()
             .find(|recent| recent.entry == hit.entry)
-            .map(|recent| recent.last)
+            .copied()
     }
 
     /// Takes the launch of `entry` off the Recent list (it was forgotten), the
@@ -317,6 +332,8 @@ impl State {
         self.scopes.last().map_or(Scope::All, |&place| match place {
             Place::Menus => Scope::Menus,
             Place::Group(group) => Scope::Within(group),
+            // Everything, then narrowed to the history by `refresh`.
+            Place::Recent => Scope::All,
         })
     }
 
@@ -413,6 +430,20 @@ impl State {
                 )
             })
             .unwrap_or_default()
+    }
+
+    /// What the action menu calls `id` on the selected result.
+    pub fn action_label(&self, index: &Index, id: ActionId) -> &'static str {
+        self.selected_hit().map_or(id.label(), |hit| {
+            actions::label(id, &index.entries()[hit.entry as usize])
+        })
+    }
+
+    /// What a row button calls `id` on the selected result.
+    pub fn action_short_label(&self, index: &Index, id: ActionId) -> &'static str {
+        self.selected_hit().map_or(id.short_label(), |hit| {
+            actions::short_label(id, &index.entries()[hit.entry as usize])
+        })
     }
 
     /// The action menu's key, to be recognised by the window.
@@ -599,7 +630,10 @@ impl State {
         if entry.kind != Kind::Group {
             return Outcome::Nothing;
         }
-        self.enter(index, Place::Group(entry.id))
+        match entry.node() {
+            Some(group) => self.enter(index, Place::Group(group)),
+            None => Outcome::Nothing,
+        }
     }
 
     /// Goes inside `place`: it becomes a chip, and the search looks only there.
@@ -893,14 +927,16 @@ impl State {
             match self.scopes.last().copied() {
                 // The empty box: the last launches, then the sections.
                 None => {
+                    let shown = self.recent.len().min(self.recent_shown);
                     if !self.recent.is_empty() {
                         self.rows.push(Row::Header(Heading::Recent));
-                        self.rows.extend(self.recent.iter().map(|recent| {
-                            Row::Result(Hit {
-                                entry: recent.entry,
-                                score: 0,
-                                matched: Field::Name,
-                            })
+                        self.rows
+                            .extend(self.recent[..shown].iter().map(Self::recent_result));
+                    }
+                    if self.recent.len() > shown {
+                        self.rows.push(Row::Section(SectionRow {
+                            place: Place::Recent,
+                            apps: self.recent.len(),
                         }));
                     }
                     if !self.sections.is_empty() {
@@ -917,13 +953,24 @@ impl State {
                 Some(Place::Group(group)) => self
                     .rows
                     .extend(listed(&|entry| entry.ancestors.last() == Some(&group))),
+                Some(Place::Recent) => self
+                    .rows
+                    .extend(self.recent.iter().map(Self::recent_result)),
             }
         } else {
-            let hits = self
+            let mut hits = self
                 .searcher
                 .search(index, &self.query, self.scope())
                 .to_vec();
-            for group in results::arrange(index, &hits, self.layout) {
+            // All of it, in one list: nobody came here for the five best.
+            let layout = if self.scopes.last() == Some(&Place::Recent) {
+                let recent = &self.recent;
+                hits.retain(|hit| recent.iter().any(|row| row.entry == hit.entry));
+                ResultsLayout::Flat
+            } else {
+                self.layout
+            };
+            for group in results::arrange(index, &hits, layout) {
                 if group.heading != Heading::All {
                     self.rows.push(Row::Header(group.heading));
                 }
@@ -931,6 +978,14 @@ impl State {
             }
         }
         self.selected = self.first_selectable();
+    }
+
+    fn recent_result(recent: &Recent) -> Row {
+        Row::Result(Hit {
+            entry: recent.entry,
+            score: 0,
+            matched: Field::Name,
+        })
     }
 
     /// The rows of a list a prefix asked for (spec §2.7): `rest` is what was
@@ -1963,6 +2018,7 @@ mod tests {
             .iter()
             .enumerate()
             .map(|(n, name)| Recent {
+                item: n as u32,
                 entry: position(&index, name),
                 last: 1000 - n as u64,
             })
@@ -2016,7 +2072,7 @@ mod tests {
         assert!(!row_names(&state, &index).contains(&"[Recent]".to_owned()));
         let hit = state.selected_hit().unwrap();
         assert_eq!(
-            state.last_launch(hit),
+            state.recent_row(hit),
             None,
             "a search result is not a recent row"
         );
@@ -2034,7 +2090,7 @@ mod tests {
             .rows()
             .iter()
             .filter_map(|row| match row {
-                Row::Result(hit) => state.last_launch(*hit),
+                Row::Result(hit) => state.recent_row(*hit).map(|row| row.last),
                 _ => None,
             })
             .collect();
@@ -2070,6 +2126,91 @@ mod tests {
         assert!(!menu_ids(&state).contains(&"forget"));
     }
 
+    /// `with_recent`, the empty box showing the first `shown`.
+    fn with_recent_shown(names: &[&str], shown: usize) -> (State, Index) {
+        let index = index();
+        let mut state = state().with_recent_shown(shown);
+        let recent = names
+            .iter()
+            .enumerate()
+            .map(|(n, name)| Recent {
+                item: n as u32,
+                entry: position(&index, name),
+                last: 1000 - n as u64,
+            })
+            .collect();
+        state.start(&index, recent, Vec::new(), Vec::new());
+        (state, index)
+    }
+
+    #[test]
+    fn a_history_longer_than_count_ends_in_a_row_that_opens_it_all() {
+        let (state, index) = with_recent_shown(&["notepad", "outlook", "notes"], 2);
+        assert_eq!(
+            row_names(&state, &index),
+            ["[Recent]", "notepad", "outlook", "<Recent>"]
+        );
+        let (state, index) = with_recent_shown(&["notepad", "outlook"], 2);
+        assert_eq!(
+            row_names(&state, &index),
+            ["[Recent]", "notepad", "outlook"],
+            "nothing more to see"
+        );
+    }
+
+    #[test]
+    fn the_whole_history_opens_as_a_chip_and_comes_back() {
+        let (mut state, index) = with_recent_shown(&["notepad", "outlook", "notes"], 1);
+        press(&mut state, &index, Key::Down);
+        assert_eq!(state.selected(), Some(2), "the row after the first");
+        press(&mut state, &index, Key::Enter);
+        assert_eq!(state.scopes(), [Place::Recent]);
+        assert_eq!(
+            row_names(&state, &index),
+            ["notepad", "outlook", "notes"],
+            "everything, newest first"
+        );
+        assert_eq!(state.selected(), Some(0));
+
+        press(&mut state, &index, Key::Backspace);
+        assert_eq!(state.scopes(), []);
+        assert_eq!(state.selected(), Some(2), "back on the row it opened from");
+    }
+
+    #[test]
+    fn typing_inside_the_history_searches_only_it_and_forget_still_applies() {
+        let (mut state, index) = with_recent_shown(&["notepad", "outlook"], 1);
+        press(&mut state, &index, Key::Down);
+        press(&mut state, &index, Key::Enter);
+
+        type_text(&mut state, &index, "no");
+        assert_eq!(
+            row_names(&state, &index),
+            ["notepad"],
+            "not the `notes` that is no launch, and no headings"
+        );
+        let hit = state.selected_hit().unwrap();
+        assert_eq!(state.recent_row(hit).map(|row| row.item), Some(0));
+        assert_eq!(
+            state.handle(&index, shortcut("Ctrl+Del")),
+            Outcome::Activate(hit, ActionId::Forget)
+        );
+    }
+
+    #[test]
+    fn forgetting_shortens_the_count_and_the_more_row_goes_when_all_fits() {
+        let (mut state, index) = with_recent_shown(&["notepad", "outlook", "notes"], 2);
+        let count = |state: &State| {
+            state.rows().iter().find_map(|row| match row {
+                Row::Section(section) => Some(section.apps),
+                _ => None,
+            })
+        };
+        assert_eq!(count(&state), Some(3));
+        state.remove_recent(&index, position(&index, "notes"));
+        assert_eq!(count(&state), None);
+    }
+
     #[test]
     fn forgetting_a_launch_keeps_the_selection_in_place() {
         let (mut state, index) = with_recent(&["notepad", "outlook", "notes"]);
@@ -2099,6 +2240,7 @@ mod tests {
             .iter()
             .enumerate()
             .map(|(n, name)| Recent {
+                item: n as u32,
                 entry: position(&index, name),
                 last: 1000 - n as u64,
             })
@@ -2228,6 +2370,7 @@ mod tests {
             .iter()
             .enumerate()
             .map(|(n, name)| Recent {
+                item: n as u32,
                 entry: position(&index, name),
                 last: 1000 - n as u64,
             })
@@ -2254,7 +2397,11 @@ mod tests {
                 "<Menus>",
                 &format!(
                     "<{:?}>",
-                    Place::Group(index.entries()[position(&index, "admin") as usize].id)
+                    Place::Group(
+                        index.entries()[position(&index, "admin") as usize]
+                            .node()
+                            .unwrap()
+                    )
                 ),
             ]
         );

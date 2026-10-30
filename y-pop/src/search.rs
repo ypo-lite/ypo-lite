@@ -12,7 +12,7 @@
 //! * [`commands`]: the `>` commands, the `?` prefixes and the rows they make.
 //! * [`keycheck`]: is a key combination free? The table of the keys Windows keeps.
 //! * [`display`]: the text of a result row (matched runs, headings, second line).
-//! * [`history`]: what was launched and when, for Recent and a ranking bonus.
+//! * [`history`]: what Windows remembers, for Recent and a ranking bonus.
 //! * [`hotkey`]: a key combination as a set, for queries like `shift+ctrl+esc`.
 //! * [`index`]: the flat list of everything searchable, built from a
 //!   [`crate::model::ConfigTree`] at load and reload, never per keystroke.

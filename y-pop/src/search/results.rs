@@ -28,6 +28,8 @@ pub enum Heading {
     StartMenu,
     MenusAndGroups,
     Folders,
+    /// Files Windows remembers having opened.
+    Files,
     Commands,
     /// `results="flat"`: no grouping, no heading shown.
     All,
@@ -62,6 +64,7 @@ pub fn arrange(index: &Index, hits: &[Hit], layout: ResultsLayout) -> Vec<Group>
         Heading::StartMenu,
         Heading::MenusAndGroups,
         Heading::Folders,
+        Heading::Files,
         Heading::Commands,
     ] {
         let members: Vec<Hit> = rest
@@ -85,6 +88,7 @@ fn heading_of(index: &Index, hit: &Hit) -> Heading {
     match (entry.kind, entry.source) {
         (Kind::Command, _) => Heading::Commands,
         (Kind::Folder, _) => Heading::Folders,
+        (Kind::File, _) => Heading::Files,
         (Kind::Group, _) => Heading::MenusAndGroups,
         (Kind::App, Source::StartMenu) => Heading::StartMenu,
         (Kind::App, _) => Heading::Apps,

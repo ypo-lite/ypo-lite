@@ -4,7 +4,7 @@
 
 use std::ops::Range;
 
-use crate::model::{ConfigTree, NodeKind};
+use crate::model::{ConfigTree, NodeId, NodeKind};
 
 use super::commands::{Command, Line, PREFIXES};
 use super::index::{Entry, Field, Kind, Source};
@@ -56,6 +56,7 @@ pub fn heading(heading: Heading) -> &'static str {
         Heading::StartMenu => "START MENU",
         Heading::MenusAndGroups => "MENUS AND GROUPS",
         Heading::Folders => "FOLDERS",
+        Heading::Files => "FILES",
         Heading::Commands => "COMMANDS",
         Heading::All => "",
     }
@@ -152,7 +153,7 @@ pub fn ago(seconds: u64) -> String {
 /// app, the `shell:AppsFolder\…` address that opens it. `None` for a group or
 /// a command, which have none.
 pub fn target(tree: &ConfigTree, entry: &Entry) -> Option<String> {
-    let NodeKind::App(app) = &tree.node(entry.id).kind else {
+    let NodeKind::App(app) = &tree.node(entry.node()?).kind else {
         return None;
     };
     match (&app.exe, &app.app_id) {
@@ -166,7 +167,7 @@ pub fn target(tree: &ConfigTree, entry: &Entry) -> Option<String> {
 /// `None` for a Store app, which is not a file, and for anything that is not
 /// an app.
 pub fn file_of(tree: &ConfigTree, entry: &Entry) -> Option<String> {
-    match &tree.node(entry.id).kind {
+    match &tree.node(entry.node()?).kind {
         NodeKind::App(app) => app.exe.as_ref().map(|exe| exe.to_string()),
         _ => None,
     }
@@ -176,7 +177,11 @@ pub fn file_of(tree: &ConfigTree, entry: &Entry) -> Option<String> {
 /// thing is — the menus it sits in and the program behind it; found by
 /// anything else, it says what matched (spec §2.6).
 pub fn subtitle(tree: &ConfigTree, entry: &Entry, matched: Field) -> String {
-    let node = tree.node(entry.id);
+    let Some(id) = entry.node() else {
+        // The item of the history says it itself: see `history::Item::detail`.
+        return String::new();
+    };
+    let node = tree.node(id);
     match matched {
         Field::Keywords => {
             if let Some(keywords) = &node.keywords {
@@ -204,12 +209,12 @@ pub fn subtitle(tree: &ConfigTree, entry: &Entry, matched: Field) -> String {
         // The path is part of the default line.
         Field::Name | Field::Path => {}
     }
-    location(tree, entry)
+    location(tree, id, entry)
 }
 
 /// Where an entry is: `Only in search · Work › Servers · C:\Windows\mstsc.exe`.
-fn location(tree: &ConfigTree, entry: &Entry) -> String {
-    let node = tree.node(entry.id);
+fn location(tree: &ConfigTree, id: NodeId, entry: &Entry) -> String {
+    let node = tree.node(id);
     let mut parts: Vec<String> = Vec::new();
 
     if entry.source == Source::SearchOnly {
@@ -230,7 +235,7 @@ fn location(tree: &ConfigTree, entry: &Entry) -> String {
             }
         }
         (_, Kind::Group) => {
-            let count = tree.children(entry.id).count();
+            let count = tree.children(id).count();
             parts.push(match count {
                 1 => "1 item".to_owned(),
                 count => format!("{count} items"),

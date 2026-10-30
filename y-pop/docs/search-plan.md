@@ -22,7 +22,8 @@ runs it and reports; sessions don't drive the desktop themselves)
 | 3 Text input and canvas primitives | 👁 |
 | 4 The search window, first usable version | 👁 |
 | 5 Result actions | 🔨 |
-| 6 History, Recent, sections, collapsed mode | ⬜ |
+| 6 History, Recent, sections, collapsed mode | 👁 |
+| 6b Windows's history replaces y-pop's | 👁 |
 | 7 Browsing the tray menus | ⬜ |
 | 8 Prefixes and the hotkey check | ⬜ |
 | 9 The Start menu section | ⬜ |
@@ -30,7 +31,7 @@ runs it and reports; sessions don't drive the desktop themselves)
 | 11 `y-pop-config` support | ⬜ |
 | later | Search layer in the boards; plugins |
 
-**Resume here:** phase 8.4 (`/` files, background thread) is the one open task of phases 6 and 8; everything else through 8 is built (awaiting a live look; 6.4 is the flat-list form, the real views come with phases 7, 9, 10). The user manual is `docs/user-manual.md`: update it with each feature. Still to look at (👁): all of phase 4 (checklist under its "Done when"), the action menu, the row buttons, Reveal and the configured shortcuts of 5.2–5.6, the start-up balloon and the search hotkey (phase 1), icon quality at 32 and 48 px and `y-snap`'s overlays unchanged (phase 3). Task 1.9 (`tray="true"`) is for later.
+**Resume here:** the live check of phase 6b (its "Done when" is the first thing to look at: the launch route changed for every app), then phase 8.4 (`/` files, background thread) is the one open task of phases 6 and 8; everything else through 8 is built (awaiting a live look; 6.4 is the flat-list form, the real views come with phases 7, 9, 10). The user manual is `docs/user-manual.md`: update it with each feature. Still to look at (👁): all of phase 4 (checklist under its "Done when"), the action menu, the row buttons, Reveal and the configured shortcuts of 5.2–5.6, the start-up balloon and the search hotkey (phase 1), icon quality at 32 and 48 px and `y-snap`'s overlays unchanged (phase 3). Task 1.9 (`tray="true"`) is for later.
 
 ---
 
@@ -517,6 +518,10 @@ Spec §2.4, §2.10. After this phase the empty box looks like the mockup.
 **Done when:** 👁 both opening modes, Recent across restarts, forgetting an
 entry.
 
+> **History is no longer y-pop's own**: tasks 6.1, 6.2 and 6.7 below were
+> replaced by phase 6b (2026-10-30). `y-pop.history`, its keys and
+> `>Clear search history` are gone; the notes are kept for the record.
+
 **6.1–6.3 built (2026-10-26)** — history and Recent:
 
 - `search::history` (pure but for `load`/`save`, 10 tests): `y-pop.history`
@@ -651,6 +656,96 @@ history keys use the raw names, which are the identity.
 
 ---
 
+## Phase 6b — Windows's history replaces y-pop's
+
+Decided 2026-10-30: y-pop lists what Windows remembers, not a list of its own;
+what it launches reaches that list; and more than `count` can be reached.
+Spec §2.4, §2.10.
+
+| | Task | Status |
+|---|---|---|
+| 6b.1 | `y_core::recent`: the `Recent` folder, `UserAssist` (read only), `add_file`, `tracks_files`, the two forgets. `y_core::apps_folder::all_apps`. Tests, on real data too (counts only). | ✅ |
+| 6b.2 | `search::history` rewritten: `listing` (pure) merges launches and files, makes a launch of a tree item that item, keeps the rest if `shell:AppsFolder` knows it, and gives the bonuses. `Target` and `Source::History`, `Kind::File`, `Heading::Files`. | ✅ |
+| 6b.3 | `launch::Usage`: a logged launch takes the shell with `SEE_MASK_FLAG_LOG_USAGE`, a document goes to `SHAddToRecentDocs`. | 👁 |
+| 6b.4 | **All recent**: `Place::Recent`, `with_recent_shown`, the row after Recent, the list behind it, filtering. | 👁 |
+| 6b.5 | Forget reaches Windows. `>Clear search history` removed. | 👁 |
+| 6b.6 | `shell="false"` is respected and not recorded (`App::shell` is now an `Option`). `open-toggle-history`, default `Ctrl+Shift+Enter`, with `Usage::Forced`. | 👁 |
+
+**Done when:** 👁
+
+1. A program launched from a tray menu appears in Recent at the next opening,
+   as that tray item. **This is the claim nothing could test without launching
+   something**: that `SEE_MASK_FLAG_LOG_USAGE` reaches `UserAssist` on this
+   Windows, and for a Store app through its `shell:AppsFolder` address. If it
+   does not, the fallback is writing the 72-byte record ourselves, which y-pop
+   avoids because the format is undocumented.
+2. Every kind of app still launches as before now that all of them take the
+   shell: arguments, working directory, `%clipboard%`, `elevate`, a `.bat`, a
+   browsed file, a Store app.
+3. Recent shows what the Start menu's lists show; with recent items on in
+   Settings, files too; a file opened from a browsed folder is listed.
+4. **All recent**: the row, `Enter`, `→` and a click, scrolling, filtering,
+   coming back. Its second line says when Windows keeps no recent files.
+5. `Ctrl+Del` on an app and on a file: gone at the next opening, and from the
+   Start menu; the file itself still there.
+6. `history="false"`: no Recent, and a launch leaves no record.
+   `shell="false"`: launched directly, no record, and `Ctrl+Shift+Enter` records
+   it; on any other app `Ctrl+Shift+Enter` leaves no record. Whether the shell
+   records a document by itself on that route is unknown: check a file too.
+7. The hotkey feels as quick as before, right after y-pop starts too.
+
+**Built (2026-10-30).** What the real data said, on the machine this was
+written on (read-only, counts only):
+
+- `UserAssist` holds 173 launches and reads in about 2 ms, so it is read at each
+  opening. Its run count is 0 on most records that have a time (11 of 187 had
+  one), so a record is judged by its **time**; the 72-byte layout held.
+- Its ids are `shell:AppsFolder`'s, for the exe key. 60 match, which is what
+  drops the installers and temporary programs. The shortcuts' key (`.lnk`
+  paths) matches none of them: it is only used to recognise a tree item.
+- `shell:AppsFolder` takes 365 ms to enumerate in a debug build: too slow for a
+  hotkey. `AppNames` reads it on its own thread, starting when y-pop does; only
+  an opening with nothing read yet waits. It is reread behind the scenes when
+  older than ten minutes, so a new install can take that long to be listed.
+- `Start_TrackDocs` is 0 here and the `Recent` folder empty: recent files can
+  only be seen with that switch on. No test exercised a real file row.
+
+Decisions:
+
+- **A launch of a tree item is that item**, matched by app id, full path, or the
+  file name when `exe` has no folder. So a row keeps its name, hotkey and
+  actions, and nothing is listed twice.
+- **History-only items are search results too** (`Source::History`, headed
+  Apps or Files). They need `<recent>`: without it, only the tree's items get
+  the bonus. Files come from their shortcut's name: a file in a tray menu can
+  be listed twice, since matching it would mean opening every shortcut.
+- **A user-asked launch takes the shell** (`Usage::Logged`), since the flag
+  exists only there, **unless the app says `shell="false"`**: that stays
+  `CreateProcessW` and is not recorded. No attribute is not the same as `false`
+  (`App::shell` is an `Option`), or nothing would be recorded by default. The
+  global `shell-execute` plays no part: the shipped `y-pop.xml` sets it to
+  `false`, and `y-pop` does not apply it to apps anyway (`y-pop-config/docs/plan.md`).
+  A launch that fails through the shell shows the shell's message rather than
+  only logging. `start`/`exit` events and `y-pop-config`'s Run stay
+  `Usage::Silent`, on the old route.
+- **`open-toggle-history` is one action, not two**, so one key does the opposite
+  of `Enter` on any item, and its label says which way. It is not offered with
+  `history="false"`. `Usage::Forced` takes the shell this once. Being an action,
+  it exists in search only; a `<search>` with its own `<actions>` has it only if
+  listed.
+- **Forget acts on Windows**, every record of the item, as the Start menu's
+  *Remove from list* does. A second list of hidden items would have brought the
+  private history back.
+- **`>Clear search history` is gone**: emptying the system's history from a
+  launcher is too much for one `Enter`, and Windows has a setting for it.
+- **All recent is a row, not a prefix**: it follows Recent, so `↓` reaches it,
+  and it opens like any section, as a chip. It is shown only when there is more
+  than `count`. Results in it are one flat list.
+- A vanished file is not filtered out: checking could block on a network drive.
+  Opening it shows the shell's message; Forget removes it.
+
+---
+
 ## Phase 7 — Browsing the tray menus
 
 | | Task | Status |
@@ -670,7 +765,7 @@ Spec §2.7, §2.14.
 
 | | Task | Status |
 |---|---|---|
-| 8.1 | `>` commands: reload, open settings, edit `y-pop.xml`, open configuration folder, clear history, refresh Start menu, start with Windows, about, quit. | 👁 (without Start menu refresh, which has no Start menu yet) |
+| 8.1 | `>` commands: reload, open settings, edit `y-pop.xml`, open configuration folder, refresh Start menu, start with Windows, about, quit. (Clear history was dropped by 6b.) | 👁 (without Start menu refresh, which has no Start menu yet) |
 | 8.2 | `#` hotkeys: every binding (search's own included), filtered. | 👁 |
 | 8.3 | `#<combination>` check: `RegisterHotKey` probe on the search window, unregistered at once; built-in table of keys Windows reserves; "free" row opens `y-pop-config` ready to assign (plain open until 11.x). | 👁 |
 | 8.4 | `/` files in browsed folders: listed on first `/` per opening on a background thread, results posted back (`WM_APP` pattern) and appended without moving the selection; network folders skipped unless `index="true"`. | ⬜ |

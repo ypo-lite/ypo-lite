@@ -7,11 +7,22 @@
 //! `IApplicationActivationManager::ActivateApplication` for a Store/RT
 //! `app_id` instead of an `exe`.
 //!
+//! A launch the user asked for is also **told to Windows** ([`Usage::Logged`]),
+//! so it lands in the history search reads ([`crate::search::history`]) and in
+//! the Start menu's own lists. A program gets there by
+//! `SEE_MASK_FLAG_LOG_USAGE`, which only `ShellExecuteExW` has, so a logged
+//! launch takes the shell route, and a Store app its `shell:AppsFolder` address
+//! rather than the activation manager. A file gets there by
+//! `y_core::recent::add_file`. An explicit `shell="false"` means the app wants
+//! the direct route: it is respected, and so it is not recorded.
+//!
 //! `%clipboard%`/`%clipboards%` are expanded here, and only here — see
 //! `y_pop::variables`'s module doc for why `y_pop::config` deliberately
 //! leaves them untouched: the clipboard's contents at config-load time are
 //! not what the user wants pasted when they actually pick the item, minutes
 //! or hours later.
+
+use std::path::Path;
 
 use windows::Win32::Foundation::{CloseHandle, HGLOBAL, HWND};
 use windows::Win32::System::Com::{
@@ -28,7 +39,7 @@ use windows::Win32::System::Threading::{
 };
 use windows::Win32::UI::Shell::{
     AO_NONE, ApplicationActivationManager, DragQueryFileW, HDROP, IApplicationActivationManager,
-    SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW,
+    SEE_MASK_FLAG_LOG_USAGE, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW,
 };
 use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 use windows::core::{HSTRING, PCWSTR, PWSTR, Result};
@@ -36,8 +47,29 @@ use windows::core::{HSTRING, PCWSTR, PWSTR, Result};
 use crate::model::App;
 use crate::variables::{self, Variable};
 
-pub fn launch(hwnd: HWND, app: &App) -> Result<()> {
+/// Whether a launch goes into Windows's history.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Usage {
+    /// Not something the user asked for just now (`start`/`exit` events),
+    /// `history="false"`, or asked not to be recorded this once.
+    Silent,
+    /// Recorded, unless the app says `shell="false"`.
+    Logged,
+    /// Recorded whatever the app says, through the shell: the user asked for
+    /// it, this once.
+    Forced,
+}
+
+/// Extensions of what Windows does not list among recent files: programs, and
+/// shortcuts, whose target it would have to be told about instead.
+const NOT_DOCUMENTS: [&str; 6] = ["exe", "com", "bat", "cmd", "msc", "lnk"];
+
+pub fn launch(hwnd: HWND, app: &App, usage: Usage) -> Result<()> {
+    let logged = logs(app, usage);
     if let Some(app_id) = &app.app_id {
+        if logged {
+            return open_item(hwnd, &format!(r"shell:AppsFolder\{app_id}"), false, true);
+        }
         return launch_packaged(app_id);
     }
 
@@ -45,11 +77,52 @@ pub fn launch(hwnd: HWND, app: &App) -> Result<()> {
     let param = app.param.as_deref().map(expand_lazy);
     let path = app.path.as_deref().map(expand_lazy);
 
-    if app.shell || app.elevate {
-        shell_execute(hwnd, &exe, param.as_deref(), path.as_deref(), app.elevate)
+    if app.shell == Some(true) || app.elevate || logged {
+        shell_execute(
+            hwnd,
+            &exe,
+            param.as_deref(),
+            path.as_deref(),
+            app.elevate,
+            logged,
+        )?;
     } else {
-        create_process(&exe, param.as_deref(), path.as_deref())
+        create_process(&exe, param.as_deref(), path.as_deref())?;
     }
+    if logged && is_document(&exe) {
+        y_core::recent::add_file(Path::new(&exe));
+    }
+    Ok(())
+}
+
+/// Whether launching `app` this way tells Windows.
+fn logs(app: &App, usage: Usage) -> bool {
+    match usage {
+        Usage::Silent => false,
+        Usage::Logged => app.shell != Some(false),
+        Usage::Forced => true,
+    }
+}
+
+/// Opens `target` (a path, or an address such as `shell:AppsFolder\…`) through
+/// the shell, telling Windows if `logged`. For the items of the history, which
+/// are no [`App`].
+pub fn open_item(hwnd: HWND, target: &str, elevate: bool, logged: bool) -> Result<()> {
+    shell_execute(hwnd, target, None, None, elevate, logged)
+}
+
+/// Whether `file` is something Windows lists among recent files: not a
+/// program, and not an address (`https://…`, `mailto:…`), which is no file.
+fn is_document(file: &str) -> bool {
+    let address = file
+        .split_once(':')
+        .is_some_and(|(scheme, _)| scheme.len() > 1);
+    !address
+        && !Path::new(file).extension().is_some_and(|extension| {
+            NOT_DOCUMENTS
+                .iter()
+                .any(|known| extension.eq_ignore_ascii_case(known))
+        })
 }
 
 /// Expands `%clipboard%`/`%clipboards%` — the one pair of tokens
@@ -131,6 +204,7 @@ fn shell_execute(
     param: Option<&str>,
     path: Option<&str>,
     elevate: bool,
+    logged: bool,
 ) -> Result<()> {
     let exe = HSTRING::from(exe);
     let param = param.map(HSTRING::from);
@@ -142,7 +216,11 @@ fn shell_execute(
         // Owns the process handle back to us so we can close it — without
         // this flag the shell closes it itself and `info.hProcess` is
         // useless, which would leak a handle if we tried to close it anyway.
-        fMask: SEE_MASK_NOCLOSEPROCESS,
+        fMask: if logged {
+            SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_LOG_USAGE
+        } else {
+            SEE_MASK_NOCLOSEPROCESS
+        },
         hwnd,
         lpVerb: pcwstr(verb.as_ref()),
         lpFile: PCWSTR(exe.as_ptr()),
@@ -224,4 +302,45 @@ fn launch_packaged(app_id: &str) -> Result<()> {
 
 fn pcwstr(value: Option<&HSTRING>) -> PCWSTR {
     value.map_or(PCWSTR::null(), |value| PCWSTR(value.as_ptr()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Usage, is_document, logs};
+    use crate::model::{App, EventMask};
+
+    fn app(shell: Option<bool>) -> App {
+        App {
+            exe: None,
+            app_id: None,
+            param: None,
+            path: None,
+            shell,
+            elevate: false,
+            events: EventMask::default(),
+            browse: None,
+        }
+    }
+
+    #[test]
+    fn shell_false_is_only_recorded_when_the_user_insists() {
+        assert!(logs(&app(None), Usage::Logged), "no attribute: recorded");
+        assert!(logs(&app(Some(true)), Usage::Logged));
+        assert!(!logs(&app(Some(false)), Usage::Logged));
+        assert!(logs(&app(Some(false)), Usage::Forced));
+        assert!(!logs(&app(None), Usage::Silent));
+        assert!(!logs(&app(Some(true)), Usage::Silent));
+    }
+
+    #[test]
+    fn a_file_is_a_document_a_program_or_an_address_is_not() {
+        assert!(is_document(r"C:\Docs\report.docx"));
+        assert!(is_document(r"C:\Docs"));
+        assert!(is_document(r"\\host\share\notes.txt"));
+        assert!(!is_document(r"C:\Tools\tool.EXE"));
+        assert!(!is_document(r"C:\Start\Word.lnk"));
+        assert!(!is_document("notepad.exe"));
+        assert!(!is_document("https://example.com/page.html"));
+        assert!(!is_document("mailto:someone@example.com"));
+    }
 }

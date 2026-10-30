@@ -635,9 +635,10 @@ fn launch_app_expands_and_settles_the_shell_choice() {
     assert_eq!(a.exe.as_deref(), Some(r"C:\Windows\notepad.exe"));
     assert_eq!(a.param.as_deref(), Some("-x %clipboard%"));
     assert_eq!(a.path.as_deref(), Some(r"C:\Windows"));
-    assert!(a.shell && !a.elevate && a.events.contains(crate::model::EventMask::START));
+    assert!(a.shell == Some(true) && !a.elevate);
+    assert!(a.events.contains(crate::model::EventMask::START));
     let b = settings.launch_app(apps[1], &mut builtins());
-    assert!(!b.shell && b.elevate);
+    assert!(b.shell != Some(true) && b.elevate);
 }
 
 const WITH_SEARCH: &str = r#"<?xml version="1.0" encoding="utf-8"?>

@@ -836,6 +836,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             [
                 ("open", "Enter"),
+                ("open-toggle-history", "Ctrl+Shift+Enter"),
                 ("reveal", "Ctrl+R"),
                 ("edit", "Ctrl+E"),
                 ("forget", "Ctrl+Del")

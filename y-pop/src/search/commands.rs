@@ -8,7 +8,6 @@ pub enum Command {
     OpenSettings,
     EditConfig,
     OpenFolder,
-    ClearHistory,
     /// Registers y-pop to start at logon, or takes that away.
     StartWithWindows,
     About,
@@ -18,12 +17,11 @@ pub enum Command {
 impl Command {
     /// In the order the list shows them. (*Refresh the Start menu* and *Reload
     /// plugins* of the spec join when there is a Start menu and plugins.)
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 7] = [
         Self::Reload,
         Self::OpenSettings,
         Self::EditConfig,
         Self::OpenFolder,
-        Self::ClearHistory,
         Self::StartWithWindows,
         Self::About,
         Self::Quit,
@@ -35,7 +33,6 @@ impl Command {
             Self::OpenSettings => "Open settings",
             Self::EditConfig => "Edit y-pop.xml",
             Self::OpenFolder => "Open configuration folder",
-            Self::ClearHistory => "Clear search history",
             Self::StartWithWindows => "Start with Windows",
             Self::About => "About",
             Self::Quit => "Quit",
@@ -49,7 +46,6 @@ impl Command {
             Self::OpenSettings => "Open y-pop-config",
             Self::EditConfig => "Open the file in its editor",
             Self::OpenFolder => "Show the folder of y-pop.xml in Explorer",
-            Self::ClearHistory => "Forget what was launched from search",
             Self::StartWithWindows => "Turn running y-pop at logon on or off",
             Self::About => "Version of y-pop",
             Self::Quit => "Close y-pop and its tray icons",
@@ -63,7 +59,6 @@ impl Command {
             Self::OpenSettings => "preferences options config",
             Self::EditConfig => "xml file text",
             Self::OpenFolder => "explorer directory",
-            Self::ClearHistory => "recent forget reset",
             Self::StartWithWindows => "startup logon autostart boot",
             Self::About => "version info",
             Self::Quit => "exit close",
