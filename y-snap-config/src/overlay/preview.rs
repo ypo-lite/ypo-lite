@@ -17,7 +17,6 @@ use super::palette::to_ui_color;
 use crate::keys;
 use crate::ui::prelude::*;
 use windows_reactor::*;
-use y_snap::action::Action;
 use y_snap::config::{Item, Overlay};
 
 /// One tile: a real [`Item`], or a glyph standing in for one of the tiles
@@ -135,7 +134,7 @@ fn sections(overlay: &Overlay) -> Vec<Section<'_>> {
             .iter()
             .filter(|item| item.group.as_deref() == Some(group.id.as_str()))
         {
-            if item.action == Action::DesktopList {
+            if item.action.is_desktop_list() {
                 tiles.extend(["1", "2", "3", "+", "◀", "▶"].map(Tile::Glyph));
             } else {
                 tiles.push(Tile::Item(item));

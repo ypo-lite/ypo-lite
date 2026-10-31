@@ -224,8 +224,14 @@ pub fn suggestions(action: Action) -> &'static [&'static str] {
         Action::DesktopPrev => &["◀️", "⬅️", "⏮️"],
         Action::DesktopNew => &["➕", "🆕", "🖥️"],
         Action::DesktopMove => &["🔀", "🖥️", "➡️"],
+        Action::DesktopMoveNext => &["➡️", "🔀", "⏭️"],
+        Action::DesktopMovePrev => &["⬅️", "🔀", "⏮️"],
+        Action::DesktopSend => &["📤", "🖥️", "➡️"],
+        Action::DesktopSendNext => &["➡️", "📤", "⏭️"],
+        Action::DesktopSendPrev => &["⬅️", "📤", "⏮️"],
         Action::PinToggle => &["📌", "📍", "🧷"],
         Action::DesktopList => &["🗂️", "🖥️", "🔢"],
+        Action::DesktopSendList => &["📤", "🗂️", "🖥️"],
     }
 }
 

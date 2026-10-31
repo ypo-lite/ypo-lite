@@ -28,7 +28,7 @@ use y_snap::ipc;
 
 use windows::Win32::UI::{
     Shell::ShellExecuteW,
-    WindowsAndMessaging::{PostMessageW, SW_SHOWNORMAL, WM_CLOSE, WM_HOTKEY, WM_TIMER},
+    WindowsAndMessaging::{IsWindow, PostMessageW, SW_SHOWNORMAL, WM_CLOSE, WM_HOTKEY, WM_TIMER},
 };
 use windows::core::HSTRING;
 
@@ -165,7 +165,12 @@ impl YSnap {
         }
 
         self.mouse_hook =
-            match mouse::MouseHook::install(hwnd, settings.mouse, &settings.min_button) {
+            match mouse::MouseHook::install(
+                hwnd,
+                settings.mouse,
+                &settings.mouse_shortcuts,
+                &settings.min_button,
+            ) {
                 Ok(hook) => Some(hook),
                 Err(error) => {
                     let message = format!("Could not install the mouse hook: {error}");
@@ -288,7 +293,53 @@ impl YSnap {
             return;
         };
 
-        match binding.action {
+        let window = binding
+            .action
+            .needs_window()
+            .then(|| target::resolve(binding.target))
+            .flatten();
+
+        self.fire(hwnd, binding.action, window, binding.desktop, false);
+    }
+
+    /// A mouse shortcut fired. The hook already chose the window, at the
+    /// press (`window` is null for an action that needs none).
+    fn on_mouse_shortcut(&mut self, hwnd: HWND, index: usize, window: HWND) {
+        // A reload may have shortened the list between the post and now.
+        let Some(binding) = self
+            .settings
+            .as_ref()
+            .and_then(|settings| settings.mouse_shortcuts.get(index))
+            .copied()
+        else {
+            return;
+        };
+
+        let window = if binding.action.needs_window() {
+            // `close` can race the next click: the window may be gone.
+            if !unsafe { IsWindow(Some(window)) }.as_bool() {
+                return;
+            }
+            Some(window)
+        } else {
+            None
+        };
+        self.fire(hwnd, binding.action, window, binding.desktop, true);
+    }
+
+    /// Does `action`, whichever way it was triggered. `window` is the
+    /// already-resolved target, `None` when the action needs none or nothing
+    /// eligible was found. `from_mouse` is a trigger with no input of its own
+    /// for Windows to grant the foreground by — see [`overlay::ActionOverlay::show`].
+    fn fire(
+        &mut self,
+        hwnd: HWND,
+        action: Action,
+        window: Option<HWND>,
+        desktop: u32,
+        from_mouse: bool,
+    ) {
+        match action {
             Action::Quit => self.quit(hwnd),
             Action::Reload => self.load(hwnd),
 
@@ -296,21 +347,15 @@ impl YSnap {
             // a target — same reason Quit/Reload are handled here rather
             // than in `actions::dispatch`.
             Action::Overlay => {
-                let Some(window) = target::resolve(binding.target) else {
+                let Some(window) = window else {
                     return;
                 };
                 if let Some(action_overlay) = self.action_overlay.as_mut() {
-                    let _ = action_overlay.show(window);
+                    let _ = action_overlay.show(window, from_mouse);
                 }
             }
 
-            action => {
-                let window = action
-                    .needs_window()
-                    .then(|| target::resolve(binding.target))
-                    .flatten();
-                self.perform(action, window, binding.desktop);
-            }
+            action => self.perform(action, window, desktop),
         }
     }
 
@@ -749,6 +794,11 @@ impl TrayApp for YSnap {
 
             mouse::WM_MIN_RIGHTCLICK => {
                 self.on_min_rightclick(HWND(wparam.0 as *mut _));
+                Some(LRESULT(0))
+            }
+
+            mouse::WM_MOUSE_SHORTCUT => {
+                self.on_mouse_shortcut(hwnd, wparam.0, HWND(lparam.0 as *mut _));
                 Some(LRESULT(0))
             }
 

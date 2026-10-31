@@ -13,7 +13,7 @@ use y_snap::config::Binding;
 
 /// Every [`Action`] a hotkey (or gesture) can be bound to, in combo-box
 /// order. Not [`Action::DesktopList`] — see [`crate::overlay::OVERLAY_ACTIONS`].
-pub const ACTIONS: [Action; 21] = [
+pub const ACTIONS: [Action; 26] = [
     Action::Overlay,
     Action::Reload,
     Action::Quit,
@@ -34,6 +34,11 @@ pub const ACTIONS: [Action; 21] = [
     Action::DesktopPrev,
     Action::DesktopNew,
     Action::DesktopMove,
+    Action::DesktopMoveNext,
+    Action::DesktopMovePrev,
+    Action::DesktopSend,
+    Action::DesktopSendNext,
+    Action::DesktopSendPrev,
     Action::PinToggle,
 ];
 
@@ -129,7 +134,7 @@ fn cells(
         ))
         .tooltip("Change the key combination");
 
-    let desktop: View = if binding.action == Action::DesktopMove {
+    let desktop: View = if binding.action.takes_desktop() {
         number_box(
             (binding.desktop != 0).then_some(binding.desktop.into()),
             1.0,

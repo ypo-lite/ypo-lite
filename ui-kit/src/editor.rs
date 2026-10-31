@@ -27,9 +27,21 @@ pub fn editor(
     on_cancel: Callback<()>,
     on_done: Callback<()>,
 ) -> View {
+    editor_checked(title, body, true, on_cancel, on_done)
+}
+
+/// [`editor`] whose Done can be disabled while what is being edited is not
+/// acceptable (`done_enabled: false`). Cancel always works.
+pub fn editor_checked(
+    title: impl Into<String>,
+    body: impl Into<View>,
+    done_enabled: bool,
+    on_cancel: Callback<()>,
+    on_done: Callback<()>,
+) -> View {
     let actions = Stack::horizontal(space::S)
         .child("cancel", button("Cancel", false, true, on_cancel))
-        .child("done", button("Done", true, true, on_done));
+        .child("done", button("Done", true, done_enabled, on_done));
     panel(title, Some(actions.into()), body)
 }
 

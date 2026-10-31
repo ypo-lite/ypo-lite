@@ -61,7 +61,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent, VIRTUAL_KEY, VK_1, VK_ESCAPE,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    PostMessageW, WM_KEYDOWN, WM_KILLFOCUS, WM_LBUTTONUP, WM_MOUSEMOVE, WM_SYSKEYDOWN,
+    GetForegroundWindow, PostMessageW, WM_KEYDOWN, WM_KILLFOCUS, WM_LBUTTONUP, WM_MOUSEMOVE, WM_SYSKEYDOWN,
 };
 use y_core::{
     Result,
@@ -186,7 +186,17 @@ impl ActionOverlay {
     /// of it), and that would post a [`WM_OVERLAY_CLOSE`] which — arriving
     /// only after this call returns — would close the *new* target's
     /// overlay right back down again.
-    pub fn show(&mut self, window: HWND) -> Result<()> {
+    ///
+    /// `grant_foreground` is for a caller that has no input to its name — a
+    /// mouse shortcut, whose click the hook swallowed. `WM_HOTKEY` lets a
+    /// process take the foreground; a swallowed click does not, and Probe B
+    /// (`docs/mouse-shortcuts-plan.md`) saw Windows refuse. A synthetic key
+    /// tap just before `activate` is what got it granted.
+    ///
+    /// Whatever the caller, an overlay that still did not get the foreground
+    /// is closed again: without focus its keys do nothing and
+    /// `WM_KILLFOCUS` never comes, so it could not be dismissed.
+    pub fn show(&mut self, window: HWND, grant_foreground: bool) -> Result<()> {
         // Re-lay-out only when the live desktop count actually moved since
         // the last time — a desktop created or removed while the overlay
         // was closed. Dropping `self.overlay` forces the "build the popup"
@@ -254,7 +264,18 @@ impl ActionOverlay {
         // to actually hold the keyboard focus — see this module's doc
         // comment on why, and [`Overlay::activate`] for why show_at alone
         // does not do it.
+        if grant_foreground {
+            y_core::hotkey::absorb_modifier_tap();
+        }
         overlay.activate();
+
+        // The safety net: a popup nobody can dismiss is worse than a
+        // shortcut that did nothing.
+        let focused = unsafe { GetForegroundWindow() } == overlay.hwnd();
+        if !focused {
+            self.close();
+            return Ok(());
+        }
 
         if self.config.focus_border {
             self.show_border(window)?;
@@ -619,7 +640,7 @@ fn point_in(rect: RECT, pt: POINT) -> bool {
 /// borrowed mutably (for the canvas it is drawing into), so it takes the one
 /// field it needs by value instead of borrowing all of `self` again.
 fn is_current_desktop(current_desktop: Option<u32>, item: &Item) -> bool {
-    item.action == Action::DesktopMove
+    item.action.takes_desktop()
         && current_desktop.is_some_and(|index| index + 1 == item.desktop)
 }
 
@@ -649,7 +670,7 @@ fn layout(config: &OverlayConfig, desktop_count: u32) -> (Vec<Tile>, Vec<Item>, 
         .items
         .iter()
         .flat_map(|item| {
-            if item.action == Action::DesktopList {
+            if item.action.is_desktop_list() {
                 expand_desktop_list(item, desktop_count)
             } else {
                 vec![item.clone()]
@@ -727,10 +748,17 @@ fn layout(config: &OverlayConfig, desktop_count: u32) -> (Vec<Tile>, Vec<Item>, 
 /// resource" fallback in this codebase, and there is no realistic grid this
 /// wide to begin with).
 fn expand_desktop_list(source: &Item, desktop_count: u32) -> Vec<Item> {
+    // `desktop-list` tiles follow the window to its desktop, `desktop-send-list`
+    // ones leave you where you are.
+    let action = if source.action == Action::DesktopSendList {
+        Action::DesktopSend
+    } else {
+        Action::DesktopMove
+    };
     (1..=desktop_count)
         .map(|desktop| Item {
             key: desktop_key(desktop),
-            action: Action::DesktopMove,
+            action,
             label: Some(desktop.to_string()),
             label_on: None,
             icon: source.icon.clone(),
@@ -938,6 +966,26 @@ mod tests {
             assert_eq!(item.group.as_deref(), Some("desktops"));
             assert_eq!(item.icon.as_deref(), Some("\u{e8a9}"));
         }
+    }
+
+    #[test]
+    fn desktop_send_list_expands_into_send_tiles() {
+        let mut source = desktop_list_item();
+        source.action = Action::DesktopSendList;
+        let config = OverlayConfig {
+            items: vec![source],
+            ..OverlayConfig::default()
+        };
+
+        let (_tiles, items, _size) = layout(&config, 3);
+
+        assert_eq!(items.len(), 3);
+        for (index, item) in items.iter().enumerate() {
+            assert_eq!(item.action, Action::DesktopSend);
+            assert_eq!(item.desktop, index as u32 + 1);
+        }
+        // Sending to the desktop you are on is as pointless as moving to it.
+        assert!(is_current_desktop(Some(1), &items[1]));
     }
 
     #[test]

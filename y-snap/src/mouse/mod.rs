@@ -58,18 +58,26 @@ use windows::Win32::{
         CallNextHookEx, GetCursorPos, HC_ACTION, HHOOK, KillTimer, MSLLHOOKSTRUCT, PostMessageW,
         SWP_NOACTIVATE, SWP_NOZORDER, SetTimer, SetWindowPos, SetWindowsHookExW,
         UnhookWindowsHookEx, WH_MOUSE_LL, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN,
-        WM_MBUTTONUP, WM_MOUSEMOVE, WM_RBUTTONDOWN, WM_RBUTTONUP,
+        WM_MBUTTONUP, WM_MOUSEHWHEEL, WM_MOUSEMOVE, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_XBUTTONDOWN,
+        WM_XBUTTONUP,
+    },
+    UI::Input::KeyboardAndMouse::{
+        GetAsyncKeyState, HOT_KEY_MODIFIERS, MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN,
+        VIRTUAL_KEY, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
     },
 };
 use windows::core::Result;
 use y_core::ids::WM_APP_FIRST;
 
-use crate::config::{Button, Mouse};
+use crate::action::Target;
+use crate::config::{Button, Mouse, MouseShortcut, MouseTrigger};
+use crate::target;
 
 mod geometry;
 mod gesture;
 mod hover;
 mod modifier_guard;
+mod shortcut;
 
 pub use geometry::visual_window_rect;
 pub use hover::{confirm_min_button, min_button_rect};
@@ -87,6 +95,13 @@ pub const WM_MIN_HOVER: u32 = WM_APP_FIRST;
 /// off, the same minimize button. `wParam` is the target `HWND`. Handled by
 /// `crate`'s own `on_min_rightclick`.
 pub const WM_MIN_RIGHTCLICK: u32 = WM_APP_FIRST + 3;
+
+/// Posted to the owner window when a mouse shortcut fires. `wParam` is the
+/// index into the list given to [`MouseHook::install`], `lParam` the target
+/// `HWND` (null for an action that needs no window). The window was chosen in
+/// the hook, at the press: resolving it later could pick another one if the
+/// pointer had moved on. Handled by `crate`'s own `on_mouse_shortcut`.
+pub const WM_MOUSE_SHORTCUT: u32 = WM_APP_FIRST + 8;
 
 /// Posted to the owner window when a drag or resize in progress has a new
 /// target rect to apply. The window and rect are read from
@@ -171,12 +186,14 @@ impl MouseHook {
     pub fn install(
         owner: HWND,
         mouse: Mouse,
+        shortcuts: &[MouseShortcut],
         min_button: &crate::config::MinButton,
     ) -> Result<Self> {
         STATE.with(|cell| {
             *cell.borrow_mut() = Some(HookState {
                 owner,
                 gesture: gesture::Gesture::new(mouse),
+                shortcuts: shortcut::Shortcuts::new(shortcuts),
                 hover: hover::Hover::new(
                     owner,
                     min_button.hover_delay_ms,
@@ -270,6 +287,7 @@ pub fn take_min_hover_target() -> HWND {
 struct HookState {
     owner: HWND,
     gesture: gesture::Gesture,
+    shortcuts: shortcut::Shortcuts,
     hover: hover::Hover,
 }
 
@@ -303,6 +321,85 @@ fn with_state_bool(body: impl FnOnce(&mut HookState) -> bool) -> bool {
 }
 
 impl HookState {
+    /// A mouse button went down. True when a shortcut claims the press.
+    fn on_press(&mut self, trigger: MouseTrigger, pt: POINT) -> bool {
+        if !self.shortcuts.uses(trigger) {
+            return false;
+        }
+        let modifiers = modifiers_held();
+        match self
+            .shortcuts
+            .press(trigger, modifiers, self.gesture.active())
+        {
+            shortcut::Press::Pass => false,
+            shortcut::Press::Swallow => true,
+            shortcut::Press::Fire(index) => self.fire(index, trigger, modifiers, Some(pt)),
+        }
+    }
+
+    /// The wheel was tilted. True when a shortcut claims the event.
+    fn on_tilt(&mut self, trigger: MouseTrigger, time: u32) -> bool {
+        if !self.shortcuts.uses(trigger) {
+            return false;
+        }
+        let modifiers = modifiers_held();
+        match self
+            .shortcuts
+            .tilt(trigger, modifiers, time, self.gesture.active())
+        {
+            shortcut::Press::Pass => false,
+            shortcut::Press::Swallow => true,
+            shortcut::Press::Fire(index) => self.fire(index, trigger, modifiers, None),
+        }
+    }
+
+    /// Resolves the window and posts [`WM_MOUSE_SHORTCUT`]: the part of a
+    /// shortcut that cannot be pure. A slice scan and a `PostMessageW`, as the
+    /// hook's time budget requires. `pt` is the press position, absent for a
+    /// tilt, which has to use the cursor.
+    fn fire(
+        &mut self,
+        index: usize,
+        trigger: MouseTrigger,
+        modifiers: HOT_KEY_MODIFIERS,
+        pt: Option<POINT>,
+    ) -> bool {
+        let Some(binding) = self.shortcuts.binding(index).copied() else {
+            return false;
+        };
+
+        // Armed before anything can pass the click on: a lone `Win` or `Alt`
+        // release left behind would open Start or the system menu.
+        modifier_guard::arm(modifiers);
+
+        let mut window = HWND::default();
+        if binding.action.needs_window() {
+            let found = match (binding.target, pt) {
+                (Target::Pointed, Some(pt)) => target::at(pt),
+                (Target::Pointed, None) => target::pointed(),
+                (Target::Focused, _) => target::focused(),
+            };
+            match found {
+                Some(found) => window = found,
+                None => {
+                    // Nothing eligible: the event goes through untouched.
+                    self.shortcuts.unclaim(trigger);
+                    return false;
+                }
+            }
+        }
+
+        let _ = unsafe {
+            PostMessageW(
+                Some(self.owner),
+                WM_MOUSE_SHORTCUT,
+                WPARAM(index),
+                LPARAM(window.0 as isize),
+            )
+        };
+        true
+    }
+
     /// A drag or resize in progress owns the pointer entirely; hover
     /// tracking only runs when neither is.
     fn on_move(&mut self, pt: POINT) {
@@ -324,26 +421,60 @@ unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) 
                 with_state(|state| state.on_move(info.pt));
                 false
             }
-            WM_LBUTTONDOWN => {
-                with_state_bool(|state| state.gesture.on_button_down(Button::Left, info.pt))
-            }
-            WM_LBUTTONUP => with_state_bool(|state| state.gesture.on_button_up(Button::Left)),
+            WM_LBUTTONDOWN => with_state_bool(|state| {
+                state.on_press(MouseTrigger::Left, info.pt)
+                    || state.gesture.on_button_down(Button::Left, info.pt)
+            }),
+            WM_LBUTTONUP => with_state_bool(|state| {
+                state.shortcuts.release(MouseTrigger::Left)
+                    || state.gesture.on_button_up(Button::Left)
+            }),
             // A minimize-button right-click gets first refusal — it only
             // ever claims the event when it actually hits a button and the
             // feature is configured on, so an Alt+Right resize started over
             // one (an edge case, not the common shape of either gesture) is
             // never shadowed by it.
             WM_RBUTTONDOWN => with_state_bool(|state| {
-                state.hover.on_right_down(info.pt)
+                state.on_press(MouseTrigger::Right, info.pt)
+                    || state.hover.on_right_down(info.pt)
                     || state.gesture.on_button_down(Button::Right, info.pt)
             }),
             WM_RBUTTONUP => with_state_bool(|state| {
-                state.hover.on_right_up(info.pt) || state.gesture.on_button_up(Button::Right)
+                state.shortcuts.release(MouseTrigger::Right)
+                    || state.hover.on_right_up(info.pt)
+                    || state.gesture.on_button_up(Button::Right)
             }),
-            WM_MBUTTONDOWN => {
-                with_state_bool(|state| state.gesture.on_button_down(Button::Middle, info.pt))
-            }
-            WM_MBUTTONUP => with_state_bool(|state| state.gesture.on_button_up(Button::Middle)),
+            WM_MBUTTONDOWN => with_state_bool(|state| {
+                state.on_press(MouseTrigger::Middle, info.pt)
+                    || state.gesture.on_button_down(Button::Middle, info.pt)
+            }),
+            WM_MBUTTONUP => with_state_bool(|state| {
+                state.shortcuts.release(MouseTrigger::Middle)
+                    || state.gesture.on_button_up(Button::Middle)
+            }),
+            // Which side button is in the high word of `mouseData`.
+            WM_XBUTTONDOWN => match side_button(info.mouseData) {
+                Some(trigger) => with_state_bool(|state| state.on_press(trigger, info.pt)),
+                None => false,
+            },
+            WM_XBUTTONUP => match side_button(info.mouseData) {
+                Some(trigger) => with_state_bool(|state| state.shortcuts.release(trigger)),
+                None => false,
+            },
+            // The high word is the signed delta, positive for right. Plain
+            // `WM_MOUSEWHEEL` is left alone, so ordinary scrolling costs
+            // nothing new.
+            WM_MOUSEHWHEEL => match (info.mouseData >> 16) as i16 {
+                0 => false,
+                delta => {
+                    let trigger = if delta > 0 {
+                        MouseTrigger::WheelRight
+                    } else {
+                        MouseTrigger::WheelLeft
+                    };
+                    with_state_bool(|state| state.on_tilt(trigger, info.time))
+                }
+            },
             _ => false,
         };
 
@@ -353,4 +484,34 @@ unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) 
     }
 
     unsafe { CallNextHookEx(None, code, wparam, lparam) }
+}
+
+/// `XBUTTON1` or `XBUTTON2`, from the high word of a `WM_XBUTTON*` event's
+/// `mouseData`.
+fn side_button(mouse_data: u32) -> Option<MouseTrigger> {
+    match mouse_data >> 16 {
+        1 => Some(MouseTrigger::X1),
+        2 => Some(MouseTrigger::X2),
+        _ => None,
+    }
+}
+
+/// The modifier keys held right now, in [`y_core::hotkey`]'s vocabulary.
+fn modifiers_held() -> HOT_KEY_MODIFIERS {
+    let held = |key: VIRTUAL_KEY| unsafe { GetAsyncKeyState(key.0 as i32) } as u16 & 0x8000 != 0;
+
+    let mut modifiers = 0;
+    if held(VK_LWIN) || held(VK_RWIN) {
+        modifiers |= MOD_WIN.0;
+    }
+    if held(VK_CONTROL) {
+        modifiers |= MOD_CONTROL.0;
+    }
+    if held(VK_MENU) {
+        modifiers |= MOD_ALT.0;
+    }
+    if held(VK_SHIFT) {
+        modifiers |= MOD_SHIFT.0;
+    }
+    HOT_KEY_MODIFIERS(modifiers)
 }

@@ -98,6 +98,11 @@ fn is_banished(window: HWND) -> bool {
         "MultitaskingViewFrame",
         "TaskListThumbnailWnd",
         "XamlExplorerHostIslandWindow",
+        // y-snap's own popups: a mouse shortcut clicked over the open
+        // overlay must not act on the overlay itself.
+        "YpoLite.YSnap.Overlay",
+        "YpoLite.YSnap.OverlayBorder",
+        "YpoLite.YSnap.MinButton",
         // Transient UI that is nobody's window.
         "tooltips_class32",
         "#32768", // a menu

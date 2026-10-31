@@ -29,10 +29,10 @@ use y_snap::action::Action;
 use y_snap::config::Overlay;
 
 /// Every [`Action`] an overlay tile can be bound to — [`crate::hotkeys::
-/// ACTIONS`] plus [`Action::DesktopList`], which only means something on a
+/// ACTIONS`] plus [`Action::DesktopList`] and [`Action::DesktopSendList`], which only mean something on a
 /// tile (it expands into one tile per virtual desktop when the overlay
 /// opens).
-pub const OVERLAY_ACTIONS: [Action; 22] = [
+pub const OVERLAY_ACTIONS: [Action; 28] = [
     Action::Overlay,
     Action::Reload,
     Action::Quit,
@@ -53,8 +53,14 @@ pub const OVERLAY_ACTIONS: [Action; 22] = [
     Action::DesktopPrev,
     Action::DesktopNew,
     Action::DesktopMove,
+    Action::DesktopMoveNext,
+    Action::DesktopMovePrev,
+    Action::DesktopSend,
+    Action::DesktopSendNext,
+    Action::DesktopSendPrev,
     Action::PinToggle,
     Action::DesktopList,
+    Action::DesktopSendList,
 ];
 
 /// One of this screen's four tabs.

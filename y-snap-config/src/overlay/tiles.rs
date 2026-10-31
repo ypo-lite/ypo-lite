@@ -215,11 +215,11 @@ fn tile_editor(
                 ),
             ),
         );
-    if item.action == Action::DesktopMove {
+    if item.action.takes_desktop() {
         fields = fields.item(
             "desktop",
             field(
-                "Move to desktop",
+                "Desktop",
                 number_box(
                     (item.desktop != 0).then_some(item.desktop.into()),
                     1.0,
@@ -230,7 +230,7 @@ fn tile_editor(
         );
     }
 
-    let key: View = if item.action == Action::DesktopList {
+    let key: View = if item.action.is_desktop_list() {
         note(
             "A desktop-list tile has no key of its own: it becomes one tile per virtual desktop, keyed 1, 2, 3….",
         )

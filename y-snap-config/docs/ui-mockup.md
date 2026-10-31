@@ -9,11 +9,12 @@ preview of the real thing (WinUI's actual Fluent controls look different).
 Also published as a Claude Artifact for easier iteration:
 <https://claude.ai/code/artifact/5f33aa86-6db8-4d3c-ade2-a969a7ce639c>
 
-Four screens, behind a left nav rail — the same shape `main.rs` now uses for
+Five screens, behind a left nav rail — the same shape `main.rs` now uses for
 real:
 
 - **Hotkeys** — table of key combo / action / target / desktop / steal-from-shell.
 - **Mouse gestures** — one card per gesture (drag/resize): button + modifier chips.
+- **Mouse shortcuts** — table of trigger / action / target / desktop; the trigger opens an editor with modifier chips and Button / Wheel tilt / Side button groups. Not in the HTML mock (it postdates it).
 - **Action overlay** — the one screen worth mocking for real: layout fields,
   palette swatches and the tile list on the left, a live preview on the
   right that mirrors the actual popup's tile grid (including the per-desktop

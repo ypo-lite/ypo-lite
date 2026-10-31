@@ -17,6 +17,14 @@
 IDI_APP_ICON ICON "y-snap.ico"
 
 /////////////////////////////////////////////////////////////////////////////
+// Application manifest
+//
+// 1  = CREATEPROCESS_MANIFEST_RESOURCE_ID
+// 24 = RT_MANIFEST
+
+1 24 "y-snap.exe.manifest"
+
+/////////////////////////////////////////////////////////////////////////////
 // Version information (Explorer's "Details" tab)
 
 1 VERSIONINFO

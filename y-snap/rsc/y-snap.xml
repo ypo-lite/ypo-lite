@@ -13,6 +13,14 @@
 	<!--
 		Mouse gestures: hold the modifiers and use the button anywhere in a
 		window, no need to aim for its title bar or its edge.
+
+		Mouse shortcuts: a modifier plus a button, a wheel tilt or a side
+		button fires one action. Left out below so a fresh install changes no
+		mouse behaviour; see README.md for what each attribute does.
+
+		<shortcut button="middle"      mod="Win"  action="overlay"/>
+		<shortcut button="wheel-right" mod="none" action="pin-toggle"/>
+		<shortcut button="x1"          mod="Alt"  action="desktop-move" desktop="2"/>
 	-->
 	<mouse>
 		<drag   button="left"  mod="Alt"/>
@@ -72,8 +80,8 @@
 		<action key="P" action="center-cursor" label="Center cursor" icon="🎯"/>
 
 		<action key="N"     action="desktop-new"  label="New desktop"  icon="➕"/>
-		<action key="Left"  action="desktop-prev" label="Prev desktop" icon="◀️"/>
-		<action key="Right" action="desktop-next" label="Next desktop" icon="▶️"/>
+		<action key="Left"  action="desktop-send-prev" label="Prev desktop" icon="⏮️"/>
+		<action key="Right" action="desktop-send-next" label="Next desktop" icon="⏭️"/>
 
 		<!--
 			Expands into one tile per virtual desktop when the overlay opens,

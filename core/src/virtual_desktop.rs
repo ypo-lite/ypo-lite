@@ -724,19 +724,28 @@ fn switch_desktop_generic<M: ShapeOps>(
     move_window: Option<HWND>,
 ) -> Result<()> {
     let next = adjacent(manager, dir)?;
+    switch_to_desktop(manager, view_collection, &next, move_window)
+}
 
+/// Switches to `next`, carrying `move_window` along first.
+fn switch_to_desktop<M: ShapeOps>(
+    manager: &M,
+    view_collection: Option<&legacy::IApplicationViewCollection>,
+    next: &M::Desktop,
+    move_window: Option<HWND>,
+) -> Result<()> {
     // Move first, same as HulK: the destination desktop should already have
     // the window on it by the time `SwitchDesktop` makes it visible.
     if let (Some(hwnd), Some(collection)) = (move_window, view_collection) {
         let mut raw = core::ptr::null_mut();
         if unsafe { collection.GetViewForHwnd(hwnd, &mut raw) }.is_ok() && !raw.is_null() {
             let view = unsafe { legacy::IApplicationView::from_raw(raw) };
-            let _ = manager.move_view_to_desktop(&view, &next);
+            let _ = manager.move_view_to_desktop(&view, next);
         }
     }
 
     with_parked_focus(|| {
-        let _ = manager.switch_desktop(&next);
+        let _ = manager.switch_desktop(next);
     });
 
     Ok(())
@@ -790,6 +799,19 @@ impl Manager {
             }
             ManagerHandle::Modern(m) => {
                 switch_desktop_generic(m, self.view_collection.as_ref(), dir, move_window)
+            }
+        }
+    }
+
+    fn switch_to_index(&self, index: u32, move_window: Option<HWND>) -> Result<()> {
+        match &self.handle {
+            ManagerHandle::Legacy(m) => {
+                let desktop = unsafe { m.desktops()?.GetAt(index)? };
+                switch_to_desktop(m, self.view_collection.as_ref(), &desktop, move_window)
+            }
+            ManagerHandle::Modern(m) => {
+                let desktop = unsafe { m.desktops()?.GetAt(index)? };
+                switch_to_desktop(m, self.view_collection.as_ref(), &desktop, move_window)
             }
         }
     }
@@ -887,6 +909,12 @@ pub fn current_desktop_index() -> Option<u32> {
 /// foreground-window dance this does around the actual switch.
 pub fn switch(dir: Direction, move_window: Option<HWND>) -> Result<()> {
     with_manager(|manager| manager.switch(dir, move_window))
+}
+
+/// Switches to the desktop at `index` (0-based), carrying `move_window` along
+/// first, as [`switch`] does.
+pub fn switch_to(index: u32, move_window: Option<HWND>) -> Result<()> {
+    with_manager(|manager| manager.switch_to_index(index, move_window))
 }
 
 /// Creates a new virtual desktop. Does not switch to it.

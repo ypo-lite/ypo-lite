@@ -33,7 +33,7 @@ pub mod viewport;
 /// Everything a screen module normally needs, in one `use`.
 pub mod prelude {
     pub use super::controls::*;
-    pub use super::editor::editor;
+    pub use super::editor::{editor, editor_checked};
     pub use super::layout::{AutoGrid, Fill, Split, Stack, cell, scroll_y};
     pub use super::surfaces::{CARD_INSET, card, note, page, panel, section, setting};
     pub use super::table::{Column, Row, Table};

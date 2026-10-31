@@ -51,12 +51,28 @@ pub enum Action {
     DesktopNext,
     DesktopPrev,
     DesktopNew,
-    /// Move the window to the desktop named by the `desktop` attribute.
+    /// Move the window to the desktop named by the `desktop` attribute, and
+    /// switch to that desktop.
     DesktopMove,
+    /// Move the window to the next desktop (wrapping from the last to the
+    /// first) and switch to it.
+    DesktopMoveNext,
+    /// Move the window to the previous desktop (wrapping from the first to the
+    /// last) and switch to it.
+    DesktopMovePrev,
+    /// Like `desktop-move`, but stay on the current desktop.
+    DesktopSend,
+    /// Like `desktop-move-next`, but stay on the current desktop.
+    DesktopSendNext,
+    /// Like `desktop-move-prev`, but stay on the current desktop.
+    DesktopSendPrev,
     /// Only on an overlay tile: expands into one tile per virtual desktop
     /// when the overlay opens, so the tiles follow desktops being created and
     /// removed instead of having to be written out by hand.
     DesktopList,
+    /// Like `desktop-list`, but the tiles `desktop-send` instead of
+    /// `desktop-move`: they send the window and stay on the current desktop.
+    DesktopSendList,
     /// Show the window on every desktop, or only on its own.
     PinToggle,
 }
@@ -88,7 +104,13 @@ impl Action {
             "desktop-prev" => Self::DesktopPrev,
             "desktop-new" => Self::DesktopNew,
             "desktop-move" => Self::DesktopMove,
+            "desktop-move-next" => Self::DesktopMoveNext,
+            "desktop-move-prev" => Self::DesktopMovePrev,
+            "desktop-send" => Self::DesktopSend,
+            "desktop-send-next" => Self::DesktopSendNext,
+            "desktop-send-prev" => Self::DesktopSendPrev,
             "desktop-list" => Self::DesktopList,
+            "desktop-send-list" => Self::DesktopSendList,
             "pin-toggle" => Self::PinToggle,
 
             _ => return None,
@@ -118,7 +140,13 @@ impl Action {
             Self::DesktopPrev => "desktop-prev",
             Self::DesktopNew => "desktop-new",
             Self::DesktopMove => "desktop-move",
+            Self::DesktopMoveNext => "desktop-move-next",
+            Self::DesktopMovePrev => "desktop-move-prev",
+            Self::DesktopSend => "desktop-send",
+            Self::DesktopSendNext => "desktop-send-next",
+            Self::DesktopSendPrev => "desktop-send-prev",
             Self::DesktopList => "desktop-list",
+            Self::DesktopSendList => "desktop-send-list",
             Self::PinToggle => "pin-toggle",
         }
     }
@@ -137,6 +165,18 @@ impl Action {
                 | Self::DesktopPrev
                 | Self::DesktopNew
         )
+    }
+
+    /// Whether the action reads the `desktop` attribute: the numbered pair,
+    /// as opposed to `-next`/`-prev`, which go by the current desktop.
+    pub fn takes_desktop(self) -> bool {
+        matches!(self, Self::DesktopMove | Self::DesktopSend)
+    }
+
+    /// `desktop-list` or `desktop-send-list`: not a tile but a generator of
+    /// them, one per virtual desktop, only meaningful on an overlay.
+    pub fn is_desktop_list(self) -> bool {
+        matches!(self, Self::DesktopList | Self::DesktopSendList)
     }
 }
 
@@ -208,7 +248,13 @@ mod tests {
             Action::DesktopPrev,
             Action::DesktopNew,
             Action::DesktopMove,
+            Action::DesktopMoveNext,
+            Action::DesktopMovePrev,
+            Action::DesktopSend,
+            Action::DesktopSendNext,
+            Action::DesktopSendPrev,
             Action::DesktopList,
+            Action::DesktopSendList,
             Action::PinToggle,
         ] {
             assert_eq!(Action::from_name(action.name()), Some(action));

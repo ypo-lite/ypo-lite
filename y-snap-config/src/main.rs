@@ -32,6 +32,7 @@ mod icon_picker;
 mod icons;
 mod min_button;
 mod mouse;
+mod mouse_shortcuts;
 mod overlay;
 mod reorder;
 
@@ -46,7 +47,8 @@ use y_core::overlay::Color as CoreColor;
 use y_core::single_instance;
 use y_snap::action::{Action, Target};
 use y_snap::config::{
-    Binding, Button as MouseButton, Gesture, Group, Item, LoadError, QuickAction, Settings, Theme,
+    Binding, Button as MouseButton, Gesture, Group, Item, LoadError, MouseShortcut, MouseTrigger,
+    QuickAction, Settings, Theme,
 };
 use y_snap::ipc;
 
@@ -137,6 +139,10 @@ enum Editing {
         field: PaletteField,
         original: CoreColor,
     },
+    MouseShortcut {
+        index: usize,
+        original: MouseShortcut,
+    },
 }
 
 /// A reorderable list — what [`Msg::ReorderToggled`] and [`Msg::Moved`] are
@@ -156,18 +162,26 @@ enum ListKind {
 enum Section {
     Hotkeys,
     Mouse,
+    MouseShortcuts,
     Overlay,
     MinButton,
 }
 
 impl Section {
-    const ALL: [Self; 4] = [Self::Hotkeys, Self::Mouse, Self::Overlay, Self::MinButton];
+    const ALL: [Self; 5] = [
+        Self::Hotkeys,
+        Self::Mouse,
+        Self::MouseShortcuts,
+        Self::Overlay,
+        Self::MinButton,
+    ];
 
     /// `NavigationViewItem`'s tag, round-tripped by `on_selected_tag_changed`.
     fn tag(self) -> &'static str {
         match self {
             Self::Hotkeys => "hotkeys",
             Self::Mouse => "mouse",
+            Self::MouseShortcuts => "mouse-shortcuts",
             Self::Overlay => "overlay",
             Self::MinButton => "minbutton",
         }
@@ -181,6 +195,7 @@ impl Section {
         match self {
             Self::Hotkeys => "Hotkeys",
             Self::Mouse => "Mouse gestures",
+            Self::MouseShortcuts => "Mouse shortcuts",
             Self::Overlay => "Action overlay",
             Self::MinButton => "Minimize button",
         }
@@ -190,6 +205,7 @@ impl Section {
         match self {
             Self::Hotkeys => Symbol::Keyboard,
             Self::Mouse => Symbol::TouchPointer,
+            Self::MouseShortcuts => Symbol::Switch,
             Self::Overlay => Symbol::ViewAll,
             Self::MinButton => Symbol::BackToWindow,
         }
@@ -244,6 +260,15 @@ enum Msg {
     GestureToggled(GestureKind, bool),
     GestureButtonChanged(GestureKind, Option<usize>),
     GestureModifierToggled(GestureKind, HOT_KEY_MODIFIERS),
+
+    EditMouseShortcut(usize),
+    MouseShortcutAdded,
+    MouseShortcutDeleted(usize),
+    MouseShortcutTriggerChanged(usize, MouseTrigger),
+    MouseShortcutModifierToggled(usize, HOT_KEY_MODIFIERS),
+    MouseShortcutActionChanged(usize, Option<usize>),
+    MouseShortcutTargetChanged(usize, Option<usize>),
+    MouseShortcutDesktopChanged(usize, Option<f64>),
 
     OverlayColumnsChanged(Option<f64>),
     OverlayTileWidthChanged(Option<f64>),
@@ -372,6 +397,13 @@ impl Component for ConfigApp {
                 )
             }
             Section::Mouse => mouse::mouse_view(&settings.mouse, viewport, context),
+            Section::MouseShortcuts => {
+                let editing = match self.editing {
+                    Some(Editing::MouseShortcut { index, .. }) => Some(index),
+                    _ => None,
+                };
+                mouse_shortcuts::mouse_shortcuts_view(settings, editing, viewport, context)
+            }
             Section::Overlay => {
                 let (tile, palette) = match self.editing {
                     Some(Editing::Tile { index, .. }) => (Some(index), None),
@@ -596,8 +628,19 @@ impl ConfigApp {
                 }
             }
             Msg::EditorClosed(close) => {
+                // Done is disabled while the shortcut being edited has a
+                // problem; a stale click must not close it anyway.
+                if close == EditorClose::Keep
+                    && let Some(Editing::MouseShortcut { index, .. }) = self.editing
+                    && mouse_shortcuts::problem_at(settings, index).is_some()
+                {
+                    return;
+                }
                 if let (Some(editing), EditorClose::Revert) = (self.editing.take(), close) {
                     match editing {
+                        Editing::MouseShortcut { index, original } => {
+                            settings.mouse_shortcuts[index] = original
+                        }
                         Editing::Hotkey { index, original } => {
                             settings.hotkeys[index].hotkey = original
                         }
@@ -694,6 +737,70 @@ impl ConfigApp {
             Msg::GestureModifierToggled(kind, modifier) => {
                 if let Some(gesture) = kind.get_mut(&mut settings.mouse) {
                     gesture.modifiers.0 ^= modifier.0;
+                    self.dirty = true;
+                }
+            }
+
+            Msg::EditMouseShortcut(index) => {
+                self.reordering = None;
+                let reopen = !matches!(self.editing, Some(Editing::MouseShortcut { index: open, .. }) if open == index);
+                self.editing = None;
+                if reopen {
+                    let original = settings.mouse_shortcuts[index];
+                    self.editing = Some(Editing::MouseShortcut { index, original });
+                }
+            }
+            Msg::MouseShortcutAdded => {
+                self.reordering = None;
+                // `Win`+middle if free, else the next free combination;
+                // opened straight into its editor, as a new hotkey is.
+                if let Some(shortcut) =
+                    mouse_shortcuts::first_free(&settings.mouse_shortcuts, &settings.mouse)
+                {
+                    settings.mouse_shortcuts.push(shortcut);
+                    self.dirty = true;
+                    self.editing = None;
+                    let index = settings.mouse_shortcuts.len() - 1;
+                    self.edit(Msg::EditMouseShortcut(index));
+                }
+            }
+            Msg::MouseShortcutDeleted(index) => {
+                self.editing = None;
+                settings.mouse_shortcuts.remove(index);
+                self.dirty = true;
+            }
+            Msg::MouseShortcutTriggerChanged(index, trigger) => {
+                let shortcut = &mut settings.mouse_shortcuts[index];
+                if shortcut.trigger != trigger {
+                    shortcut.trigger = trigger;
+                    self.dirty = true;
+                }
+            }
+            Msg::MouseShortcutModifierToggled(index, modifier) => {
+                settings.mouse_shortcuts[index].modifiers.0 ^= modifier.0;
+                self.dirty = true;
+            }
+            Msg::MouseShortcutActionChanged(index, Some(choice)) => {
+                let action = hotkeys::ACTIONS[choice];
+                let shortcut = &mut settings.mouse_shortcuts[index];
+                if shortcut.action != action {
+                    shortcut.action = action;
+                    self.dirty = true;
+                }
+            }
+            Msg::MouseShortcutTargetChanged(index, Some(choice)) => {
+                let target = hotkeys::TARGETS[choice];
+                let shortcut = &mut settings.mouse_shortcuts[index];
+                if shortcut.target != target {
+                    shortcut.target = target;
+                    self.dirty = true;
+                }
+            }
+            Msg::MouseShortcutDesktopChanged(index, Some(desktop)) => {
+                let desktop = desktop.max(1.0) as u32;
+                let shortcut = &mut settings.mouse_shortcuts[index];
+                if shortcut.desktop != desktop {
+                    shortcut.desktop = desktop;
                     self.dirty = true;
                 }
             }
@@ -804,7 +911,7 @@ impl ConfigApp {
                 item.action = action;
                 // `desktop-list` expands into per-desktop tiles that carry
                 // their own keys; a key on the placeholder would be dead data.
-                if action == Action::DesktopList {
+                if action.is_desktop_list() {
                     item.key = None;
                 }
                 self.dirty = true;
@@ -980,6 +1087,13 @@ impl ConfigApp {
                 }
             }
 
+            Msg::Save
+                if matches!(self.editing, Some(Editing::MouseShortcut { index, .. })
+                    if mouse_shortcuts::problem_at(settings, index).is_some()) =>
+            {
+                self.save_error =
+                    Some("the open mouse shortcut has a problem — fix or cancel it first".to_owned());
+            }
             Msg::Save => match settings.save() {
                 Ok(()) => {
                     self.dirty = false;
@@ -999,6 +1113,9 @@ impl ConfigApp {
             | Msg::HotkeyTargetChanged(_, None)
             | Msg::HotkeyDesktopChanged(_, None)
             | Msg::GestureButtonChanged(_, None)
+            | Msg::MouseShortcutActionChanged(_, None)
+            | Msg::MouseShortcutTargetChanged(_, None)
+            | Msg::MouseShortcutDesktopChanged(_, None)
             | Msg::OverlayColumnsChanged(None)
             | Msg::OverlayTileWidthChanged(None)
             | Msg::OverlayTileHeightChanged(None)

@@ -47,6 +47,22 @@ Overlay `Split`, down to `shell::MIN_WINDOW` (560×472, title bar included).
 | 3 | Modifier chips are equal width and fit the card | ✅ | Chip `AutoGrid` built from the card's own `Viewport`. |
 | 4 | An off gesture reads as off | ✅ | `emphasis::OFF` opacity; controls disabled. |
 
+## Mouse shortcuts (`mouse_shortcuts.rs`)
+
+| # | Requirement | Status | Notes |
+|---|---|---|---|
+| 1 | The table fits any width without scrolling sideways | 👁 | `Table` with flex columns; below `min_width()` rows become cards. Check at `shell::MIN_WINDOW`. |
+| 2 | The trigger reads as keycaps | ✅ | Modifiers then the trigger (`Win` + `Middle`, `Tilt right`); side buttons show as Back/Forward. |
+| 3 | The editor opens under its row and offers every trigger once | ✅ | `Row::detail`; test asserts each `MouseTrigger` is in exactly one of the Button / Wheel tilt / Side button groups. |
+| 4 | The chosen trigger is unmistakable | ✅ | Accent button re-rendered from state, not a `ToggleButton` (it would uncheck itself when clicked again). |
+| 5 | A combination y-snap would refuse can't be kept | 👁 | `shortcut_problem` shown live as a note; Done is disabled (`editor_checked`) and Save refuses while the open editor has a problem. Cancel restores the original. |
+| 6 | A clash caused elsewhere (Drag changed on the Mouse gestures screen) is noticed | ✅ | A note under the table counts shortcuts that clash outside the open editor. |
+| 7 | A bare trigger says what it replaces | ✅ | "Replaces middle click everywhere." etc., for middle, tilt and side buttons. |
+| 8 | A new shortcut opens straight into its editor | ✅ | `Msg::MouseShortcutAdded` → first free combination (`Win`+middle first) → `EditMouseShortcut(last)`. |
+| 9 | The three trigger groups reflow | 👁 | `AutoGrid` 3 → 1 columns, each group's buttons in their own `AutoGrid` from the narrowed `Viewport`. |
+
+No reordering: order means nothing here, duplicates being refused.
+
 ## Action overlay (`overlay/`)
 
 | # | Requirement | Status | Notes |

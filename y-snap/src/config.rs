@@ -35,6 +35,9 @@ pub struct Settings {
     pub path: PathBuf,
     pub hotkeys: Vec<Binding>,
     pub mouse: Mouse,
+    /// The `<shortcut>`s inside `<mouse>`. Kept apart from [`Mouse`], which is
+    /// `Copy` and handed to the gesture code by value.
+    pub mouse_shortcuts: Vec<MouseShortcut>,
     pub overlay: Overlay,
     /// The `<minbutton>` popup, and what a right-click on the button does.
     pub min_button: MinButton,
@@ -87,7 +90,7 @@ pub struct Binding {
     pub hotkey: Hotkey,
     pub action: Action,
     pub target: Target,
-    /// Which desktop `desktop-move` moves to, 1-based; 0 when unset.
+    /// Which desktop `desktop-move`/`desktop-send` go to, 1-based; 0 when unset.
     pub desktop: u32,
     /// Take the combination with a low-level keyboard hook when the system
     /// refuses to register it — how a `Win+…` combination the shell already
@@ -134,6 +137,141 @@ impl Button {
             Self::Middle => "middle",
         }
     }
+}
+
+/// What can start a [`MouseShortcut`]. Wider than [`Button`] on purpose:
+/// `<drag button="wheel-left">` means nothing and must keep warning.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MouseTrigger {
+    Left,
+    Middle,
+    Right,
+    /// Wheel tilted left (`WM_MOUSEHWHEEL`, negative delta).
+    WheelLeft,
+    /// Wheel tilted right (`WM_MOUSEHWHEEL`, positive delta).
+    WheelRight,
+    /// The "back" side button.
+    X1,
+    /// The "forward" side button.
+    X2,
+}
+
+impl MouseTrigger {
+    pub const ALL: [Self; 7] = [
+        Self::Left,
+        Self::Middle,
+        Self::Right,
+        Self::WheelLeft,
+        Self::WheelRight,
+        Self::X1,
+        Self::X2,
+    ];
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|t| t.name() == name.trim())
+    }
+
+    /// The name [`MouseTrigger::from_name`] reads back.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Left => "left",
+            Self::Middle => "middle",
+            Self::Right => "right",
+            Self::WheelLeft => "wheel-left",
+            Self::WheelRight => "wheel-right",
+            Self::X1 => "x1",
+            Self::X2 => "x2",
+        }
+    }
+
+    /// Position in [`MouseTrigger::ALL`], for tables indexed by trigger.
+    pub fn index(self) -> usize {
+        self as usize
+    }
+
+    /// Whether this is a plain left or right click, which can never be taken
+    /// without a modifier (it would eat every click on the machine).
+    pub fn is_primary(self) -> bool {
+        matches!(self, Self::Left | Self::Right)
+    }
+}
+
+impl From<Button> for MouseTrigger {
+    fn from(button: Button) -> Self {
+        match button {
+            Button::Left => Self::Left,
+            Button::Right => Self::Right,
+            Button::Middle => Self::Middle,
+        }
+    }
+}
+
+/// One `<shortcut>`: a modifier plus a mouse trigger fires one action, the
+/// way a hotkey does. Fires on the press; see `docs/mouse-shortcuts-plan.md`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MouseShortcut {
+    pub trigger: MouseTrigger,
+    /// Matched exactly, left and right `Win` alike. Empty means "no modifier".
+    pub modifiers: HOT_KEY_MODIFIERS,
+    pub action: Action,
+    /// Defaults to [`Target::Pointed`] here, unlike a hotkey: the pointer is
+    /// the point of a mouse shortcut.
+    pub target: Target,
+    /// Which desktop `desktop-move`/`desktop-send` go to, 1-based; 0 when unset.
+    pub desktop: u32,
+}
+
+impl MouseShortcut {
+    /// The target a `<shortcut>` without a `target` attribute gets.
+    pub const DEFAULT_TARGET: Target = Target::Pointed;
+}
+
+/// Why a [`MouseShortcut`] cannot be added. See [`shortcut_problem`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShortcutProblem {
+    /// A plain left or right click, which would be taken everywhere.
+    PlainClick,
+    /// Another shortcut already has this combination.
+    Duplicate,
+    /// A `<drag>` or `<resize>` already has it; the name is the element's.
+    Gesture(&'static str),
+}
+
+impl fmt::Display for ShortcutProblem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::PlainClick => f.write_str("a plain left or right click cannot be taken"),
+            Self::Duplicate => f.write_str("another shortcut already uses this combination"),
+            Self::Gesture(name) => write!(f, "this combination is already used by <{name}>"),
+        }
+    }
+}
+
+/// Whether `candidate` may join `earlier` next to the gestures in `mouse`.
+/// One place for the rules, for the reader and the settings app alike.
+pub fn shortcut_problem(
+    candidate: &MouseShortcut,
+    earlier: &[MouseShortcut],
+    mouse: &Mouse,
+) -> Option<ShortcutProblem> {
+    if candidate.trigger.is_primary() && candidate.modifiers.0 == 0 {
+        return Some(ShortcutProblem::PlainClick);
+    }
+    for (name, gesture) in [("drag", mouse.drag), ("resize", mouse.resize)] {
+        if let Some(gesture) = gesture
+            && MouseTrigger::from(gesture.button) == candidate.trigger
+            && gesture.modifiers == candidate.modifiers
+        {
+            return Some(ShortcutProblem::Gesture(name));
+        }
+    }
+    if earlier
+        .iter()
+        .any(|s| s.trigger == candidate.trigger && s.modifiers == candidate.modifiers)
+    {
+        return Some(ShortcutProblem::Duplicate);
+    }
+    None
 }
 
 /// The `<overlay>` popup: how it looks, and what is on it.
@@ -301,7 +439,7 @@ pub struct Item {
     pub icon: Option<String>,
     /// The `<group>` this tile belongs to, if any.
     pub group: Option<String>,
-    /// Which desktop `desktop-move` moves to, 1-based; 0 when unset.
+    /// Which desktop `desktop-move`/`desktop-send` go to, 1-based; 0 when unset.
     pub desktop: u32,
 }
 
@@ -351,9 +489,13 @@ impl Settings {
         let root = document.root();
         reader.warn_duplicate_sections(root);
 
+        let hotkeys = reader.hotkeys(root);
+        let mouse = reader.mouse(root);
+        let mouse_shortcuts = reader.mouse_shortcuts(root, &mouse);
         let settings = Self {
-            hotkeys: reader.hotkeys(root),
-            mouse: reader.mouse(root),
+            hotkeys,
+            mouse,
+            mouse_shortcuts,
             overlay: reader.overlay(root),
             min_button: reader.min_button(root),
             warnings: std::mem::take(&mut reader.warnings),
@@ -379,7 +521,7 @@ impl Settings {
         let mut out = String::new();
         out.push_str("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<y-snap>\n");
 
-        write_mouse(&mut out, &self.mouse);
+        write_mouse(&mut out, &self.mouse, &self.mouse_shortcuts);
         write_hotkeys(&mut out, &self.hotkeys);
         write_overlay(&mut out, &self.overlay);
         write_min_button(&mut out, &self.min_button);
@@ -401,7 +543,7 @@ impl Settings {
     }
 }
 
-fn write_mouse(out: &mut String, mouse: &Mouse) {
+fn write_mouse(out: &mut String, mouse: &Mouse, shortcuts: &[MouseShortcut]) {
     out.push_str("\t<mouse>\n");
     for (name, gesture) in [("drag", mouse.drag), ("resize", mouse.resize)] {
         let Some(gesture) = gesture else { continue };
@@ -409,6 +551,24 @@ fn write_mouse(out: &mut String, mouse: &Mouse) {
         // "Alt" is what a missing `mod` attribute reads as (see `Reader::mouse`).
         if gesture.modifiers != MOD_ALT {
             let _ = write!(out, " mod=\"{}\"", format_modifiers(gesture.modifiers));
+        }
+        out.push_str("/>\n");
+    }
+    for shortcut in shortcuts {
+        // `mod` is always written: a missing one is an error on reading,
+        // since "none" can take over a whole button.
+        let _ = write!(
+            out,
+            "\t\t<shortcut button=\"{}\" mod=\"{}\" action=\"{}\"",
+            shortcut.trigger.name(),
+            format_modifiers(shortcut.modifiers),
+            shortcut.action
+        );
+        if shortcut.target != MouseShortcut::DEFAULT_TARGET {
+            let _ = write!(out, " target=\"{}\"", shortcut.target);
+        }
+        if shortcut.desktop != 0 {
+            let _ = write!(out, " desktop=\"{}\"", shortcut.desktop);
         }
         out.push_str("/>\n");
     }
@@ -796,8 +956,8 @@ impl Reader {
 
             // Only on a tile, where it becomes several tiles; a key can only
             // ever fire one thing.
-            if action == Action::DesktopList {
-                self.warn(element, "desktop-list only works on an overlay tile");
+            if action.is_desktop_list() {
+                self.warn(element, "desktop-list and desktop-send-list only work on an overlay tile");
                 continue;
             }
 
@@ -854,6 +1014,9 @@ impl Reader {
             let slot = match element.name() {
                 "drag" => &mut mouse.drag,
                 "resize" => &mut mouse.resize,
+                // Read afterwards by `mouse_shortcuts`, which needs the
+                // gestures to be settled to check for clashes.
+                "shortcut" => continue,
                 name => {
                     self.warn(element, format!("<{name}> is not a mouse gesture"));
                     continue;
@@ -880,6 +1043,72 @@ impl Reader {
         }
 
         mouse
+    }
+
+    /// The `<shortcut>`s of `<mouse>`. Every problem is a warning that drops
+    /// that one shortcut and keeps the rest.
+    fn mouse_shortcuts(&mut self, root: Element<'_>, mouse: &Mouse) -> Vec<MouseShortcut> {
+        let Some(section) = root.child("mouse") else {
+            return Vec::new();
+        };
+
+        let mut shortcuts: Vec<MouseShortcut> = Vec::new();
+
+        for element in section.children().filter(|e| e.name() == "shortcut") {
+            self.check(element, &["button", "mod", "action", "target", "desktop"]);
+
+            let Some(name) = element.attr("button") else {
+                self.warn(element, "a <shortcut> needs a button attribute");
+                continue;
+            };
+            let Some(trigger) = MouseTrigger::from_name(name) else {
+                self.warn(element, format!("unknown button {name:?}"));
+                continue;
+            };
+
+            // Required, unlike `<drag>`: a missing value must not silently
+            // mean something when "none" can take over a whole button.
+            let Some(text) = element.attr("mod") else {
+                self.warn(element, "a <shortcut> needs a mod attribute (or mod=\"none\")");
+                continue;
+            };
+            let Some(modifiers) = parse_modifiers(text) else {
+                self.warn(element, format!("{text:?} is not a set of modifiers"));
+                continue;
+            };
+
+            let Some(action) = self.action(element) else {
+                if element.attr("action").is_none() {
+                    self.warn(element, "a <shortcut> needs an action attribute");
+                }
+                continue;
+            };
+            if action.is_desktop_list() {
+                self.warn(element, "desktop-list and desktop-send-list only work on an overlay tile");
+                continue;
+            }
+
+            let target = if element.attr("target").is_some() {
+                self.target(element)
+            } else {
+                MouseShortcut::DEFAULT_TARGET
+            };
+
+            let shortcut = MouseShortcut {
+                trigger,
+                modifiers,
+                action,
+                target,
+                desktop: self.desktop(element),
+            };
+            if let Some(problem) = shortcut_problem(&shortcut, &shortcuts, mouse) {
+                self.warn(element, format!("shortcut ignored: {problem}"));
+                continue;
+            }
+            shortcuts.push(shortcut);
+        }
+
+        shortcuts
     }
 
     fn min_button(&mut self, root: Element<'_>) -> MinButton {
@@ -1084,7 +1313,7 @@ impl Reader {
                     return None;
                 }
             },
-            None if action == Action::DesktopList => None,
+            None if action.is_desktop_list() => None,
             None => {
                 self.warn(element, "an overlay <action> needs a key attribute");
                 return None;
@@ -1126,7 +1355,7 @@ impl Reader {
 ///
 /// Public so `y-snap-config` offers exactly what this reader accepts.
 pub fn is_minbutton_action(action: Action) -> bool {
-    action.needs_window() && !matches!(action, Action::DesktopList | Action::Overlay)
+    action.needs_window() && !action.is_desktop_list() && action != Action::Overlay
 }
 
 /// Reads `"Win+Alt"`, `"Alt"`, or `"none"` — the modifier half of a hotkey,
@@ -1233,6 +1462,102 @@ mod tests {
         // both warn, and the drag read above is left alone.
         assert_eq!(drag.button, Button::Left);
         assert_eq!(settings.warnings.len(), 2, "{:?}", settings.warnings);
+    }
+
+    #[test]
+    fn reads_mouse_shortcuts_and_round_trips_them() {
+        let settings = load(
+            "shortcuts",
+            r#"<y-snap>
+                 <mouse>
+                   <drag button="left" mod="Alt"/>
+                   <shortcut button="middle" mod="Win" action="overlay"/>
+                   <shortcut button="wheel-right" mod="none" action="pin-toggle"/>
+                   <shortcut button="x1" mod="Alt" action="desktop-move" desktop="2" target="focused"/>
+                 </mouse>
+               </y-snap>"#,
+        );
+
+        assert!(settings.warnings.is_empty(), "{:?}", settings.warnings);
+        let shortcuts = &settings.mouse_shortcuts;
+        assert_eq!(shortcuts.len(), 3);
+        assert_eq!(shortcuts[0].trigger, MouseTrigger::Middle);
+        assert_eq!(shortcuts[0].modifiers, MOD_WIN);
+        assert_eq!(shortcuts[0].target, Target::Pointed);
+        assert_eq!(shortcuts[1].modifiers.0, 0);
+        assert_eq!(shortcuts[2].target, Target::Focused);
+        assert_eq!(shortcuts[2].desktop, 2);
+
+        let xml = settings.to_xml();
+        assert!(!xml.contains(r#"action="overlay" target"#), "{xml}");
+        let saved = std::env::temp_dir().join("y-snap-shortcuts-roundtrip.xml");
+        std::fs::write(&saved, &xml).expect("writes");
+        let reloaded = Settings::load_from(saved.clone()).expect("reloads");
+        let _ = std::fs::remove_file(&saved);
+        assert!(reloaded.warnings.is_empty(), "{:?}", reloaded.warnings);
+        assert_eq!(reloaded.mouse_shortcuts, settings.mouse_shortcuts);
+    }
+
+    #[test]
+    fn refused_mouse_shortcuts_warn_and_keep_the_others() {
+        let settings = load(
+            "shortcuts-bad",
+            r#"<y-snap>
+                 <mouse>
+                   <drag button="left" mod="Alt"/>
+                   <shortcut button="left" mod="none" action="close"/>
+                   <shortcut button="right" mod="none" action="close"/>
+                   <shortcut button="left" mod="Alt" action="close"/>
+                   <shortcut button="middle" action="close"/>
+                   <shortcut button="wheel" mod="Win" action="close"/>
+                   <shortcut button="middle" mod="Win" action="desktop-list"/>
+                   <shortcut button="middle" mod="Win" action="close" colour="red"/>
+                   <shortcut button="middle" mod="Win+Win" action="pin-toggle"/>
+                   <shortcut button="middle" mod="Win" action="minimize"/>
+                   <drag button="x1"/>
+                 </mouse>
+               </y-snap>"#,
+        );
+
+        // Kept: the first Win+middle only. The `Win+Win` one is the same
+        // combination, so it is a duplicate.
+        assert_eq!(settings.mouse_shortcuts.len(), 1);
+        assert_eq!(settings.mouse_shortcuts[0].action, Action::Close);
+        // plain left, plain right, Alt+left (drag), missing mod, bad button,
+        // desktop-list, colour attribute, duplicate, duplicate, <drag x1>.
+        assert_eq!(settings.warnings.len(), 10, "{:?}", settings.warnings);
+    }
+
+    #[test]
+    fn shortcut_problem_names_the_clash() {
+        let mouse = Mouse {
+            drag: Some(Gesture {
+                button: Button::Left,
+                modifiers: MOD_ALT,
+            }),
+            resize: None,
+        };
+        let shortcut = |trigger, modifiers| MouseShortcut {
+            trigger,
+            modifiers,
+            action: Action::Close,
+            target: Target::Pointed,
+            desktop: 0,
+        };
+
+        assert_eq!(
+            shortcut_problem(&shortcut(MouseTrigger::Left, MOD_ALT), &[], &mouse),
+            Some(ShortcutProblem::Gesture("drag"))
+        );
+        assert_eq!(
+            shortcut_problem(&shortcut(MouseTrigger::Left, MOD_WIN), &[], &mouse),
+            None
+        );
+        let earlier = [shortcut(MouseTrigger::X1, MOD_WIN)];
+        assert_eq!(
+            shortcut_problem(&shortcut(MouseTrigger::X1, MOD_WIN), &earlier, &mouse),
+            Some(ShortcutProblem::Duplicate)
+        );
     }
 
     #[test]
@@ -1376,7 +1701,7 @@ mod tests {
         assert!(settings.mouse.drag.is_some());
         assert!(settings.mouse.resize.is_some());
         assert_eq!(settings.overlay.groups.len(), 1);
-        assert_eq!(settings.overlay.items.len(), 16);
+        assert_eq!(settings.overlay.items.len(), 20);
         assert_eq!(settings.min_button.items.len(), 2);
     }
 

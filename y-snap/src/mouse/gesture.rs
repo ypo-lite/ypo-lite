@@ -45,16 +45,13 @@
 //! timeout.
 
 use windows::Win32::Foundation::{HWND, POINT, RECT};
-use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetAsyncKeyState, HOT_KEY_MODIFIERS, MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, VIRTUAL_KEY,
-    VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
-};
 
 use crate::config::{Button, Gesture as GestureConfig, Mouse};
 use crate::target;
 
 use super::geometry::window_rect;
 use super::modifier_guard;
+use super::modifiers_held;
 
 /// A window resized down to nothing is not a feature.
 const MIN_SIZE: i32 = 32;
@@ -89,6 +86,12 @@ impl Gesture {
             drag: None,
             resize: None,
         }
+    }
+
+    /// Whether a drag or resize is in progress — what a mouse shortcut
+    /// pressed meanwhile is swallowed for.
+    pub fn active(&self) -> bool {
+        self.drag.is_some() || self.resize.is_some()
     }
 
     /// Computes the target rect for whichever gesture is in progress, for
@@ -242,24 +245,4 @@ fn matched_start(gesture: Option<GestureConfig>, button: Button) -> Option<Gestu
 /// modifiers do not matter here the way they do for [`matched_start`].
 fn matched_end(gesture: Option<GestureConfig>, button: Button) -> Option<GestureConfig> {
     gesture.filter(|gesture| gesture.button == button)
-}
-
-/// The modifier keys held right now, in [`y_core::hotkey`]'s vocabulary.
-fn modifiers_held() -> HOT_KEY_MODIFIERS {
-    let held = |key: VIRTUAL_KEY| unsafe { GetAsyncKeyState(key.0 as i32) } as u16 & 0x8000 != 0;
-
-    let mut modifiers = 0;
-    if held(VK_LWIN) || held(VK_RWIN) {
-        modifiers |= MOD_WIN.0;
-    }
-    if held(VK_CONTROL) {
-        modifiers |= MOD_CONTROL.0;
-    }
-    if held(VK_MENU) {
-        modifiers |= MOD_ALT.0;
-    }
-    if held(VK_SHIFT) {
-        modifiers |= MOD_SHIFT.0;
-    }
-    HOT_KEY_MODIFIERS(modifiers)
 }

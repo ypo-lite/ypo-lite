@@ -15,7 +15,7 @@ Working: the configuration file, the tray icon and menu, hotkey registration
 (including reclaiming a combination the shell owns), the actions that act
 directly on a window — minimize, maximize, close, always-on-top, borderless,
 transparency, shade, hide-from-taskbar, center-cursor — the mouse hook (drag,
-resize), the minimize-button popup, the action overlay (grid layout,
+resize, mouse shortcuts on a button, side button or wheel tilt), the minimize-button popup, the action overlay (grid layout,
 hover, click, key, `Escape`, click-outside), and the virtual desktop actions
 (`desktop-next`/`-prev`/`-new`/`-move`, `pin-toggle`, `desktop-list`'s
 per-desktop tiles) — see [`y-core`'s own `virtual_desktop`
@@ -65,8 +65,10 @@ The same names work on a hotkey and on an overlay tile.
 | `center-cursor` | put the pointer in the middle of the window |
 | `iconize` `traynize` | hide the window behind an icon of its own, or in the tray menu |
 | `uniconize` `uniconize-all` | bring back the window hidden last, or all of them |
-| `desktop-next` `desktop-prev` `desktop-new` `desktop-move` `pin-toggle` | virtual desktops |
-| `desktop-list` | overlay only: expands into one tile per desktop |
+| `desktop-next` `desktop-prev` `desktop-new` `pin-toggle` | virtual desktops: switch to the next or previous one (wrapping), create one, pin the window to all |
+| `desktop-move` `desktop-move-next` `desktop-move-prev` | move the window to another desktop **and switch to it**. `desktop-move` goes to the `desktop` number; `-next`/`-prev` go one along from the current desktop, wrapping from the last to the first (and back), and take no number |
+| `desktop-send` `desktop-send-next` `desktop-send-prev` | the same three, but **stay on the current desktop**: the window is sent away |
+| `desktop-list` `desktop-send-list` | overlay only: expand into one tile per desktop, numbered from 1 and keyed `1`-`9`. `desktop-list` makes `desktop-move` tiles (they switch to that desktop), `desktop-send-list` makes `desktop-send` tiles (they stay put). The tile for the desktop you are on is drawn disabled |
 
 ### `<hotkeys>`
 
@@ -79,7 +81,7 @@ The same names work on a hotkey and on an overlay tile.
 | `key` | required |
 | `action` | required |
 | `target` | `focused` (default), or `pointed` for the window under the pointer, falling back to the focused one |
-| `desktop` | for `desktop-move`, 1-based |
+| `desktop` | for `desktop-move` and `desktop-send` only, 1-based |
 | `steal-from-shell` | `true` takes a combination Windows already owns, with a low-level keyboard hook |
 
 `steal-from-shell` is off by default: a combination belonging to another
@@ -97,9 +99,52 @@ a cost — the hook runs on every keystroke on the machine.
 `Alt` if left out).
 
 Both are driven by one `WH_MOUSE_LL` hook, installed on y-snap's own
-thread rather than injected into other processes — see `mouse.rs`. Drag and
+thread rather than injected into other processes — see `mouse/`. Drag and
 resize grab and release with the same button; the window under the pointer at
 the moment of the press is the one they act on, same as `target="pointed"`.
+
+#### `<shortcut>`
+
+A modifier plus a mouse trigger fires one action, the way a hotkey does:
+
+```xml
+<shortcut button="middle"      mod="Win"  action="overlay"/>
+<shortcut button="wheel-right" mod="none" action="pin-toggle"/>
+<shortcut button="x1"          mod="Alt"  action="desktop-move" desktop="2"/>
+```
+
+| Attribute | |
+| --- | --- |
+| `button` | required: `left`, `middle`, `right`, `wheel-left`, `wheel-right` (the wheel tilted), `x1` (back), `x2` (forward) |
+| `mod` | required, unlike `<drag>`: `Win+Alt`…, or `none` |
+| `action` | required, the same vocabulary as a hotkey, except `desktop-list` and `desktop-send-list` |
+| `target` | `pointed` (the default, unlike a hotkey) or `focused` |
+| `desktop` | for `desktop-move` and `desktop-send` only, 1-based |
+
+* It fires on the press; the release is swallowed. A tilt has no release, so a
+  held tilt fires once (events less than 500 ms apart are one hold) and fires
+  again after a pause.
+* Modifiers match exactly: a `Win` shortcut does not fire on `Win+Shift`.
+* `target="pointed"` has no fallback: with nothing eligible under the pointer
+  (the desktop, the taskbar) the click passes through untouched, and the
+  focused window is never acted on instead.
+* A plain left or right click (`mod="none"`) cannot be taken. A plain middle
+  click, tilt or side button can, and replaces its normal job everywhere.
+* A combination can mean only one thing: a shortcut duplicating another
+  shortcut, or a `<drag>`/`<resize>`, is a warning and is dropped.
+* Tilt and the side buttons must reach Windows as such: some mouse software
+  remaps them to keystrokes, which no hook here can see.
+* As with drag and resize, nothing reaches y-snap while an elevated window is
+  in front.
+* From a click, `overlay` asks Windows for the foreground with a synthetic key
+  tap, and closes again if it still does not get it. `Win` is still held when
+  it opens, so a tile's letter pressed before letting go is `Win`+letter, which
+  belongs to the shell; clicking a tile works either way.
+
+Wheel up/down is not a trigger; it belongs with the switcher
+([`docs/switcher-plan.md`](docs/switcher-plan.md)). The settings app has a
+Mouse shortcuts page for all of this. Design notes:
+[`docs/mouse-shortcuts-plan.md`](docs/mouse-shortcuts-plan.md).
 
 ### `<minbutton>`
 
@@ -118,7 +163,7 @@ Two behaviours on a window's minimize button, no hotkey needed for either:
   to maximize or close. No `<overlay>` theming of its own; it reuses
   `<overlay>`'s own colours and corner radius. Each `<action>` takes
   `action`, `label` and `icon` — no `key`, no `group`; only actions that act
-  on a single window are allowed (not `desktop-list`, not `overlay` itself).
+  on a single window are allowed (not `desktop-list`, `desktop-send-list` or `overlay` itself).
   `columns` is the number of tiles per row — `columns="2"` makes four tiles
   a 2×2 grid; left out (or `0`) puts them all on one row. The tile under the
   pointer is highlighted, and a tile whose toggle is on for the window
@@ -167,7 +212,7 @@ instead of in the main grid. A tile joins one with `group="…"`.
 tile. `label-on` is shown in place of `label` while the toggle is on ("Pin" /
 "Unpin"); `icon` is a glyph from the icon font, shown instead of the key
 letter — the key itself still shows, as a small corner badge, so an iconed
-tile does not hide which key fires it. Only `desktop-list` may omit `key`: it
+tile does not hide which key fires it. Only `desktop-list` and `desktop-send-list` may omit `key`: it
 is not a tile, it becomes tiles. A tile under the pointer is drawn in
 `hover-back-color`/`hover-text-color`, whether reached by mouse or by the
 overlay having just opened with the pointer already sitting over it.
@@ -208,7 +253,7 @@ planned for that.
 | `actions.rs` | action → Win32 call, in one place |
 | `target.rs` | choosing the window, and refusing the shell's |
 | `window.rs` | what gets done to a window, and how to undo it |
-| `mouse.rs` | the low-level mouse hook: drag, resize, minimize-button hover |
+| `mouse/` | the low-level mouse hook: drag, resize (`gesture`), minimize-button hover (`hover`), mouse shortcuts (`shortcut`, a pure state machine) |
 | `min_overlay.rs` | the minimize-button popup, and turning a click into an action |
 | `overlay.rs` | the action overlay: tile grid, hover, click, key, focus-driven close |
 

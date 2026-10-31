@@ -89,6 +89,11 @@ Done on the message loop, never inside the hook:
 
 What the low-level hook must provide before any mode can be built:
 
+> **Done already** by [mouse shortcuts](mouse-shortcuts-plan.md): `WM_MOUSEHWHEEL`
+> (tilt) and `WM_XBUTTONDOWN/UP` are handled in `mouse/mod.rs`, with a held tilt
+> inferred from event timing (`mouse/shortcut.rs`, `TILT_GAP_MS`). Still to do
+> here: plain `WM_MOUSEWHEEL`, notch accumulation and session end detection.
+
 * **Wheel** — restore `WM_MOUSEWHEEL` (signed delta in the high word of
   `mouseData`) and add **`WM_MOUSEHWHEEL`** (tilt / horizontal wheel), which
   the old code never saw. Both only *post* a private `WM_APP` message

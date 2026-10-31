@@ -21,7 +21,7 @@ pub enum Status {
 }
 
 /// Runs `action` against `window`. `desktop` is only read by
-/// [`Action::DesktopMove`] — the 1-based desktop number from the `desktop`
+/// [`Action::DesktopMove`] and [`Action::DesktopSend`] — the 1-based desktop number from the `desktop`
 /// attribute, `0` (unset) for every other action.
 ///
 /// [`Action::Quit`] and [`Action::Reload`] are not here: they act on y-snap
@@ -62,13 +62,14 @@ pub fn dispatch(action: Action, target: Option<HWND>, desktop: u32) -> Status {
             let _ = virtual_desktop::create_desktop();
         }
 
-        (Action::DesktopMove, Some(window)) => {
-            // 1-based in the configuration file, 0-based on the COM side.
-            let Some(index) = desktop.checked_sub(1) else {
-                return Status::Done;
-            };
-            let _ = virtual_desktop::move_window_to_desktop(window, index);
-        }
+        // `move` follows the window to its new desktop, `send` stays where
+        // it is. Either way `desktop` is only read by the numbered pair.
+        (Action::DesktopMove, Some(window)) => relocate(window, Place::Number(desktop), true),
+        (Action::DesktopMoveNext, Some(window)) => relocate(window, Place::Next, true),
+        (Action::DesktopMovePrev, Some(window)) => relocate(window, Place::Prev, true),
+        (Action::DesktopSend, Some(window)) => relocate(window, Place::Number(desktop), false),
+        (Action::DesktopSendNext, Some(window)) => relocate(window, Place::Next, false),
+        (Action::DesktopSendPrev, Some(window)) => relocate(window, Place::Prev, false),
         (Action::PinToggle, Some(window)) => {
             let _ = virtual_desktop::toggle_window_pinned(window);
         }
@@ -80,6 +81,56 @@ pub fn dispatch(action: Action, target: Option<HWND>, desktop: u32) -> Status {
     }
 
     Status::Done
+}
+
+/// Where `desktop-move`/`desktop-send` put the window.
+enum Place {
+    /// The 1-based number from the `desktop` attribute; 0 (unset) does nothing.
+    Number(u32),
+    Next,
+    Prev,
+}
+
+/// Puts `window` on another desktop, and when `follow` switches to that
+/// desktop too (`desktop-move`); otherwise (`desktop-send`) the current
+/// desktop stays as it is. Next and previous are relative to the current
+/// desktop and wrap around at either end. Nothing happens when there is
+/// nowhere to go, or the desktops cannot be read.
+fn relocate(window: HWND, place: Place, follow: bool) {
+    let index = match place {
+        // 1-based in the configuration file, 0-based on the COM side.
+        Place::Number(number) => number.checked_sub(1),
+        Place::Next | Place::Prev => {
+            let (Some(count), Some(current)) = (
+                virtual_desktop::desktop_count(),
+                virtual_desktop::current_desktop_index(),
+            ) else {
+                return;
+            };
+            wrapped_neighbour(current, count, matches!(place, Place::Next))
+        }
+    };
+    let Some(index) = index else {
+        return;
+    };
+    // Only follow a window that actually moved: a number past the last
+    // desktop would otherwise switch away for nothing.
+    if virtual_desktop::move_window_to_desktop(window, index).is_ok() && follow {
+        let _ = virtual_desktop::switch_to(index, None);
+    }
+}
+
+/// The 0-based desktop after or before `current` out of `count`, circling
+/// round at the ends. `None` when there is nowhere else to go.
+fn wrapped_neighbour(current: u32, count: u32, next: bool) -> Option<u32> {
+    if count < 2 || current >= count {
+        return None;
+    }
+    Some(if next {
+        (current + 1) % count
+    } else {
+        (current + count - 1) % count
+    })
 }
 
 /// Whether `action` currently does something real when dispatched — every
@@ -103,6 +154,11 @@ pub fn is_implemented(action: Action) -> bool {
             | Action::DesktopPrev
             | Action::DesktopNew
             | Action::DesktopMove
+            | Action::DesktopMoveNext
+            | Action::DesktopMovePrev
+            | Action::DesktopSend
+            | Action::DesktopSendNext
+            | Action::DesktopSendPrev
             | Action::PinToggle
             | Action::Iconize
             | Action::Traynize
@@ -125,4 +181,25 @@ pub fn toggle_state(action: Action, window: HWND) -> Option<bool> {
         Action::PinToggle => virtual_desktop::is_window_pinned(window).unwrap_or(false),
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::wrapped_neighbour;
+
+    #[test]
+    fn moving_next_and_prev_circles_round() {
+        assert_eq!(wrapped_neighbour(0, 3, true), Some(1));
+        assert_eq!(wrapped_neighbour(2, 3, true), Some(0));
+        assert_eq!(wrapped_neighbour(2, 3, false), Some(1));
+        assert_eq!(wrapped_neighbour(0, 3, false), Some(2));
+    }
+
+    #[test]
+    fn nowhere_to_go_with_one_desktop_or_a_stale_index() {
+        assert_eq!(wrapped_neighbour(0, 1, true), None);
+        assert_eq!(wrapped_neighbour(0, 1, false), None);
+        assert_eq!(wrapped_neighbour(0, 0, true), None);
+        assert_eq!(wrapped_neighbour(5, 3, true), None);
+    }
 }
