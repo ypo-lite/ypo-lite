@@ -136,7 +136,7 @@ A module `search_edit.rs`, no UI, all tested (the `roots.rs` model).
 | | Task | Status |
 |---|---|---|
 | 2.1 | `ensure`, `turn_off`; `<search>` is created by the first edit that changes something and removed **only** by `turn_off` — **changed from the draft**: an empty `<search/>` is not nothing, it turns search on, so it is never dropped for being empty. | ✅ |
-| 2.2 | Basics: `set_hotkey`, `set_override`, `set_collapsed`, `set_results`, `set_row_actions`, `set_history`; a no-op never creates `<search>`. | ✅ |
+| 2.2 | Basics: `set_hotkey`, `set_override`, `set_collapsed`, `set_monitor`, `set_results`, `set_row_actions`, `set_history`; a no-op never creates `<search>`. | ✅ |
 | 2.3 | Sections: `sections()` (what y-pop will use; `Row.written`, `Sections.defaults`, pinned to y-pop's own reading by a test), `customize`, `addable`/`add_section`, `can_remove` (not `<menus>`), `remove_section`, `move_section`, addressed by `SectionKey`. Every edit writes the implied entries out first. | ✅ |
 | 2.4 | `recent_count`/`set_recent_count`, `menus_browse`/`set_menus_browse`, `include_names`/`set_include` (a set of menu names; all or none writes no `include`; `;` refused), `unknown_includes`, `start_exclude`/`set_start_exclude`. | ✅ |
 | 2.5 | Actions: `actions()` (defaults when none written, `open` implied first), `customize_actions`, `add_action`/`addable_actions`, `remove_action` (not `open`), `move_action`, `set_action`, `set_action_key`, `set_action_button`, `set_menu_key`, `set_quick_pick`, `reset_actions`. | ✅ |

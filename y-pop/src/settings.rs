@@ -290,6 +290,7 @@ pub struct SearchSettings {
     pub hotkey: Option<String>,
     pub can_override: bool,
     pub collapsed: Option<bool>,
+    pub monitor: Option<MonitorMode>,
     pub results: Option<ResultsMode>,
     pub row_actions: Option<bool>,
     pub history: Option<bool>,
@@ -300,6 +301,14 @@ pub struct SearchSettings {
     pub skin: Skin,
     pub extra_attrs: Vec<(String, String)>,
     pub children: Vec<SearchEntry>,
+}
+
+/// `monitor="cursor|focus|primary"`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MonitorMode {
+    Cursor,
+    Focus,
+    Primary,
 }
 
 /// `results="sections|flat"`.

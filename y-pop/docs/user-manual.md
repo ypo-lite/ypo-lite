@@ -88,9 +88,10 @@ With the mouse: hovering selects a row, a click opens it, a right click opens
 the action menu, the wheel scrolls. Clicking outside the window, or on another
 window, closes it.
 
-The window sits on the monitor with the cursor, scales with its DPI, and takes
-the colours of your tray menu's `theme`: `default`, `flat`, `dark`, `graphite`,
-`midnight`, `sand` or `auto`, or Windows' light or dark setting with `native`.
+The window sits on the monitor with the cursor (`monitor` on `<search>` changes
+that), scales with its DPI, and takes the colours of your tray menu's `theme`:
+`default`, `flat`, `dark`, `graphite`, `midnight`, `sand` or `auto`, or Windows'
+light or dark setting with `native`.
 
 To give it colours of its own, put a `theme` and/or a `<skin>` on `<search>`
 (same attributes as the menus' `<skin>`; **Skin → Search window** in
@@ -441,6 +442,7 @@ All of it is inside the `<search>` element, which goes at the top level of
 | Attribute | Default | Meaning |
 | --- | --- | --- |
 | `hotkey` | none | the key that opens the search, written like a `<hotkey>` (`Alt+Space`, `Ctrl+Win+F`…). Add `override="true"` to take it from another program if need be. |
+| `monitor` | `cursor` | where the window opens. `cursor`: the monitor with the mouse pointer. `focus`: the monitor of the application with the focus, or the pointer's when no application has it (on the desktop, or opening from a tray icon). `primary`: the main monitor. |
 | `results` | `sections` | `sections`: the best hit, then groups of at most five. `flat`: one list in score order. |
 | `row-actions` | `true` | `false` hides the buttons of the selected row. |
 | `history` | `true` | `false` neither remembers launches nor lists them nor lets them rank results (see [History](#history-and-recent)) |

@@ -209,6 +209,10 @@ index outside the folders the configuration browses, and no web results.
   list is exactly what is written (except `<menus/>`, always present).
 - `collapsed`: `false` (default) opens on Recent and the sections;
   `true` opens on the input row alone (§2.4).
+- `monitor`: `cursor` (default) opens on the monitor under the pointer,
+  `focus` on the monitor of the focused application (the pointer's when none
+  has the focus: the desktop, or a click in a tray menu), `primary` on the
+  main monitor.
 - `results`, `row-actions`: §2.8, §2.9.
 - Also reachable without the hotkey: **Open Search** in the right-click menu
   of any tray icon (a left click opens the menu as written; a right click
@@ -239,8 +243,8 @@ index outside the folders the configuration browses, and no web results.
 └────────────────────────────────────────────────────────────┘
 ```
 
-Width 560–720 px, placed in the upper third of the monitor under the cursor.
-The input row never moves; the results grow downwards.
+Width 560–720 px, placed in the upper third of the monitor `monitor` names
+(§2.2). The input row never moves; the results grow downwards.
 
 ### 2.4 The empty box: recent, then the sections
 

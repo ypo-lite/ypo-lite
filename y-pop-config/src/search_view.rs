@@ -19,7 +19,7 @@
 //! Keys are chosen in [`crate::key_edit`]'s dialog, never typed.
 
 use y_pop::model::ActionId;
-use y_pop::settings::{ItemId, MenusMode, ResultsMode, Settings};
+use y_pop::settings::{ItemId, MenusMode, MonitorMode, ResultsMode, Settings};
 
 use crate::key_edit::{KeyMsg, KeyTarget, hotkey_labels, hotkey_warning, shortcut_labels};
 use crate::search_edit::{self as se, SectionAdd, SectionKey};
@@ -53,6 +53,8 @@ pub enum SearchMsg {
     RemoveHotkey,
     Override(bool),
     Collapsed(bool),
+    /// 0 the cursor's, 1 the focused app's, 2 the main one.
+    Monitor(usize),
     /// 0 sections, 1 flat.
     Results(usize),
     RowActions(bool),
@@ -163,6 +165,17 @@ pub fn apply(settings: &mut Settings, ui: &mut SearchUi, message: SearchMsg) -> 
         SearchMsg::Collapsed(on) => flag(settings, on, false, |s| s.collapsed, se::set_collapsed),
         SearchMsg::RowActions(on) => flag(settings, on, true, |s| s.row_actions, se::set_row_actions),
         SearchMsg::History(on) => flag(settings, on, true, |s| s.history, se::set_history),
+        SearchMsg::Monitor(choice) => {
+            let mode = match choice {
+                1 => Some(MonitorMode::Focus),
+                2 => Some(MonitorMode::Primary),
+                _ => None,
+            };
+            let current = settings.search.as_ref().and_then(|s| s.monitor);
+            // `cursor` written out and not written are the same choice.
+            let same = current == mode || (mode.is_none() && current == Some(MonitorMode::Cursor));
+            !same && se::set_monitor(settings, mode)
+        }
         SearchMsg::Results(choice) => {
             let flat = choice == 1;
             let current = settings.search.as_ref().and_then(|s| s.results);
@@ -480,6 +493,27 @@ fn opening(settings: &Settings, viewport: Viewport, context: &ViewContext<Config
                 "Hotkey",
                 "Opens the search from anywhere.",
                 hotkey_control(settings, context),
+                viewport,
+            ),
+        )
+        .child(
+            "monitor",
+            setting(
+                "Monitor",
+                "Where the search appears. With Focused app, on the desktop or from a tray icon it follows the cursor.",
+                segmented(
+                    &[
+                        Choice::new("Cursor"),
+                        Choice::new("Focused app"),
+                        Choice::new("Main monitor"),
+                    ],
+                    Some(match search.monitor {
+                        Some(MonitorMode::Focus) => 1,
+                        Some(MonitorMode::Primary) => 2,
+                        Some(MonitorMode::Cursor) | None => 0,
+                    }),
+                    search_callback(context, SearchMsg::Monitor),
+                ),
                 viewport,
             ),
         )

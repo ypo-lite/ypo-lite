@@ -28,8 +28,8 @@
 use y_pop::model::{ActionId, ActionsConfig, same_menu};
 use y_pop::search::keys::Chord;
 use y_pop::settings::{
-    ActionEntry, ActionItem, ItemId, ItemKind, MenusMode, ResultsMode, SearchEntry, SearchSection,
-    SearchSettings, SectionKind, Settings,
+    ActionEntry, ActionItem, ItemId, ItemKind, MenusMode, MonitorMode, ResultsMode, SearchEntry,
+    SearchSection, SearchSettings, SectionKind, Settings,
 };
 
 /// Sets `slot` to `new`; whether that changed it.
@@ -91,6 +91,10 @@ pub fn set_override(settings: &mut Settings, on: bool) -> bool {
 
 pub fn set_collapsed(settings: &mut Settings, value: Option<bool>) -> bool {
     edit(settings, |search| put(&mut search.collapsed, value))
+}
+
+pub fn set_monitor(settings: &mut Settings, value: Option<MonitorMode>) -> bool {
+    edit(settings, |search| put(&mut search.monitor, value))
 }
 
 pub fn set_results(settings: &mut Settings, value: Option<ResultsMode>) -> bool {

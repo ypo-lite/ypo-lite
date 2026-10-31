@@ -280,6 +280,8 @@ pub struct SearchConfig {
     pub hotkey: Option<HotkeyBinding>,
     /// Open on the input row alone instead of on Recent and the sections.
     pub collapsed: bool,
+    /// Which monitor the window opens on.
+    pub monitor: SearchMonitor,
     pub results: ResultsLayout,
     /// Buttons on the selected result row; the keys work either way.
     pub row_actions: bool,
@@ -357,6 +359,19 @@ impl SearchConfig {
 /// search compares, so case, accents and a menu's `&` marker make no difference.
 pub fn same_menu(a: &str, b: &str) -> bool {
     fold(&plain(a)) == fold(&plain(b))
+}
+
+/// `monitor="cursor|focus|primary"`: where the search window opens.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum SearchMonitor {
+    /// The monitor the mouse pointer is on.
+    #[default]
+    Cursor,
+    /// The monitor of the application with the focus; the pointer's if no
+    /// application has it.
+    Focus,
+    /// The main monitor.
+    Primary,
 }
 
 /// `results="sections|flat"`.

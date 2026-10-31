@@ -12,7 +12,9 @@ use windows::Win32::Graphics::Gdi::{
     MonitorFromPoint, MonitorFromWindow,
 };
 use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
-use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetClassNameW, GetCursorPos, GetForegroundWindow, IsWindowVisible,
+};
 use windows::core::Result;
 
 /// The reference DPI: 100% scaling.
@@ -50,6 +52,26 @@ impl Monitor {
     /// The monitor a window is mostly on.
     pub fn from_window(hwnd: windows::Win32::Foundation::HWND) -> Self {
         Self::describe(unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) })
+    }
+
+    /// The monitor of the window with the keyboard focus. `None` if that says
+    /// nothing about where the user is: no window has it, it is hidden (a tray
+    /// app's own window, after its menu), or it is the desktop, which spans
+    /// every monitor.
+    pub fn from_foreground() -> Option<Self> {
+        let window = unsafe { GetForegroundWindow() };
+        if window.is_invalid() || !unsafe { IsWindowVisible(window) }.as_bool() {
+            return None;
+        }
+
+        let mut class = [0u16; 16];
+        let length = unsafe { GetClassNameW(window, &mut class) };
+        let class = String::from_utf16_lossy(&class[..length.max(0) as usize]);
+        if matches!(class.as_str(), "Progman" | "WorkerW") {
+            return None;
+        }
+
+        Some(Self::from_window(window))
     }
 
     pub fn primary() -> Self {

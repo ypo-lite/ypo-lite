@@ -48,6 +48,27 @@ fn a_switch_equal_to_its_default_writes_nothing() {
 }
 
 #[test]
+fn the_monitor_writes_only_what_differs_from_the_cursor() {
+    let mut settings = load(r#"<y-pop><search/></y-pop>"#);
+    assert!(!run(&mut settings, SearchMsg::Monitor(0)));
+    assert!(!settings.to_xml().contains("monitor"));
+
+    assert!(run(&mut settings, SearchMsg::Monitor(1)));
+    assert!(settings.to_xml().contains(r#"monitor="focus""#));
+    assert!(run(&mut settings, SearchMsg::Monitor(2)));
+    assert!(settings.to_xml().contains(r#"monitor="primary""#));
+    assert!(!run(&mut settings, SearchMsg::Monitor(2)));
+
+    assert!(run(&mut settings, SearchMsg::Monitor(0)));
+    assert!(!settings.to_xml().contains("monitor"));
+
+    // Written out, it is already the cursor: nothing to change.
+    let mut settings = load(r#"<y-pop><search monitor="cursor"/></y-pop>"#);
+    assert!(!run(&mut settings, SearchMsg::Monitor(0)));
+    assert!(settings.to_xml().contains(r#"monitor="cursor""#));
+}
+
+#[test]
 fn a_section_opens_and_closes_without_changing_the_file() {
     let mut settings = load(r#"<y-pop><search/></y-pop>"#);
     let mut ui = SearchUi::default();

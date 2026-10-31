@@ -150,7 +150,9 @@ fn argument_path() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{MenusBrowse, NodeKind, OpenFolder, PresenterStyle, ResultsLayout, Section};
+    use crate::model::{
+        MenusBrowse, NodeKind, OpenFolder, PresenterStyle, ResultsLayout, SearchMonitor, Section,
+    };
     use crate::variables::Variable;
 
     fn builtins() -> Vec<Variable> {
@@ -540,6 +542,7 @@ mod tests {
         let search = tree.search.as_ref().expect("a <search>");
         assert!(search.hotkey.is_some());
         assert!(!search.collapsed);
+        assert_eq!(search.monitor, SearchMonitor::Cursor);
         assert_eq!(search.results, ResultsLayout::Sections);
         assert!(search.row_actions);
         assert!(search.history);
@@ -652,7 +655,7 @@ mod tests {
     #[test]
     fn section_attributes_are_read() {
         let tree = load_str(
-            r#"<y-pop><search collapsed="true" results="flat" row-actions="false" history="false">
+            r#"<y-pop><search collapsed="true" monitor="focus" results="flat" row-actions="false" history="false">
                 <recent count="9"/>
                 <menus browse="a-z" include="y-pop; Admin tools"/>
                 <start-menu exclude="*uninstall*;Help"/>
@@ -667,6 +670,7 @@ mod tests {
 
         let search = tree.search.unwrap();
         assert!(search.collapsed);
+        assert_eq!(search.monitor, SearchMonitor::Focus);
         assert_eq!(search.results, ResultsLayout::Flat);
         assert!(!search.row_actions);
         assert!(!search.history);
@@ -687,6 +691,18 @@ mod tests {
             exclude.iter().map(|name| name.as_ref()).collect::<Vec<_>>(),
             ["*uninstall*", "Help"]
         );
+    }
+
+    #[test]
+    fn an_unknown_monitor_warns_and_stays_on_the_cursor() {
+        let tree = load_str(
+            r#"<y-pop><search monitor="left"/><group name="y-pop"><quit/></group></y-pop>"#,
+            &mut builtins(),
+        )
+        .expect("valid");
+        assert_eq!(tree.warnings.len(), 1, "{:?}", tree.warnings);
+        assert!(tree.warnings[0].to_string().contains("unknown monitor"));
+        assert_eq!(tree.search.unwrap().monitor, SearchMonitor::Cursor);
     }
 
     #[test]

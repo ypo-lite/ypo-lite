@@ -84,7 +84,9 @@ use y_core::{
     window::WindowHandler,
 };
 
-use y_pop::model::{ActionId, ActionsConfig, App, ConfigTree, NodeId, ResultsLayout, Section};
+use y_pop::model::{
+    ActionId, ActionsConfig, App, ConfigTree, NodeId, ResultsLayout, SearchMonitor, Section,
+};
 use y_pop::search::columns::{Columns, PaneView};
 use y_pop::search::commands::{Command, Line, PREFIXES};
 use y_pop::search::display::{self, LineContext};
@@ -181,6 +183,16 @@ pub enum Pick {
     History(Item),
     /// A file found by `/`, as the tray menu would run it.
     File(App),
+}
+
+/// The monitor to open on, as it stands now.
+fn monitor_for(choice: SearchMonitor) -> Monitor {
+    let at_cursor = || Monitor::from_cursor().unwrap_or_else(|_| Monitor::primary());
+    match choice {
+        SearchMonitor::Cursor => at_cursor(),
+        SearchMonitor::Focus => Monitor::from_foreground().unwrap_or_else(at_cursor),
+        SearchMonitor::Primary => Monitor::primary(),
+    }
 }
 
 /// What the owner keeps: nothing while closed, the open window otherwise.
@@ -307,19 +319,19 @@ impl SearchWindow {
         }
     }
 
-    /// Opens the window on the monitor the cursor is on, themed like the
-    /// tray menus. A no-op while already open.
+    /// Opens the window on the monitor `monitor="…"` asks for, themed like
+    /// the tray menus. A no-op while already open.
     pub fn open(&mut self, tree: &ConfigTree) -> Result<()> {
         if self.is_open() {
             return Ok(());
         }
         self.generation += 1;
 
-        let monitor = Monitor::from_cursor().unwrap_or_else(|_| Monitor::primary());
+        let search = tree.search.as_ref();
+        let monitor = monitor_for(search.map_or_else(Default::default, |search| search.monitor));
         let area = monitor.work_area;
         let (area_width, area_height) = (area.right - area.left, area.bottom - area.top);
 
-        let search = tree.search.as_ref();
         let spec = Spec {
             width: layout::width_for(area_width, monitor.scale()),
             scale: monitor.scale(),

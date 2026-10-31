@@ -16,9 +16,9 @@ use y_core::overlay::Color;
 use y_core::xml::Writer;
 
 use super::{
-    ActionEntry, Comment, Entry, Globals, HotkeyEntry, Item, ItemKind, MenusMode, PopupStyle,
-    Renderer, ResultsMode, SearchEntry, SearchSection, SearchSettings, SectionKind, Settings, Skin,
-    Var, VarEntry,
+    ActionEntry, Comment, Entry, Globals, HotkeyEntry, Item, ItemKind, MenusMode, MonitorMode,
+    PopupStyle, Renderer, ResultsMode, SearchEntry, SearchSection, SearchSettings, SectionKind,
+    Settings, Skin, Var, VarEntry,
 };
 use crate::model::OpenFolder;
 use crate::theme::{EdgeRule, GradientDirection, GradientOverride, SeparatorSpan, Theme};
@@ -301,6 +301,7 @@ fn write_search(writer: &mut Writer, search: &SearchSettings) {
     attributes.text("hotkey", search.hotkey.as_deref());
     attributes.flag("override", search.can_override);
     attributes.bool("collapsed", search.collapsed);
+    attributes.text("monitor", search.monitor.map(MonitorMode::name));
     attributes.text("results", search.results.map(ResultsMode::name));
     attributes.bool("row-actions", search.row_actions);
     attributes.bool("history", search.history);
@@ -362,6 +363,16 @@ fn write_section(writer: &mut Writer, section: &SearchSection) {
         }
     }
     writer.close();
+}
+
+impl MonitorMode {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Cursor => "cursor",
+            Self::Focus => "focus",
+            Self::Primary => "primary",
+        }
+    }
 }
 
 impl ResultsMode {

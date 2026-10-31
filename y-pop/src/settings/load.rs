@@ -19,8 +19,8 @@ use y_core::xml::{self, Comment as XmlComment, Document, Element, Node, Writer};
 
 use super::{
     ActionEntry, ActionItem, AppFields, Comment, Entry, Globals, HotkeyEntry, Item, ItemKind,
-    MenusMode, PopupStyle, Renderer, ResultsMode, SearchEntry, SearchSection, SearchSettings,
-    SectionKind, Settings, Skin, Var, VarEntry,
+    MenusMode, MonitorMode, PopupStyle, Renderer, ResultsMode, SearchEntry, SearchSection,
+    SearchSettings, SectionKind, Settings, Skin, Var, VarEntry,
 };
 use crate::config::{self, LoadError};
 use crate::model::OpenFolder;
@@ -262,6 +262,7 @@ impl Loader {
             hotkey: attrs.take("hotkey"),
             can_override: attrs.bool("override").unwrap_or(false),
             collapsed: attrs.bool("collapsed"),
+            monitor: attrs.parse("monitor", MonitorMode::parse),
             results: attrs.parse("results", ResultsMode::parse),
             row_actions: attrs.bool("row-actions"),
             history: attrs.bool("history"),
@@ -660,6 +661,17 @@ fn parse_bool(text: &str) -> Option<bool> {
         "true" | "yes" | "on" | "1" => Some(true),
         "false" | "no" | "off" | "0" => Some(false),
         _ => None,
+    }
+}
+
+impl MonitorMode {
+    fn parse(text: &str) -> Option<Self> {
+        match text {
+            "cursor" => Some(Self::Cursor),
+            "focus" => Some(Self::Focus),
+            "primary" => Some(Self::Primary),
+            _ => None,
+        }
     }
 }
 

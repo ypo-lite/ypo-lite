@@ -647,7 +647,7 @@ const WITH_SEARCH: &str = r#"<?xml version="1.0" encoding="utf-8"?>
 		<var name="tools" value="%win%\tools"/>
 	</variables>
 	<!-- the launcher -->
-	<search hotkey="Alt+Space" override="true" collapsed="true" results="flat" row-actions="false" history="false" future="x">
+	<search hotkey="Alt+Space" override="true" collapsed="true" monitor="primary" results="flat" row-actions="false" history="false" future="x">
 		<recent count="7"/>
 
 		<!-- natural order -->
@@ -688,6 +688,7 @@ fn search_is_loaded_as_elements_not_as_a_comment() {
     assert_eq!(search.hotkey.as_deref(), Some("Alt+Space"));
     assert!(search.can_override);
     assert_eq!(search.collapsed, Some(true));
+    assert_eq!(search.monitor, Some(MonitorMode::Primary));
     assert_eq!(search.results, Some(ResultsMode::Flat));
     assert_eq!(search.row_actions, Some(false));
     assert_eq!(search.history, Some(false));

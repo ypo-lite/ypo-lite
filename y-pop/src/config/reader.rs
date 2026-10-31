@@ -12,8 +12,8 @@ use y_core::xml::Element;
 use crate::model::{
     ActionBinding, ActionId, ActionsConfig, App, Browse, Builder, ConfigTree, Defaults, EventMask,
     HotkeyBinding, IconSource, MAX_DEPTH, MenusBrowse, NodeData, NodeFlags, NodeId, NodeKind,
-    OpenFolder, PluginSection, PopupMode, PresenterStyle, ResultsLayout, SearchConfig, Section,
-    same_menu,
+    OpenFolder, PluginSection, PopupMode, PresenterStyle, ResultsLayout, SearchConfig,
+    SearchMonitor, Section, same_menu,
 };
 use crate::search::keys::Chord;
 use crate::variables::{self, Lookup, Pool, Variable};
@@ -320,6 +320,7 @@ impl<'b> Reader<'b> {
                 "hotkey",
                 "override",
                 "collapsed",
+                "monitor",
                 "results",
                 "row-actions",
                 "history",
@@ -340,6 +341,15 @@ impl<'b> Reader<'b> {
                         None
                     }
                 });
+        let monitor = match element.attr("monitor") {
+            None | Some("cursor") => SearchMonitor::Cursor,
+            Some("focus") => SearchMonitor::Focus,
+            Some("primary") => SearchMonitor::Primary,
+            Some(other) => {
+                self.warn(element, format!("unknown monitor {other:?}"));
+                SearchMonitor::Cursor
+            }
+        };
         let results = match element.attr("results") {
             None | Some("sections") => ResultsLayout::Sections,
             Some("flat") => ResultsLayout::Flat,
@@ -425,6 +435,7 @@ impl<'b> Reader<'b> {
         Some(SearchConfig {
             hotkey,
             collapsed: element.attr_bool("collapsed").unwrap_or(false),
+            monitor,
             results,
             row_actions: element.attr_bool("row-actions").unwrap_or(true),
             history: element.attr_bool("history").unwrap_or(true),
