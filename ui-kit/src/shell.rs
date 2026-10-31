@@ -20,10 +20,14 @@ const PANE_COMPACT: f64 = 48.0;
 /// slack on the safe side, see [`Viewport`]'s note on approximate widths.
 const CHROME_ALLOWANCE: f64 = 20.0;
 
+/// WinUI's `Standard` title bar. It sits inside the client area, so the
+/// window sizes below include it.
+const TITLE_BAR_HEIGHT: f64 = 32.0;
+
 /// Smallest window the content is designed for — below this the window
 /// simply can't be resized. Everything must still work at this size.
-pub const MIN_WINDOW: (f64, f64) = (560.0, 440.0);
-pub const INITIAL_WINDOW: (f64, f64) = (1180.0, 780.0);
+pub const MIN_WINDOW: (f64, f64) = (560.0, 440.0 + TITLE_BAR_HEIGHT);
+pub const INITIAL_WINDOW: (f64, f64) = (1180.0, 780.0 + TITLE_BAR_HEIGHT);
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct ShellLayout {
@@ -52,6 +56,25 @@ pub fn layout(window_width: f64) -> ShellLayout {
         page_padding,
         content: rest.inset(page_padding),
     }
+}
+
+/// The root of a config app's window: WinUI's `TitleBar` over `body`.
+///
+/// A `Window` keeps the system-drawn caption unless the tree holds a
+/// `TitleBar`, whose presence is what extends the content (and Mica) under
+/// it. Every root the app can return goes through here: a tree without the
+/// bar would put the system caption back.
+///
+/// No app icon, deliberately: `TitleBar` doesn't expose one here, and the
+/// window icon would need an `.ico` file shipped next to the exe.
+///
+/// `title` should be the window's own title, so that the two can't disagree
+/// (`single_instance::bring_to_front` finds the window by it).
+pub fn window_frame(title: &str, body: impl Into<View>) -> View {
+    let title_bar: View = TitleBar::new().title(title).grid_row(0).into();
+    Grid::new()
+        .rows([GridLength::Auto, GridLength::STAR])
+        .keyed_children([("title-bar", title_bar), ("body", cell(body, 1, 0))])
 }
 
 /// The pane's display-mode settings for `layout`.

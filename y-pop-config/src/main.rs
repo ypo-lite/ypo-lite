@@ -501,12 +501,13 @@ impl Component for ConfigApp {
             Err(error) => {
                 let screen = page("Couldn't load y-pop.xml", &error.to_string(), View::empty());
                 let bar = self.bar("y-pop.xml couldn't be loaded", false, None, context);
-                return Grid::new()
+                let app: View = Grid::new()
                     .rows([GridLength::STAR, GridLength::Auto])
                     .keyed_children([
                         ("page", cell(shell::page_frame(screen, layout), 0, 0)),
                         ("bar", bar),
                     ]);
+                return shell::window_frame(ipc::CONFIG_TITLE, app);
             }
         };
 
@@ -608,7 +609,7 @@ impl Component for ConfigApp {
             ));
         }
 
-        let nav = shell::pane_mode(NavigationView::new().pane_title("y-pop"), layout)
+        let nav = shell::pane_mode(NavigationView::new(), layout)
             .on_selected_tag_changed(context.callback(Msg::Navigated))
             .grid_row(0)
             .slots(slots);
@@ -620,7 +621,8 @@ impl Component for ConfigApp {
         let app: View = Grid::new()
             .rows([GridLength::STAR, GridLength::Auto])
             .keyed_children([("nav", nav), ("bar", bar)]);
-        // A picker covers the whole window, bar included.
+        // A picker covers the whole window below the title bar, Save bar
+        // included: the window can still be dragged while one is open.
         let window = Viewport::new(self.window_width);
         let modal = key_edit::key_modal(settings, &self.key_edit, window, context)
             .or_else(|| {
@@ -653,7 +655,8 @@ impl Component for ConfigApp {
         // whole app under it and every scroll position would be lost.
         let mut layers = vec![("app", app)];
         layers.extend(modal.map(|modal| ("modal", modal)));
-        Grid::new().keyed_children(layers)
+        let layers: View = Grid::new().keyed_children(layers);
+        shell::window_frame(ipc::CONFIG_TITLE, layers)
     }
 }
 

@@ -9,7 +9,7 @@ rendering the code can't prove) · ⚠️ partial / open call · ❌ missing.
 
 Every 👁 row is checked by resizing a real window across the thresholds:
 `shell::EXPANDED_PANE_MIN_WINDOW` (1000px), each table's `min_width()`, and each
-`Split`, down to `shell::MIN_WINDOW` (560×440).
+`Split`, down to `shell::MIN_WINDOW` (560×472, title bar included).
 
 ## Shell (`main.rs`, `ui-kit` `shell`)
 
@@ -19,7 +19,7 @@ Every 👁 row is checked by resizing a real window across the thresholds:
 | 2 | Nav pane gives room back on narrow windows | 👁 | Labelled 220px pane ≥ 1000px, 48px rail below. On the rail the group parents ("Settings", "Tray menus") open as flyouts: check they are usable. |
 | 3 | Page scrolls vertically only | ✅ | `page_frame` → `scroll_y`; a screen that scrolls its own panes uses `page_frame_pinned` (no page scroll, the screen gets the window's height; see Tray menu 15). |
 | 4 | Status bar never pushes its buttons off-window | ✅ | `Grid [Star, Auto, Auto, Auto, Auto]` (status, tools, extra, Reload, Save); the status trims, its tooltip has the full text and the file path. |
-| 5 | Window can't be resized below what the layout supports | 👁 | `WindowConstraints` min 560×440. |
+| 5 | Window can't be resized below what the layout supports | 👁 | `WindowConstraints` min 560×472. |
 | 6 | Save is the visually primary action | ✅ | Accent, disabled when clean. Tooltip says what is and isn't kept. |
 | 7 | Load warnings are shown before the first save | 👁 | `InfoBar` above every screen, closable. Unlike `y-snap-config`'s, the text says a save loses nothing. Check how a long list wraps. |
 | 8 | A save applies to the running y-pop | 👁 | `y_pop::ipc::request_reload` after save; the status says whether y-pop was running. |

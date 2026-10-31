@@ -68,7 +68,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     MF_DISABLED, MF_GRAYED, MF_MENUBREAK, MF_OWNERDRAW, MF_POPUP, MF_SEPARATOR, MF_STRING,
     MFS_DISABLED, MFS_HILITE, MFT_OWNERDRAW, MIIM_BITMAP, MIIM_DATA, MIIM_FTYPE, MIIM_STATE,
     MIIM_SUBMENU, MIM_BACKGROUND, PostMessageW, SetForegroundWindow, SetMenuInfo, SetMenuItemInfoW,
-    TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, WM_NULL,
+    TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD, TPM_RIGHTBUTTON, TPM_TOPALIGN,
+    TRACK_POPUP_MENU_FLAGS, TrackPopupMenu, WM_NULL,
 };
 use windows::core::{HSTRING, PCWSTR, Result};
 
@@ -664,19 +665,35 @@ impl PopupMenu {
         handle
     }
 
-    /// Shows the menu at the given screen coordinates and returns the command
-    /// id that was chosen, or `None` if the user dismissed the menu.
-    ///
+    /// Shows the menu above the given screen coordinates, the way a tray menu
+    /// opens, and returns the command id that was chosen, or `None` if the
+    /// user dismissed the menu.
+    pub fn track(&self, owner: HWND, position: POINT) -> Option<u32> {
+        self.track_aligned(owner, position, TPM_BOTTOMALIGN)
+    }
+
+    /// [`PopupMenu::track`], but below the given screen coordinates: for a
+    /// menu opened at the mouse pointer rather than at the taskbar. Windows
+    /// still flips it upwards if it would not fit under the point.
+    pub fn track_below(&self, owner: HWND, position: POINT) -> Option<u32> {
+        self.track_aligned(owner, position, TPM_TOPALIGN)
+    }
+
     /// The `SetForegroundWindow` / `WM_NULL` dance is required for tray menus:
     /// without it the menu would not close when the user clicks elsewhere
     /// (see Microsoft KB135788).
-    pub fn track(&self, owner: HWND, position: POINT) -> Option<u32> {
+    fn track_aligned(
+        &self,
+        owner: HWND,
+        position: POINT,
+        vertical: TRACK_POPUP_MENU_FLAGS,
+    ) -> Option<u32> {
         unsafe {
             let _ = SetForegroundWindow(owner);
 
             let selection = TrackPopupMenu(
                 self.handle,
-                TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_LEFTALIGN | TPM_BOTTOMALIGN,
+                TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_LEFTALIGN | vertical,
                 position.x,
                 position.y,
                 None,

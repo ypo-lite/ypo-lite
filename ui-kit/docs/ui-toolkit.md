@@ -219,7 +219,7 @@ documented defaults; confirm them on a live run if one looks off.
 - [ ] Every container that narrows width hands its children a narrowed `Viewport`.
 - [ ] Tables have honest column minimums; you've looked at the card layout too.
 - [ ] Optional children (editors, banners) are keyed, not positional.
-- [ ] Works at `shell::MIN_WINDOW` (560×440): nothing clipped, nothing sideways.
+- [ ] Works at `shell::MIN_WINDOW` (560×472, title bar included): nothing clipped, nothing sideways.
 - [ ] Works at a maximized 1920px window: nothing absurdly stretched (cap `max_columns`).
 - [ ] Icon-only buttons have tooltips.
 - [ ] `ui-checklist.md` updated for the screen.

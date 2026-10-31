@@ -48,6 +48,23 @@ const APP: AppInfo = AppInfo::new("Y-Pop", ipc::CLASS).single_instance();
 /// notification the user cannot read is a notification wasted.
 const MAX_REPORTED: usize = 6;
 
+/// Where a popup opens, and so which way it grows.
+#[derive(Clone, Copy)]
+enum Anchor {
+    /// At a tray icon: upwards, away from the taskbar.
+    Tray(POINT),
+    /// At the mouse pointer, for what no tray icon opened (a hotkey, a pick in
+    /// the search window): downwards, like any menu on the desktop.
+    Pointer(POINT),
+}
+
+impl Anchor {
+    /// The mouse pointer, wherever it is now.
+    fn pointer() -> Self {
+        Self::Pointer(monitor::cursor_position().unwrap_or(POINT { x: 0, y: 0 }))
+    }
+}
+
 struct YPop {
     tree: ConfigTree,
     tray: Vec<TrayIcon>,
@@ -125,11 +142,11 @@ impl YPop {
 
     /// Acting on `node`, wherever it was reached from: a tray icon click, a
     /// hotkey, or a selection out of an already-open popup. A `Group` opens
-    /// its own popup at `position` rather than being a no-op, so this one
+    /// its own popup at `anchor` rather than being a no-op, so this one
     /// function serves all three call sites.
-    fn run(&mut self, hwnd: HWND, node: NodeId, position: POINT) {
+    fn run(&mut self, hwnd: HWND, node: NodeId, anchor: Anchor) {
         match &self.tree.node(node).kind {
-            NodeKind::Group => self.show_menu(hwnd, Some(node), position, None),
+            NodeKind::Group => self.show_menu(hwnd, Some(node), anchor, None),
             NodeKind::App(app) => launch_and_report(hwnd, app, self.usage()),
             NodeKind::Quit => window::quit(0),
             NodeKind::About => self.show_about(),
@@ -149,17 +166,14 @@ impl YPop {
     fn show_context_menu(&mut self, hwnd: HWND, root: NodeId, position: POINT) {
         let extras = self.tree.tray_extras(root);
         let group = matches!(self.tree.node(root).kind, NodeKind::Group).then_some(root);
-        self.show_menu(hwnd, group, position, Some(extras));
+        self.show_menu(hwnd, group, Anchor::Tray(position), Some(extras));
     }
 
     /// What the user chose in the search window, once it has closed:
     /// `action` done to `node`. (Copying a path is done by the window.)
     fn run_search_pick(&mut self, hwnd: HWND, node: NodeId, action: ActionId) {
         match action {
-            ActionId::Open => {
-                let position = monitor::cursor_position().unwrap_or(POINT { x: 0, y: 0 });
-                self.run(hwnd, node, position);
-            }
+            ActionId::Open => self.run(hwnd, node, Anchor::pointer()),
             // An item outside the tray menus (search-only) has no path yet:
             // the settings app opens without it selected.
             ActionId::Edit => {
@@ -314,7 +328,7 @@ impl YPop {
             .or_else(|| monitor::cursor_position().ok())
             .unwrap_or(POINT { x: 0, y: 0 });
         self.reveal_steps = steps;
-        self.show_menu(hwnd, Some(root), position, None);
+        self.show_menu(hwnd, Some(root), Anchor::Tray(position), None);
     }
 
     /// Does what an entry of the right-click menu says.
@@ -336,7 +350,7 @@ impl YPop {
         &mut self,
         hwnd: HWND,
         group: Option<NodeId>,
-        position: POINT,
+        anchor: Anchor,
         extras: Option<TrayExtras>,
     ) {
         // Keys for this popup only, whether or not it ends up opening.
@@ -375,7 +389,10 @@ impl YPop {
                     unsafe { PostMessageW(Some(hwnd), message, WPARAM(key.0 as usize), LPARAM(0)) };
             }
         }
-        let selected = popup.track(hwnd, position);
+        let selected = match anchor {
+            Anchor::Tray(position) => popup.track(hwnd, position),
+            Anchor::Pointer(position) => popup.track_below(hwnd, position),
+        };
         self.tooltip.hide(hwnd);
         // Taken, not just read: nothing after this point still needs a
         // browse folder's bookkeeping, and a stray WM_INITMENUPOPUP for
@@ -388,7 +405,7 @@ impl YPop {
             && let Some(selection) = menu::resolve_selection(id, &mut session)
         {
             match selection {
-                menu::Selection::Node(node) => self.run(hwnd, node, position),
+                menu::Selection::Node(node) => self.run(hwnd, node, anchor),
                 menu::Selection::Launch(app) => launch_and_report(hwnd, &app, self.usage()),
                 menu::Selection::Extra(extra) => self.run_extra(extra),
             }
@@ -663,7 +680,7 @@ impl TrayApp for YPop {
                 if event == TrayEvent::ContextMenu {
                     self.show_context_menu(hwnd, root, position);
                 } else {
-                    self.run(hwnd, root, position);
+                    self.run(hwnd, root, Anchor::Tray(position));
                 }
             }
             return Some(LRESULT(0));
@@ -747,8 +764,7 @@ impl TrayApp for YPop {
                     y_core::log::line(format_args!("search could not open: {error}"));
                 }
             } else if let Some(node) = self.tree.hotkey_owner(wparam.0 as u32) {
-                let position = monitor::cursor_position().unwrap_or(POINT { x: 0, y: 0 });
-                self.run(hwnd, node, position);
+                self.run(hwnd, node, Anchor::pointer());
             }
             return Some(LRESULT(0));
         }

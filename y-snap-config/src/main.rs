@@ -345,14 +345,12 @@ impl Component for ConfigApp {
             Ok(settings) => settings,
             // Nothing to edit if the file can't be read — say why, plainly.
             Err(error) => {
-                return shell::page_frame(
-                    page(
-                        "Couldn't load y-snap.xml",
-                        &error.to_string(),
-                        View::empty(),
-                    ),
-                    layout,
+                let screen = page(
+                    "Couldn't load y-snap.xml",
+                    &error.to_string(),
+                    View::empty(),
                 );
+                return shell::window_frame(ipc::CONFIG_TITLE, shell::page_frame(screen, layout));
             }
         };
 
@@ -463,7 +461,7 @@ impl Component for ConfigApp {
             ));
         }
 
-        let nav = shell::pane_mode(NavigationView::new().pane_title("y-snap"), layout)
+        let nav = shell::pane_mode(NavigationView::new(), layout)
             .on_selected_tag_changed(context.callback(move |tag: Option<String>| {
                 Msg::SelectSection(
                     tag.as_deref()
@@ -515,9 +513,10 @@ impl Component for ConfigApp {
         );
 
         // Nav takes the height the bar doesn't (`Star` over `Auto`).
-        Grid::new()
+        let app: View = Grid::new()
             .rows([GridLength::STAR, GridLength::Auto])
-            .keyed_children([("nav", nav), ("bar", bar)])
+            .keyed_children([("nav", nav), ("bar", bar)]);
+        shell::window_frame(ipc::CONFIG_TITLE, app)
     }
 }
 

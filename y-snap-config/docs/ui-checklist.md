@@ -9,7 +9,7 @@ rendering the code can't prove) · ⚠️ partial / open call · ❌ missing.
 
 Every 👁 row is checked by resizing a real window across the thresholds:
 `shell::EXPANDED_PANE_MIN_WINDOW` (1000px), each table's `min_width()`, and the
-Overlay `Split`, down to `shell::MIN_WINDOW` (560×440).
+Overlay `Split`, down to `shell::MIN_WINDOW` (560×472, title bar included).
 
 ## Shell (`main.rs`, `shell.rs`)
 
@@ -19,7 +19,7 @@ Overlay `Split`, down to `shell::MIN_WINDOW` (560×440).
 | 2 | Nav pane gives room back on narrow windows | 👁 | Labelled 220px pane ≥ 1000px, 48px icon rail (`LeftCompact`) below. Check the rail shows tooltips and the switch doesn't flicker at the threshold. |
 | 3 | Page scrolls vertically only; nothing scrolls sideways | ✅ | `page_frame` → `scroll_y`. No other `ScrollViewer` in the app. |
 | 4 | Status bar never pushes its buttons off-window | ✅ | `Grid [Star, Auto, Auto]`; status trims with an ellipsis, full text and file path in the tooltip. |
-| 5 | Window can't be resized below what the layout supports | 👁 | `WindowConstraints` min 560×440. |
+| 5 | Window can't be resized below what the layout supports | 👁 | `WindowConstraints` min 560×472. |
 | 6 | Save is the visually primary action | ✅ | Accent style, disabled when nothing changed. Tooltip says comments and formatting aren't kept. |
 | 7 | Parts of the file that failed to load are shown before a save can drop them | 👁 | `shell::warnings_banner` (an `InfoBar`) above every screen, closable; status turns red ("saving drops what couldn't be read") while there are unsaved changes. Check how a long list wraps. |
 | 8 | A save applies to the running y-snap | 👁 | `y_snap::ipc::request_reload` after save; status says whether y-snap was running. Check: edit a hotkey, Save, use it straight away without touching the tray. |
