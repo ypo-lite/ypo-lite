@@ -25,8 +25,9 @@ use windows::Win32::{
 use y_core::{
     Result,
     ids::WM_APP_FIRST,
+    memory,
     monitor::Monitor,
-    overlay::{ColorFont, Overlay, OverlaySpec, TextAlign},
+    overlay::{ColorFont, Overlay, OverlaySpec, TextAlign, release_color_text},
     window::WindowHandler,
 };
 
@@ -147,6 +148,13 @@ impl MinOverlay {
             overlay.hide();
         }
         mouse::set_overlay_hwnd(HWND::default());
+
+        // This popup hides far too often to trim every time, and only rarely
+        // has anything new to give back: trim on the hide after a first
+        // render, which is the one that left Direct2D's pages behind.
+        if release_color_text() {
+            let _ = memory::trim_working_set();
+        }
     }
 
     /// The pointer moved onto, off, or between tiles — `None` for "off every

@@ -1,10 +1,8 @@
 //! Helper for the applications' `build.rs`, behind the `build` feature.
 //!
 //! ```no_run
-//! // y-snap/build.rs
-//! fn main() {
-//!     y_core::build::embed_resources("rsc/y-snap.rc");
-//! }
+//! // In `main` of y-snap/build.rs:
+//! y_core::build::embed_resources("rsc/y-snap.rc");
 //! ```
 //!
 //! `embed-resource` picks whichever resource compiler the active toolchain

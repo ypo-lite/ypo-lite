@@ -135,6 +135,8 @@ impl YSnap {
         self.action_overlay = None;
         self.settings = None;
         self.problem = None;
+        // Icons, fonts and colours may all be about to change.
+        y_core::overlay::forget_color_text();
 
         let settings = match Settings::load() {
             Ok(settings) => settings,
@@ -491,9 +493,8 @@ impl YSnap {
             self.perform(action, Some(target), desktop);
         }
 
-        // The overlay stays alive once created (`close` only hides it, for
-        // instant reuse next time), so its layered-window bitmap and tile
-        // state are still fully committed here, just idle — exactly the
+        // `close` destroyed the popup and released Direct2D and DirectWrite,
+        // whose pages are idle now if this open needed them — exactly the
         // burst-is-over case `y_core::memory`'s own doc comment calls out,
         // not the hot-loop one it warns against: the overlay now sits
         // closed for as long as the user is doing something else, almost
@@ -875,9 +876,9 @@ impl TrayApp for YSnap {
         self.mouse_hook = None;
         self.min_overlay = None;
         self.action_overlay = None;
-        // After the overlays, whose canvases and fonts hold Direct2D
-        // objects. Left to process exit, tearing Direct2D/DirectWrite down
-        // takes seconds once anything has been drawn.
+        // A paint may have run since the last close. Left to process exit,
+        // tearing Direct2D/DirectWrite down takes seconds once anything has
+        // been drawn.
         y_core::overlay::release_color_text();
         self.tray = None;
     }

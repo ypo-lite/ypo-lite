@@ -91,6 +91,9 @@ fn key_events(context: &ViewContext<ConfigApp>) -> KeyPickerEvents {
 
 struct ConfigApp {
     settings: Result<Settings, LoadError>,
+    /// Whether there was no file to load: `settings` is then empty, and Save
+    /// creates the file.
+    missing: bool,
     section: Section,
     /// Whether anything has changed since the last load or save.
     dirty: bool,
@@ -304,13 +307,24 @@ enum Msg {
     QuickActionAdded,
 }
 
+/// Reads y-snap.xml. A missing file is not a failure here: it is an empty
+/// [`Settings`], and whether that is the case comes back alongside it.
+fn load() -> (Result<Settings, LoadError>, bool) {
+    match Settings::load() {
+        Err(LoadError::Missing(path)) => (Ok(Settings::empty(path)), true),
+        loaded => (loaded, false),
+    }
+}
+
 impl Component for ConfigApp {
     type Input = ();
     type Message = Msg;
 
     fn create(_input: &(), _context: &ComponentContext<Self>) -> Self {
+        let (settings, missing) = load();
         Self {
-            settings: Settings::load(),
+            settings,
+            missing,
             section: Section::Hotkeys,
             dirty: false,
             save_error: None,
@@ -338,7 +352,7 @@ impl Component for ConfigApp {
             Msg::WarningsDismissed => self.warnings_dismissed = true,
             Msg::Reload => {
                 self.editing = None;
-                self.settings = Settings::load();
+                (self.settings, self.missing) = load();
                 self.dirty = false;
                 self.save_error = None;
                 self.warnings_dismissed = false;
@@ -525,6 +539,7 @@ impl Component for ConfigApp {
                         .to_owned(),
                     true,
                 ),
+                None if self.missing => ("No y-snap.xml yet — Save creates it".to_owned(), true),
                 None => (summary(settings), true),
             },
         };
@@ -1097,6 +1112,7 @@ impl ConfigApp {
             Msg::Save => match settings.save() {
                 Ok(()) => {
                     self.dirty = false;
+                    self.missing = false;
                     self.save_error = None;
                     // What they described is no longer in the file.
                     settings.warnings.clear();

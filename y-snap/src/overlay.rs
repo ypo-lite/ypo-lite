@@ -298,11 +298,16 @@ impl ActionOverlay {
     /// [`show`](Self::show) (the same path `show` already takes when the
     /// tile count itself changes) is the right side to be cheap on, in
     /// keeping with this project's own low-memory goal.
+    ///
+    /// Direct2D and DirectWrite go for the same reason, here rather than in
+    /// the caller so that [`show`](Self::show)'s own close counts too: every
+    /// icon is kept as pixels by now, so a next show needs neither.
     pub fn close(&mut self) {
         self.target = None;
         self.hovered = None;
         self.overlay = None;
         self.border = None;
+        y_core::overlay::release_color_text();
     }
 
     /// The action, target and (for `desktop-move`) desktop number for tile

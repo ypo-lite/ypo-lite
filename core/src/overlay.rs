@@ -62,11 +62,17 @@ use crate::window::{self, WindowHandler, WindowSpec};
 #[cfg(feature = "color-text")]
 mod color_text;
 #[cfg(feature = "color-text")]
-pub use color_text::{ColorFont, release as release_color_text};
+pub use color_text::{ColorFont, forget as forget_color_text, release as release_color_text};
 
 /// Nothing to release without the `color-text` feature.
 #[cfg(not(feature = "color-text"))]
-pub fn release_color_text() {}
+pub fn release_color_text() -> bool {
+    false
+}
+
+/// Nothing to forget without the `color-text` feature.
+#[cfg(not(feature = "color-text"))]
+pub fn forget_color_text() {}
 
 /// GDI stand-in for the DirectWrite `ColorFont`: same API, monochrome emoji.
 #[cfg(not(feature = "color-text"))]
@@ -430,9 +436,6 @@ pub struct Canvas {
     previous: HGDIOBJ,
     pixels: *mut u32,
     size: (i32, i32),
-    /// Direct2D's view of `dc`, created on the first [`Canvas::draw_text_color`].
-    #[cfg(feature = "color-text")]
-    target: Option<windows::Win32::Graphics::Direct2D::ID2D1DCRenderTarget>,
 }
 
 impl Canvas {
@@ -489,8 +492,6 @@ impl Canvas {
             previous,
             pixels: pixels as *mut u32,
             size,
-            #[cfg(feature = "color-text")]
-            target: None,
         })
     }
 
@@ -1040,11 +1041,6 @@ fn for_each_rect_corner_pixel(
 
 impl Drop for Canvas {
     fn drop(&mut self) {
-        // Release Direct2D's hold on the DC before deleting it.
-        #[cfg(feature = "color-text")]
-        {
-            self.target = None;
-        }
         unsafe {
             SelectObject(self.dc, self.previous);
             let _ = DeleteObject(self.bitmap.into());

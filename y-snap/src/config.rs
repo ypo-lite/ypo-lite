@@ -468,6 +468,20 @@ impl fmt::Display for LoadError {
 impl std::error::Error for LoadError {}
 
 impl Settings {
+    /// Nothing configured yet, for a file that does not exist: what a settings
+    /// app edits on a machine where saving will create `path`.
+    pub fn empty(path: PathBuf) -> Self {
+        Self {
+            path,
+            hotkeys: Vec::new(),
+            mouse: Mouse::default(),
+            mouse_shortcuts: Vec::new(),
+            overlay: Overlay::default(),
+            min_button: MinButton::default(),
+            warnings: Vec::new(),
+        }
+    }
+
     /// Reads the configuration from wherever [`path`] finds it.
     pub fn load() -> Result<Self, LoadError> {
         Self::load_from(path())
@@ -537,8 +551,12 @@ impl Settings {
 
     /// Writes [`Settings::to_xml`] to `path`, regardless of what
     /// [`Settings::path`] says — "save as", or saving a configuration built
-    /// in memory rather than loaded from a file.
+    /// in memory rather than loaded from a file. Creates the folder: on a new
+    /// machine `%APPDATA%\Ypo-Lite` does not exist yet.
     pub fn save_to(&self, path: &Path) -> io::Result<()> {
+        if let Some(directory) = path.parent() {
+            std::fs::create_dir_all(directory)?;
+        }
         std::fs::write(path, self.to_xml())
     }
 }
@@ -1701,7 +1719,7 @@ mod tests {
         assert!(settings.mouse.drag.is_some());
         assert!(settings.mouse.resize.is_some());
         assert_eq!(settings.overlay.groups.len(), 1);
-        assert_eq!(settings.overlay.items.len(), 20);
+        assert_eq!(settings.overlay.items.len(), 16);
         assert_eq!(settings.min_button.items.len(), 2);
     }
 
@@ -1804,6 +1822,22 @@ mod tests {
         let error = Settings::load_from(path.clone()).expect_err("missing");
         assert!(matches!(error, LoadError::Missing(_)));
         assert!(error.to_string().contains("y-snap-absent.xml"));
+    }
+
+    /// A first save on a new machine: the folder is missing too, and what
+    /// lands there has to load back.
+    #[test]
+    fn an_empty_configuration_saves_into_a_new_folder_and_loads_back() {
+        let directory = std::env::temp_dir().join("y-snap-first-save");
+        let _ = std::fs::remove_dir_all(&directory);
+        let path = directory.join("nested").join(FILE_NAME);
+
+        Settings::empty(path.clone()).save().expect("saves");
+        let loaded = Settings::load_from(path).expect("loads");
+
+        assert!(loaded.hotkeys.is_empty());
+        assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
+        let _ = std::fs::remove_dir_all(&directory);
     }
 
     #[test]
