@@ -28,8 +28,8 @@ IDI_APP_ICON ICON "y-snap.ico"
 // Version information (Explorer's "Details" tab)
 
 1 VERSIONINFO
- FILEVERSION    0,1,0,0
- PRODUCTVERSION 0,1,0,0
+ FILEVERSION    0,2,0,0
+ PRODUCTVERSION 0,2,0,0
  FILEFLAGSMASK  0x3fL
  FILEFLAGS      0x0L
  FILEOS         0x40004L   // VOS_NT_WINDOWS32
@@ -42,12 +42,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName",      "ypo-lite"
             VALUE "FileDescription",  "y-snap"
-            VALUE "FileVersion",      "0.1.0.0"
+            VALUE "FileVersion",      "0.2.0.0"
             VALUE "InternalName",     "y-snap"
             VALUE "LegalCopyright",   "Copyright (C) 2026"
             VALUE "OriginalFilename", "y-snap.exe"
             VALUE "ProductName",      "y-snap"
-            VALUE "ProductVersion",   "0.1.0.0"
+            VALUE "ProductVersion",   "0.2.0.0"
         END
     END
     BLOCK "VarFileInfo"
