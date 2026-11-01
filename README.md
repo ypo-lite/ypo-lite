@@ -12,7 +12,7 @@ executable, with no DLL plugins and no background service.
 | Tool | What it does | Rewrite of | State |
 | --- | --- | --- | --- |
 | **[Y-Snap](y-snap/README.md)** | Window management by hotkey, mouse gesture and overlay: minimize, maximize, roll up, fade, strip the frame, hide behind a tray icon, pin to every virtual desktop or send to another one | HulK | Usable |
-| **[Y-Pop](y-pop/docs/user-manual.md)** | A tray icon whose menu launches your programs, and a search window that finds them as you type | PortAL | Usable |
+| **[Y-Pop](y-pop/README.md)** | A tray icon whose menu launches your programs, and a search window that finds them as you type | PortAL | Usable |
 | **Y-Term** | | | Placeholder |
 | **Y-Coustic** | | | Placeholder |
 

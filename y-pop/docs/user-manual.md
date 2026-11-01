@@ -4,10 +4,11 @@ y-pop is a tray utility: an icon in the notification area whose menu launches
 your programs, and a **search window** that finds them by typing. Everything
 is configured in one file, `y-pop.xml`.
 
-This manual describes **what works today**. Each section ends, where it
-matters, with what is not there yet. The design behind it is in
-`overlay-modes.md` (the search spec) and `search-plan.md` (the build plan);
-this page is for using it. It grows with each feature.
+This manual is about the search window, and describes **what works today**.
+Each section ends, where it matters, with what is not there yet. Tray icons, menu
+items, hotkeys, variables and themes are in the [README](../README.md). The
+design behind search is in `overlay-modes.md` (the spec) and `search-plan.md`
+(the build plan); this page is for using it. It grows with each feature.
 
 - [The configuration file](#the-configuration-file)
 - [The search window](#the-search-window)
@@ -24,14 +25,16 @@ this page is for using it. It grows with each feature.
 
 ## The configuration file
 
-`y-pop.xml` lives in `%APPDATA%\Ypo-Lite\`. y-pop reads it at start-up and
-again when `y-pop-config` saves it.
+`y-pop.xml` lives in `%APPDATA%\Ypo-Lite\`, or next to `y-pop.exe` for a portable
+copy ([the full order](../README.md#the-configuration-file)). y-pop reads it at
+start-up, when `y-pop-config` saves it, and with `>Reload configuration`.
 
-A mistake in the XML itself (a tag left open) stops the file from loading, and
-the message gives the line. Anything else that is recognised but wrong — an
-unknown attribute, a shortcut that cannot work — is only a **warning**: a
-balloon at start-up tells you, the rest of the file still loads, and the
-details are in the log.
+A mistake in the XML itself (a tag left open) stops the file from loading. At
+start-up y-pop then runs with no tray icon, and `y-pop.log`, next to the file,
+gives the line; on a reload it keeps the configuration it has. Anything else
+that is recognised but wrong — an unknown attribute, a shortcut that cannot work
+— is only a **warning**: a balloon at start-up tells you, the rest of the file
+still loads, and the details are in the log.
 
 A minimal file:
 
@@ -44,8 +47,8 @@ A minimal file:
 </y-pop>
 ```
 
-Each top-level element is a **tray icon**. A group gives the icon a menu; the
-menu is the group's contents.
+Each top-level `<group>` or `<app>` is a **tray icon**. A group gives the icon a
+menu; the menu is the group's contents.
 
 ---
 
