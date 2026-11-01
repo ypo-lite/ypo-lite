@@ -68,6 +68,7 @@ use windows::Win32::{
 };
 use windows::core::Result;
 use y_core::ids::WM_APP_FIRST;
+use y_core::monitor::Monitor;
 
 use crate::action::Target;
 use crate::config::{Button, Mouse, MouseShortcut, MouseTrigger};
@@ -146,6 +147,44 @@ pub fn apply_pending_gesture() {
             SWP_NOZORDER | SWP_NOACTIVATE,
         )
     };
+}
+
+/// Posted to the owner window when the pointer of a pinned drag (a maximized
+/// window, with `allow-maximized` off) has reached another monitor. The
+/// window and the point are read from [`PENDING_MONITOR`]. Handled in
+/// [`crate`]'s message loop by [`apply_pending_monitor`].
+pub const WM_GESTURE_MONITOR: u32 = WM_APP_FIRST + 9;
+
+thread_local! {
+    /// Set by [`queue_monitor`], consumed by [`apply_pending_monitor`]. The
+    /// latest crossing wins, as with [`PENDING_APPLY`]. It carries the point
+    /// and not a monitor handle: a monitor unplugged meanwhile cannot be
+    /// dereferenced, and the point is resolved when it is used.
+    static PENDING_MONITOR: Cell<Option<(HWND, POINT)>> = const { Cell::new(None) };
+}
+
+fn queue_monitor(owner: HWND, window: HWND, pt: POINT) {
+    let already_queued = PENDING_MONITOR.with(|cell| cell.replace(Some((window, pt))).is_some());
+    if !already_queued {
+        let _ = unsafe { PostMessageW(Some(owner), WM_GESTURE_MONITOR, WPARAM(0), LPARAM(0)) };
+    }
+}
+
+/// Handles `WM_GESTURE_MONITOR`: takes the window to the monitor the pointer
+/// is on now. Does nothing when the window is gone or already there, which
+/// absorbs a quick wobble across a boundary.
+pub fn apply_pending_monitor() {
+    let Some((window, pt)) = PENDING_MONITOR.with(|cell| cell.take()) else {
+        return;
+    };
+    if !crate::window::exists(window) {
+        return;
+    }
+    let target = Monitor::from_point(pt);
+    if Monitor::from_window(window).handle == target.handle {
+        return;
+    }
+    crate::window::move_to_monitor(window, &target);
 }
 
 /// `wParam` of the `WM_TIMER` that drives [`MouseHook::check_liveness`] —
@@ -404,8 +443,11 @@ impl HookState {
     /// tracking only runs when neither is.
     fn on_move(&mut self, pt: POINT) {
         match self.gesture.on_move(pt) {
-            Some((window, rect)) => queue_apply(self.owner, window, rect),
-            None => self.hover.update(pt),
+            gesture::Step::Apply(window, rect) => queue_apply(self.owner, window, rect),
+            gesture::Step::Monitor(window, pt) => queue_monitor(self.owner, window, pt),
+            // A pinned gesture owns the pointer too: no popup meanwhile.
+            gesture::Step::Claimed => {}
+            gesture::Step::Idle => self.hover.update(pt),
         }
     }
 }

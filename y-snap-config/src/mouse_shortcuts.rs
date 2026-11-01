@@ -348,6 +348,7 @@ mod tests {
                 modifiers: MOD_WIN,
             }),
             resize: None,
+            allow_maximized: false,
         };
         let next = first_free(&[], &mouse).expect("something is free");
         assert_ne!(

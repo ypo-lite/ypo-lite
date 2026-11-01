@@ -262,6 +262,7 @@ enum Msg {
     HotkeyAdded,
 
     GestureToggled(GestureKind, bool),
+    AllowMaximizedToggled(bool),
     GestureButtonChanged(GestureKind, Option<usize>),
     GestureModifierToggled(GestureKind, HOT_KEY_MODIFIERS),
 
@@ -755,6 +756,10 @@ impl ConfigApp {
                     button: MouseButton::Left,
                     modifiers: HOT_KEY_MODIFIERS(0),
                 });
+                self.dirty = true;
+            }
+            Msg::AllowMaximizedToggled(allow) => {
+                settings.mouse.allow_maximized = allow;
                 self.dirty = true;
             }
             Msg::GestureButtonChanged(kind, Some(choice)) => {

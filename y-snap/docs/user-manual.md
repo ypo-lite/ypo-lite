@@ -18,6 +18,7 @@ page shows the ones you are likely to want. The design notes are in
 - [What each action does](#what-each-action-does)
 - [Hidden windows](#hidden-windows)
 - [Virtual desktops](#virtual-desktops)
+- [Several monitors](#several-monitors)
 - [Mouse shortcuts](#mouse-shortcuts)
 - [Changing the configuration](#changing-the-configuration)
 - [Not there yet](#not-there-yet)
@@ -108,6 +109,18 @@ The modifiers must match exactly: `Ctrl+Alt` + drag does nothing when the gestur
 is `Alt`. You may let go of the modifier and the button in either order, and doing
 so will not open the window's system menu or the Start menu.
 
+**Maximized windows** do not follow the pointer. Drag one and it stays where it is,
+until the pointer reaches **another monitor**: the window then goes there, still
+maximized, and restores on that monitor when you un-maximize it. Resizing a maximized
+window does nothing. If you would rather they move and resize like any other window,
+switch on *Allow on maximized windows* in the settings app (`allow-maximized="true"`
+on `<mouse>`).
+
+> **Changed in this version.** A maximized window used to slide around under an
+> `Alt` drag, still flagged as maximized and the wrong size for where it landed. It
+> no longer does, with no change to your configuration. `allow-maximized="true"`
+> brings the old behaviour back.
+
 To use other buttons or modifiers, see [Mouse gestures](#changing-the-configuration)
 in the settings app, or `<drag>` and `<resize>` in the
 [configuration reference](configuration.md#mouse).
@@ -182,6 +195,7 @@ mouse shortcuts alike. Most are toggles: do it again to undo it.
 | `center-cursor` | puts the pointer in the middle of the window | Useful for finding a window on a wide desktop |
 | `iconize` `traynize` | hide the window, see [Hidden windows](#hidden-windows) | |
 | `uniconize` `uniconize-all` | bring back the last hidden window, or all of them | Need no target window |
+| `monitor-move-next` `monitor-move-prev` `monitor-send-next` `monitor-send-prev` | send the window to another monitor | See [Several monitors](#several-monitors) |
 | `overlay` | opens the action overlay | |
 | `reload` `quit` | y-snap itself | |
 
@@ -246,6 +260,50 @@ hotkey they only switch.
 Windows has no public interface for any of this, so y-snap uses a private one that
 can change with a Windows update. See
 [Troubleshooting](#troubleshooting) if these actions stop working.
+
+---
+
+## Several monitors
+
+| Action | Does |
+| --- | --- |
+| `monitor-move-next` `monitor-move-prev` | move the window to the next or previous monitor **and take the pointer along** |
+| `monitor-send-next` `monitor-send-prev` | **send** the window there; the pointer stays where it is |
+
+Monitors are counted by position, left to right and then top to bottom, and the
+count goes round at the ends. With one monitor, or with a minimized window, nothing
+happens.
+
+- A normal window keeps its place and size relative to the monitor's work area,
+  clamped to fit. If the new monitor is smaller, the window shrinks to fit it.
+- A window snapped to half a screen stays that half on the new monitor.
+- A maximized window stays maximized, with no flicker, and restores on the new
+  monitor.
+- Between screens with different scaling, the program may resize itself as Windows
+  tells it about the change; y-snap then makes sure the result still fits.
+
+The pair is there for `target="pointed"`: after a `send`, the pointer is over
+whatever lies beneath the window's old place, so pressing again moves *that* window.
+`move` follows the window, so repeating it walks one window round all your monitors.
+
+None is bound by default. The overlay offers `Up` and `Down` for the previous and
+next monitor (`send`, since the pointer is on the overlay). To bind your own:
+
+```xml
+<hotkeys>
+	<hotkey key="Ctrl+Win+Alt+Left"  action="monitor-move-prev" target="focused"/>
+	<hotkey key="Ctrl+Win+Alt+Right" action="monitor-move-next" target="focused"/>
+</hotkeys>
+<mouse>
+	<shortcut button="wheel-left"  mod="Win" action="monitor-move-prev"/>
+	<shortcut button="wheel-right" mod="Win" action="monitor-move-next"/>
+	<shortcut button="x1"          mod="Win" action="monitor-move-prev"/>
+	<shortcut button="x2"          mod="Win" action="monitor-move-next"/>
+</mouse>
+```
+
+`Win+Shift+Left/Right` is Windows' own move-to-monitor and needs
+`steal-from-shell="true"` to be taken.
 
 ---
 

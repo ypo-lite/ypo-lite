@@ -104,6 +104,11 @@ pub struct Binding {
 pub struct Mouse {
     pub drag: Option<Gesture>,
     pub resize: Option<Gesture>,
+    /// `allow-maximized` on `<mouse>`: whether drag and resize act on a
+    /// maximized window as they do on any other. Off by default, in which case
+    /// a maximized window stays put until the pointer crosses to another
+    /// monitor, and then goes there still maximized.
+    pub allow_maximized: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -562,7 +567,12 @@ impl Settings {
 }
 
 fn write_mouse(out: &mut String, mouse: &Mouse, shortcuts: &[MouseShortcut]) {
-    out.push_str("\t<mouse>\n");
+    // Written only when true: false is what a missing attribute means.
+    if mouse.allow_maximized {
+        out.push_str("\t<mouse allow-maximized=\"true\">\n");
+    } else {
+        out.push_str("\t<mouse>\n");
+    }
     for (name, gesture) in [("drag", mouse.drag), ("resize", mouse.resize)] {
         let Some(gesture) = gesture else { continue };
         let _ = write!(out, "\t\t<{name} button=\"{}\"", gesture.button.name());
@@ -1030,6 +1040,17 @@ impl Reader {
         };
 
         let mut mouse = Mouse::default();
+
+        self.check(section, &["allow-maximized"]);
+        if let Some(text) = section.attr("allow-maximized") {
+            match section.attr_bool("allow-maximized") {
+                Some(allow) => mouse.allow_maximized = allow,
+                None => self.warn(
+                    section,
+                    format!("allow-maximized {text:?} is not true or false"),
+                ),
+            }
+        }
 
         for element in section.children() {
             let slot = match element.name() {
@@ -1556,6 +1577,41 @@ mod tests {
     }
 
     #[test]
+    fn allow_maximized_is_off_by_default_and_round_trips_when_on() {
+        let off = load(
+            "maximized-off",
+            r#"<y-snap><mouse><drag button="left"/></mouse></y-snap>"#,
+        );
+        assert!(!off.mouse.allow_maximized);
+        assert!(!off.to_xml().contains("allow-maximized"));
+
+        let on = load(
+            "maximized-on",
+            r#"<y-snap><mouse allow-maximized="true"><drag button="left"/></mouse></y-snap>"#,
+        );
+        assert!(on.warnings.is_empty(), "{:?}", on.warnings);
+        assert!(on.mouse.allow_maximized);
+
+        let saved = std::env::temp_dir().join("y-snap-maximized-roundtrip.xml");
+        std::fs::write(&saved, on.to_xml()).expect("writes");
+        let reloaded = Settings::load_from(saved.clone()).expect("reloads");
+        let _ = std::fs::remove_file(&saved);
+        assert!(reloaded.mouse.allow_maximized);
+        assert!(reloaded.warnings.is_empty(), "{:?}", reloaded.warnings);
+    }
+
+    #[test]
+    fn a_bad_allow_maximized_is_a_warning_and_means_off() {
+        let settings = load(
+            "maximized-bad",
+            r#"<y-snap><mouse allow-maximized="sometimes"><drag button="left"/></mouse></y-snap>"#,
+        );
+        assert!(!settings.mouse.allow_maximized);
+        assert_eq!(settings.warnings.len(), 1, "{:?}", settings.warnings);
+        assert!(settings.mouse.drag.is_some());
+    }
+
+    #[test]
     fn shortcut_problem_names_the_clash() {
         let mouse = Mouse {
             drag: Some(Gesture {
@@ -1563,6 +1619,7 @@ mod tests {
                 modifiers: MOD_ALT,
             }),
             resize: None,
+            allow_maximized: false,
         };
         let shortcut = |trigger, modifiers| MouseShortcut {
             trigger,
@@ -1728,7 +1785,7 @@ mod tests {
         assert!(settings.mouse.drag.is_some());
         assert!(settings.mouse.resize.is_some());
         assert_eq!(settings.overlay.groups.len(), 1);
-        assert_eq!(settings.overlay.items.len(), 16);
+        assert_eq!(settings.overlay.items.len(), 18);
         assert_eq!(settings.min_button.items.len(), 2);
     }
 

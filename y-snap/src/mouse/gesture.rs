@@ -45,6 +45,8 @@
 //! timeout.
 
 use windows::Win32::Foundation::{HWND, POINT, RECT};
+use windows::Win32::Graphics::Gdi::HMONITOR;
+use y_core::monitor;
 
 use crate::config::{Button, Gesture as GestureConfig, Mouse};
 use crate::target;
@@ -56,11 +58,43 @@ use super::modifiers_held;
 /// A window resized down to nothing is not a feature.
 const MIN_SIZE: i32 = 32;
 
+/// What the pointer moving means for the gesture in progress.
+pub enum Step {
+    /// Put the window at this rect.
+    Apply(HWND, RECT),
+    /// The pointer of a pinned drag reached another monitor, at this point:
+    /// take the window there.
+    Monitor(HWND, POINT),
+    /// A pinned gesture is in progress and there is nothing to do, but the
+    /// move is not for hover tracking either.
+    Claimed,
+    /// No gesture: the move is free for hover tracking.
+    Idle,
+}
+
 /// Drag and resize state.
 pub struct Gesture {
     config: Mouse,
     drag: Option<Move>,
     resize: Option<Resize>,
+    /// A drag or resize that started on a maximized window while
+    /// `allow-maximized` is off. See [`Pinned`].
+    pinned: Option<Pinned>,
+}
+
+/// A press on a maximized window with `allow-maximized` off. It is claimed all
+/// the same, so the application gets no stray `Alt`+click, the modifier guard
+/// is armed as usual, and the release is swallowed; but the window does not
+/// follow the pointer. A drag watches for the pointer reaching another
+/// monitor and takes the window there, still maximized; a resize does nothing
+/// and only owns the pointer until the button is released.
+struct Pinned {
+    button: Button,
+    window: HWND,
+    /// The monitor the pointer was last on: `Some` for a drag, `None` for a
+    /// resize. A handle is compared, never dereferenced or kept past the
+    /// gesture.
+    monitor: Option<HMONITOR>,
 }
 
 struct Move {
@@ -85,20 +119,28 @@ impl Gesture {
             config,
             drag: None,
             resize: None,
+            pinned: None,
         }
     }
 
     /// Whether a drag or resize is in progress — what a mouse shortcut
-    /// pressed meanwhile is swallowed for.
+    /// pressed meanwhile is swallowed for. A pinned one counts.
     pub fn active(&self) -> bool {
-        self.drag.is_some() || self.resize.is_some()
+        self.drag.is_some() || self.resize.is_some() || self.pinned.is_some()
+    }
+
+    /// Whether this press should pin the window instead of moving or resizing
+    /// it: `allow-maximized` is off and the window is maximized. Reads a style
+    /// bit and sends no message, so it is safe inside the hook.
+    fn pins(&self, window: HWND) -> bool {
+        !self.config.allow_maximized && crate::window::is_maximized(window)
     }
 
     /// Computes the target rect for whichever gesture is in progress, for
     /// the caller to actually apply — see this module's doc comment for why
     /// that has to happen somewhere other than here. `None` means there is
     /// nothing here for it, so it can fall through to hover tracking.
-    pub fn on_move(&mut self, pt: POINT) -> Option<(HWND, RECT)> {
+    pub fn on_move(&mut self, pt: POINT) -> Step {
         if let Some(drag) = &self.drag {
             let (dx, dy) = (pt.x - drag.origin.x, pt.y - drag.origin.y);
             let (left, top) = (drag.start.left + dx, drag.start.top + dy);
@@ -106,7 +148,7 @@ impl Gesture {
                 drag.start.right - drag.start.left,
                 drag.start.bottom - drag.start.top,
             );
-            Some((
+            Step::Apply(
                 drag.window,
                 RECT {
                     left,
@@ -114,7 +156,22 @@ impl Gesture {
                     right: left + width,
                     bottom: top + height,
                 },
-            ))
+            )
+        } else if let Some(pinned) = &mut self.pinned {
+            // Only a drag carries a monitor, and reports it when the pointer
+            // changes to another one. A resize has nothing to do.
+            match pinned.monitor {
+                Some(known) => {
+                    let now = monitor::handle_at(pt);
+                    if now == known {
+                        Step::Claimed
+                    } else {
+                        pinned.monitor = Some(now);
+                        Step::Monitor(pinned.window, pt)
+                    }
+                }
+                None => Step::Claimed,
+            }
         } else if let Some(resize) = &self.resize {
             let (dx, dy) = (pt.x - resize.origin.x, pt.y - resize.origin.y);
 
@@ -146,7 +203,7 @@ impl Gesture {
                 }
             }
 
-            Some((
+            Step::Apply(
                 resize.window,
                 RECT {
                     left,
@@ -154,9 +211,9 @@ impl Gesture {
                     right,
                     bottom,
                 },
-            ))
+            )
         } else {
-            None
+            Step::Idle
         }
     }
 
@@ -172,9 +229,7 @@ impl Gesture {
         // reached the dragged application as an ordinary right-click and
         // opened its context menu mid-drag. Swallowing it here is a plain
         // "not now", not a gesture of its own.
-        if (drag_match.is_some() || resize_match.is_some())
-            && (self.drag.is_some() || self.resize.is_some())
-        {
+        if (drag_match.is_some() || resize_match.is_some()) && self.active() {
             return true;
         }
 
@@ -182,6 +237,15 @@ impl Gesture {
             && let Some(window) = target::at(pt)
             && let Ok(start) = window_rect(window)
         {
+            if self.pins(window) {
+                self.pinned = Some(Pinned {
+                    button,
+                    window,
+                    monitor: Some(monitor::handle_at(pt)),
+                });
+                modifier_guard::arm(gesture.modifiers);
+                return true;
+            }
             self.drag = Some(Move {
                 window,
                 origin: pt,
@@ -195,6 +259,15 @@ impl Gesture {
             && let Some(window) = target::at(pt)
             && let Ok(start) = window_rect(window)
         {
+            if self.pins(window) {
+                self.pinned = Some(Pinned {
+                    button,
+                    window,
+                    monitor: None,
+                });
+                modifier_guard::arm(gesture.modifiers);
+                return true;
+            }
             let invert_x = (pt.x - start.left) > (start.right - start.left) / 2;
             let invert_y = (pt.y - start.top) > (start.bottom - start.top) / 2;
             self.resize = Some(Resize {
@@ -224,6 +297,10 @@ impl Gesture {
     /// actually happens — which this end of the gesture cannot assume has
     /// occurred yet.
     pub fn on_button_up(&mut self, button: Button) -> bool {
+        if self.pinned.as_ref().is_some_and(|p| p.button == button) {
+            self.pinned = None;
+            return true;
+        }
         if matched_end(self.config.drag, button).is_some() && self.drag.take().is_some() {
             return true;
         }

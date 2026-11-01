@@ -53,6 +53,8 @@ The same names work on a hotkey and on an overlay tile.
 | `desktop-next` / `desktop-prev` / `desktop-new` / `pin-toggle` | virtual desktops: switch to the next or previous one (wrapping), create one, pin the window to all |
 | `desktop-move` / `desktop-move-next` / `desktop-move-prev` | move the window to another desktop **and switch to it**. `desktop-move` goes to the `desktop` number; `-next`/`-prev` go one along from the current desktop, wrapping from the last to the first (and back), and take no number |
 | `desktop-send` / `desktop-send-next` / `desktop-send-prev` | the same three, but **stay on the current desktop**: the window is sent away |
+| `monitor-move-next` / `monitor-move-prev` | move the window to the next or previous monitor, **and take the pointer along** to the same relative spot. Monitors are ordered by position, left to right and then top to bottom, wrapping at the ends. Nothing happens with one monitor or a minimized window |
+| `monitor-send-next` / `monitor-send-prev` | the same, but the **pointer stays where it is**. With `target="pointed"` it is then over whatever lies beneath the old place, so pressing again moves *that* window; `monitor-move-*` can be repeated to walk one window round |
 | `desktop-list` / `desktop-send-list` | overlay only: expand into one tile per desktop, numbered from 1 and keyed `1`-`9`. `desktop-list` makes `desktop-move` tiles (they switch to that desktop), `desktop-send-list` makes `desktop-send` tiles (they stay put). The tile for the desktop you are on is drawn disabled |
 
 ## `<hotkeys>`
@@ -76,7 +78,9 @@ a cost — the hook runs on every keystroke on the machine.
 ## `<mouse>`
 
 ```xml
-<drag button="left" mod="Alt"/>
+<mouse allow-maximized="true">
+	<drag button="left" mod="Alt"/>
+</mouse>
 ```
 
 `<drag>` and `<resize>`, each with a `button` (`left`, `right` or
@@ -87,6 +91,13 @@ Drag and resize grab and release with the same button; the window under the
 pointer at the moment of the press is the one they act on, same as
 `target="pointed"`.
 
+| Attribute of `<mouse>` | |
+| --- | --- |
+| `allow-maximized` | `true` lets drag and resize act on a **maximized** window like on any other, flag and all. `false` (the default, and not written to the file) leaves a maximized window where it is: the press is still claimed (the program gets no stray click, and the release is swallowed), a resize does nothing, and a drag that brings the pointer onto another monitor takes the window there, **still maximized**. Only the maximized flag counts: a borderless full-screen window drags as before. Anything other than `true`/`false` is a warning and means `false` |
+
+Before this setting existed, a maximized window followed an `Alt` drag around, still
+flagged as maximized. If you want that back, set `allow-maximized="true"`.
+
 ### `<shortcut>`
 
 A modifier plus a mouse trigger fires one action, the way a hotkey does:
@@ -95,6 +106,8 @@ A modifier plus a mouse trigger fires one action, the way a hotkey does:
 <shortcut button="middle"      mod="Win"  action="overlay"/>
 <shortcut button="wheel-right" mod="none" action="pin-toggle"/>
 <shortcut button="x1"          mod="Alt"  action="desktop-move" desktop="2"/>
+<shortcut button="x1"          mod="Win"  action="monitor-move-prev"/>
+<shortcut button="x2"          mod="Win"  action="monitor-move-next"/>
 ```
 
 | Attribute | |
