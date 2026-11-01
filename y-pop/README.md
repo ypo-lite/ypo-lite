@@ -363,9 +363,10 @@ The first five are the `y-pop` binary, the rest is the `y_pop` library that
 to a launcher (the hidden message window, the tray icon, menus, hotkey
 registration, the XML reader, the overlay surface) is in
 [`y-core`](../core/README.md). The settings app is
-[`y-pop-config`](../y-pop-config/docs/plan.md).
+[`y-pop-config`](../y-pop-config/docs/design/plan.md).
 
-Design notes, in [`docs/`](docs/): [`y-pop-plan.md`](docs/y-pop-plan.md) (the
-design and its roadmap), [`portal-analysis.md`](docs/portal-analysis.md) (what
-PortAL does), [`overlay-modes.md`](docs/overlay-modes.md) (the search spec) and
-[`search-plan.md`](docs/search-plan.md) (its build plan).
+Design notes, in [`docs/design/`](docs/design/):
+[`y-pop-plan.md`](docs/design/y-pop-plan.md) (the design and its roadmap),
+[`portal-analysis.md`](docs/design/portal-analysis.md) (what PortAL does),
+[`overlay-modes.md`](docs/design/overlay-modes.md) (the search spec) and
+[`search-plan.md`](docs/design/search-plan.md) (its build plan).

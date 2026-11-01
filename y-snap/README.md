@@ -9,6 +9,10 @@ behind a tray icon, pin to every virtual desktop or send to another one — from
 the keyboard, or from one popup, on whichever window the pointer happens to be
 over.
 
+This page is the reference for `y-snap.xml`. For how to use y-snap, with the
+defaults, common changes and troubleshooting, see the
+[user manual](docs/user-manual.md).
+
 ## State
 
 Working: the configuration file, the tray icon and menu, hotkey registration
@@ -142,9 +146,9 @@ A modifier plus a mouse trigger fires one action, the way a hotkey does:
   belongs to the shell; clicking a tile works either way.
 
 Wheel up/down is not a trigger; it belongs with the switcher
-([`docs/switcher-plan.md`](docs/switcher-plan.md)). The settings app has a
-Mouse shortcuts page for all of this. Design notes:
-[`docs/mouse-shortcuts-plan.md`](docs/mouse-shortcuts-plan.md).
+([`docs/design/switcher-plan.md`](docs/design/switcher-plan.md)). The settings
+app has a Mouse shortcuts page for all of this. Design notes:
+[`docs/design/mouse-shortcuts-plan.md`](docs/design/mouse-shortcuts-plan.md).
 
 ### `<minbutton>`
 
@@ -238,7 +242,7 @@ would ignore the request without saying so.
 y-snap checks every five seconds, only while something is hidden, and forgets
 a window that was closed, or that its program showed again by itself. Quitting
 y-snap brings every hidden window back. If y-snap is *killed*, hidden windows
-stay hidden; `docs/iconize-traynize-plan.md` describes the opt-in cache file
+stay hidden; `docs/design/iconize-traynize-plan.md` describes the opt-in cache file
 planned for that.
 
 ## Layout

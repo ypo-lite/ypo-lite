@@ -1,9 +1,15 @@
 # Ypo-Lite
 
-Lite productivity tools for Windows: low memory, fast, and they do just what
-they need to do.
+*Lite productivity tools for Windows: low memory, fast, and they do just what
+they need to do.*
 
-Ypo-Lite rewrites the [GUIPro](http://glatigny.github.io/guipro/) tray
+<p align="center">
+    <picture>
+        <img src="./docs/ypo-lite_logo.png" />
+    </picture>
+</p>
+
+> Ypo-Lite rewrites the [GUIPro](http://glatigny.github.io/guipro/) tray
 utilities (PortAL, HulK, VulCan, ...) in Rust. Each tool is one small native
 executable, with no DLL plugins and no background service.
 
@@ -13,8 +19,7 @@ executable, with no DLL plugins and no background service.
 | --- | --- | --- | --- |
 | **[Y-Snap](y-snap/README.md)** | Window management by hotkey, mouse gesture and overlay: minimize, maximize, roll up, fade, strip the frame, hide behind a tray icon, pin to every virtual desktop or send to another one | HulK | Usable |
 | **[Y-Pop](y-pop/README.md)** | A tray icon whose menu launches your programs, and a search window that finds them as you type | PortAL | Usable |
-| **Y-Term** | | | Placeholder |
-| **Y-Coustic** | | | Placeholder |
+| **Y-Coustic** | Volume manager | VulCan | *Work in progress* |
 
 Y-Snap and Y-Pop are configured through one XML file each. `y-snap-config` and
 `y-pop-config` are the WinUI 3 settings apps that edit those files, if you

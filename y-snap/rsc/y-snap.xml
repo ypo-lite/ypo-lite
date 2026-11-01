@@ -101,7 +101,8 @@
 
 		right-click-action fires directly, no popup, on a plain right-click
 		over the button; "none" turns that off. Leave the whole section out
-		(or empty, with no attributes either) to turn everything off.
+		to turn everything off: an empty section still does the right-click,
+		with its default action, unless it says "none".
 	-->
 	<minbutton hover-delay="700" right-click-action="traynize">
 		<action action="traynize"     label="Traynize"     icon="📤"/>

@@ -7,8 +7,9 @@ is configured in one file, `y-pop.xml`.
 This manual is about the search window, and describes **what works today**.
 Each section ends, where it matters, with what is not there yet. Tray icons, menu
 items, hotkeys, variables and themes are in the [README](../README.md). The
-design behind search is in `overlay-modes.md` (the spec) and `search-plan.md`
-(the build plan); this page is for using it. It grows with each feature.
+design behind search is in [`design/overlay-modes.md`](design/overlay-modes.md)
+(the spec) and [`design/search-plan.md`](design/search-plan.md) (the build plan);
+this page is for using it. It grows with each feature.
 
 - [The configuration file](#the-configuration-file)
 - [The search window](#the-search-window)
