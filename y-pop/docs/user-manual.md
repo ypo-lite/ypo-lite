@@ -6,8 +6,9 @@ is configured in one file, `y-pop.xml`.
 
 This manual is about the search window, and describes **what works today**.
 Each section ends, where it matters, with what is not there yet. Tray icons, menu
-items, hotkeys, variables and themes are in the [README](../README.md). The
-design behind search is in [`design/overlay-modes.md`](design/overlay-modes.md)
+items, hotkeys, variables and themes are in the
+[configuration reference](configuration.md). The design behind search is in
+[`design/overlay-modes.md`](design/overlay-modes.md)
 (the spec) and [`design/search-plan.md`](design/search-plan.md) (the build plan);
 this page is for using it. It grows with each feature.
 
@@ -27,7 +28,7 @@ this page is for using it. It grows with each feature.
 ## The configuration file
 
 `y-pop.xml` lives in `%APPDATA%\Ypo-Lite\`, or next to `y-pop.exe` for a portable
-copy ([the full order](../README.md#the-configuration-file)). y-pop reads it at
+copy ([the full order](configuration.md#the-configuration-file)). y-pop reads it at
 start-up, when `y-pop-config` saves it, and with `>Reload configuration`.
 
 A mistake in the XML itself (a tag left open) stops the file from loading. At

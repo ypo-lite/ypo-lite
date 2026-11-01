@@ -24,7 +24,6 @@
 //! tray icon offers it). So `<search>` is created by the first real edit and
 //! removed only by [`turn_off`], never because it became empty.
 
-
 use y_pop::model::{ActionId, ActionsConfig, same_menu};
 use y_pop::search::keys::Chord;
 use y_pop::settings::{
@@ -326,9 +325,10 @@ pub fn customize(settings: &mut Settings) -> bool {
         )
     });
     let at = recent.map_or(first.unwrap_or(0), |recent| recent + 1);
-    search
-        .children
-        .insert(at, new_section(default_kind(SectionKey::Menus).expect("menus")));
+    search.children.insert(
+        at,
+        new_section(default_kind(SectionKey::Menus).expect("menus")),
+    );
     true
 }
 
@@ -546,7 +546,9 @@ pub fn set_recent_count(settings: &mut Settings, count: Option<u32>) -> bool {
 /// `;`-separated patterns, raw.
 pub fn start_exclude(settings: &Settings) -> String {
     match kind_ref(settings, SectionKey::StartMenu) {
-        Some(SectionKind::StartMenu { exclude: Some(text) }) => text.clone(),
+        Some(SectionKind::StartMenu {
+            exclude: Some(text),
+        }) => text.clone(),
         _ => String::new(),
     }
 }
@@ -670,13 +672,18 @@ pub enum Rename {
 
 /// The `include` of the first `<menus>`, the one y-pop reads.
 fn include_mut(settings: &mut Settings) -> Option<&mut Option<String>> {
-    settings.search.as_mut()?.children.iter_mut().find_map(|entry| match entry {
-        SearchEntry::Section(SearchSection {
-            kind: SectionKind::Menus { include, .. },
-            ..
-        }) => Some(include),
-        _ => None,
-    })
+    settings
+        .search
+        .as_mut()?
+        .children
+        .iter_mut()
+        .find_map(|entry| match entry {
+            SearchEntry::Section(SearchSection {
+                kind: SectionKind::Menus { include, .. },
+                ..
+            }) => Some(include),
+            _ => None,
+        })
 }
 
 /// A tray menu was renamed: the same entry of `include` follows it, so the
@@ -695,7 +702,13 @@ pub fn rename_in_include(settings: &mut Settings, old: &str, new: &str) -> Renam
     }
     let renamed: Vec<String> = names
         .into_iter()
-        .map(|name| if same_menu(&name, old) { new.to_owned() } else { name })
+        .map(|name| {
+            if same_menu(&name, old) {
+                new.to_owned()
+            } else {
+                name
+            }
+        })
         .collect();
     *raw = renamed.join(";");
     Rename::Renamed
@@ -707,7 +720,9 @@ pub fn rename_in_include(settings: &mut Settings, old: &str, new: &str) -> Renam
 /// every one out of the search.
 pub fn drop_from_include(settings: &mut Settings, name: &str) -> bool {
     let same_name = |menu: &y_pop::settings::Item| {
-        menu.name.as_deref().is_some_and(|other| same_menu(other, name))
+        menu.name
+            .as_deref()
+            .is_some_and(|other| same_menu(other, name))
     };
     if crate::roots::menus(settings).any(same_name) {
         return false;
@@ -764,18 +779,23 @@ pub struct ActionsView {
 }
 
 fn actions_ref(settings: &Settings) -> Option<(&Option<String>, &Option<bool>, &[ActionEntry])> {
-    settings.search.as_ref()?.children.iter().find_map(|entry| match entry {
-        SearchEntry::Section(SearchSection {
-            kind:
-                SectionKind::Actions {
-                    menu_key,
-                    quick_pick,
-                    entries,
-                },
-            ..
-        }) => Some((menu_key, quick_pick, entries.as_slice())),
-        _ => None,
-    })
+    settings
+        .search
+        .as_ref()?
+        .children
+        .iter()
+        .find_map(|entry| match entry {
+            SearchEntry::Section(SearchSection {
+                kind:
+                    SectionKind::Actions {
+                        menu_key,
+                        quick_pick,
+                        entries,
+                    },
+                ..
+            }) => Some((menu_key, quick_pick, entries.as_slice())),
+            _ => None,
+        })
 }
 
 fn default_menu_key() -> String {
@@ -965,7 +985,11 @@ pub fn addable_actions(settings: &Settings) -> Vec<ActionId> {
 /// `open` can't go: Enter would do nothing.
 pub fn remove_action(settings: &mut Settings, index: usize) -> bool {
     let view = actions(settings);
-    if view.rows.get(index).is_none_or(|row| row.id == ActionId::Open.name()) {
+    if view
+        .rows
+        .get(index)
+        .is_none_or(|row| row.id == ActionId::Open.name())
+    {
         return false;
     }
     let Some((_, _, entries)) = actions_mut(settings) else {
@@ -993,8 +1017,7 @@ pub fn move_action(settings: &mut Settings, index: usize, up: bool) -> bool {
     let Some((_, _, entries)) = actions_mut(settings) else {
         return false;
     };
-    let (Some(from), Some(to)) = (entry_index(entries, index), entry_index(entries, target))
-    else {
+    let (Some(from), Some(to)) = (entry_index(entries, index), entry_index(entries, target)) else {
         return false;
     };
     let entry = entries.remove(from);

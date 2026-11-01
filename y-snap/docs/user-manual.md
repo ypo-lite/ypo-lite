@@ -5,8 +5,9 @@ anywhere inside them, and minimize, roll up, fade, hide or pin them from the
 keyboard or from a popup, on whichever window the pointer is over.
 
 This manual describes **what works today**, and how to use it. Every attribute of
-the configuration file is in the [README](../README.md); this page shows the ones
-you are likely to want. The design notes are in [`design/`](design/).
+the configuration file is in the [configuration reference](configuration.md); this
+page shows the ones you are likely to want. The design notes are in
+[`design/`](design/).
 
 - [First steps](#first-steps)
 - [The tray icon](#the-tray-icon)
@@ -59,7 +60,11 @@ The menu lists, from the top:
 - **Hidden windows**, when there are any, with **Restore all hidden windows**;
 - how many hotkeys and overlay actions are loaded, or what is wrong with the
   configuration when it did not load;
-- **Settings…**, **Edit y-snap.xml** and **Reload configuration**;
+- **Configuration**, a submenu with **Settings…**, **Edit y-snap.xml** and
+  **Reload configuration**;
+- **Start with Windows**, checked when y-snap runs at logon; click to turn it on or
+  off (the same setting as the installer's start-up option, and as the switch at the
+  bottom of the settings app);
 - **About**: a balloon with the version, what is loaded, where the file is and how
   much memory y-snap uses. Clicking the balloon opens the settings app;
 - **Exit**, which brings every hidden window back first.
@@ -105,7 +110,7 @@ so will not open the window's system menu or the Start menu.
 
 To use other buttons or modifiers, see [Mouse gestures](#changing-the-configuration)
 in the settings app, or `<drag>` and `<resize>` in the
-[README](../README.md#mouse).
+[configuration reference](configuration.md#mouse).
 
 ---
 
@@ -269,7 +274,7 @@ the *Mouse shortcuts* page of the settings app, or in the file:
   tile's letter is a `Win` combination that goes to Windows. Let go of `Win` first,
   or click the tile.
 
-The full rules are in the [README](../README.md#shortcut).
+The full rules are in the [configuration reference](configuration.md#shortcut).
 
 ---
 
@@ -288,7 +293,7 @@ there is one, which is how a portable copy works. *About* shows which one is in 
 A few things people change first:
 
 **Add a hotkey.** `key` is written the way it reads, and
-[the README](../README.md#keys) lists the key names. Any action works:
+[the reference](configuration.md#keys) lists the key names. Any action works:
 
 ```xml
 <hotkeys>
@@ -345,7 +350,6 @@ moment ago. Windows already hidden can still be brought back from the tray menu.
 - **A window switcher**, on the wheel or otherwise: there are
   [options](design/switcher-plan.md), nothing built;
 - **recovering hidden windows** after y-snap is killed;
-- **a *Start with Windows* setting** in y-snap itself: only the installer offers it;
 - **choosing how far `transparency` fades.**
 
 ---

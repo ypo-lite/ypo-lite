@@ -61,7 +61,8 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent, VIRTUAL_KEY, VK_1, VK_ESCAPE,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetForegroundWindow, PostMessageW, WM_KEYDOWN, WM_KILLFOCUS, WM_LBUTTONUP, WM_MOUSEMOVE, WM_SYSKEYDOWN,
+    GetForegroundWindow, PostMessageW, WM_KEYDOWN, WM_KILLFOCUS, WM_LBUTTONUP, WM_MOUSEMOVE,
+    WM_SYSKEYDOWN,
 };
 use y_core::{
     Result,
@@ -645,8 +646,7 @@ fn point_in(rect: RECT, pt: POINT) -> bool {
 /// borrowed mutably (for the canvas it is drawing into), so it takes the one
 /// field it needs by value instead of borrowing all of `self` again.
 fn is_current_desktop(current_desktop: Option<u32>, item: &Item) -> bool {
-    item.action.takes_desktop()
-        && current_desktop.is_some_and(|index| index + 1 == item.desktop)
+    item.action.takes_desktop() && current_desktop.is_some_and(|index| index + 1 == item.desktop)
 }
 
 /// Centres `size` on `window`'s own bounds — the action overlay opens over

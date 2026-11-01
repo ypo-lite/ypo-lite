@@ -333,8 +333,11 @@ Closed in phase 0.1.
    It stays a single attribute and the schema gains no new one. The picker
    writes `icon="@app"` for the Store apps it adds; the user can clear it or
    pick a file icon instead.
-3. **Start with Windows: not in the config app.** Not an attribute, not a
-   General switch. The user's startup is handled outside the editor for now.
+3. **Start with Windows: a switch in the bottom bar** (revised; first
+   decided "not in the config app"). Not an attribute and not a General
+   setting: it is the `HKCU\…\Run` value, so it applies at once and neither
+   dirties the file nor waits for Save. The same `shell::startup_toggle`
+   from `ui-kit` appears in `y-snap-config`'s bar.
 4. **Shared UI: done, and wider than the toolkit.** Anything common to our
    graphical apps lives in `ui-kit`, the way `y-core` holds the Win32 plumbing
    but for a more specialised purpose. `ui-kit` exists (plan 0.2) and the key

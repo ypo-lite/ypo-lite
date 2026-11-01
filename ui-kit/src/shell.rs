@@ -132,6 +132,13 @@ pub struct BarStatus<'a> {
     pub tools: Option<View>,
 }
 
+/// The "Start with Windows" switch for [`BarStatus::tools`]: the same control
+/// and wording in every config app. It acts on the registry at once rather
+/// than with Save, because it is not part of the app's file.
+pub fn startup_toggle(on: bool, on_toggle: Callback<bool>) -> View {
+    labeled_switch("Start with Windows", on, on_toggle)
+}
+
 /// The status / Reload / Save bar along the bottom of the window — one for
 /// the whole app, so an edit on one screen can be saved from another.
 pub fn action_bar(bar: BarStatus<'_>, on_reload: Callback<()>, on_save: Callback<()>) -> View {

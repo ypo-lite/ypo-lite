@@ -456,9 +456,7 @@ pub fn apply(settings: &mut Settings, ui: &mut SkinUi, message: SkinMsg) -> bool
         }
         SkinMsg::Theme(chosen) => {
             return match (scope, settings.search.as_mut()) {
-                (Scope::Search, Some(search)) => {
-                    search.theme.replace(chosen) != Some(chosen)
-                }
+                (Scope::Search, Some(search)) => search.theme.replace(chosen) != Some(chosen),
                 (Scope::Search, None) => false,
                 (Scope::Menus, _) => {
                     if chosen == theme_of(settings) {
@@ -707,15 +705,18 @@ mod tests {
         assert_eq!(search.skin.overrides.back, Some(back));
         assert_eq!(search.skin.overrides.padding, None);
         assert_eq!(search.skin.overrides.edge, None);
-        assert_eq!(settings.skin.overrides.padding, Some(4), "the menus keep it");
+        assert_eq!(
+            settings.skin.overrides.padding,
+            Some(4),
+            "the menus keep it"
+        );
     }
 
     /// Native menus with a `<skin>` are drawn as Auto, and when the padding is
     /// all it has, there would be nothing left to keep the window drawn.
     #[test]
     fn a_look_of_its_own_stays_the_look_it_had() {
-        let mut settings =
-            settings(r#"<y-pop><skin padding="4"/><search/><quit/></y-pop>"#);
+        let mut settings = settings(r#"<y-pop><skin padding="4"/><search/><quit/></y-pop>"#);
         assert!(run(&mut settings, &mut in_search(), SkinMsg::Customize));
         let search = settings.search.as_ref().expect("search");
         assert_eq!(search.theme, Some(Theme::Auto));
@@ -751,7 +752,11 @@ mod tests {
     fn nothing_changes_without_a_search_element() {
         let mut settings = dark();
         let mut ui = in_search();
-        for message in [SkinMsg::Customize, SkinMsg::Theme(Theme::Flat), SkinMsg::Follow] {
+        for message in [
+            SkinMsg::Customize,
+            SkinMsg::Theme(Theme::Flat),
+            SkinMsg::Follow,
+        ] {
             assert!(!run(&mut settings, &mut ui, message));
         }
         assert_eq!(theme_of(&settings), Theme::Dark);

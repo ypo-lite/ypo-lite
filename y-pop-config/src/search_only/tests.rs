@@ -28,9 +28,7 @@ const XML: &str = r#"<y-pop>
 fn named(settings: &Settings, name: &str) -> ItemId {
     fn walk(entries: &[y_pop::settings::Entry], name: &str) -> Option<ItemId> {
         entries.iter().find_map(|entry| match entry {
-            Entry::Item(item) if item.name.as_deref() == Some(name) => {
-                Some(item.id)
-            }
+            Entry::Item(item) if item.name.as_deref() == Some(name) => Some(item.id),
             Entry::Item(item) => walk(&item.children, name),
             Entry::Comment(_) => None,
         })
@@ -63,7 +61,10 @@ fn search_only_items_are_found_by_id_at_any_depth() {
     assert!(tree::is_inside(&settings, admin, deep));
     assert_eq!(tree::root_of(&settings, deep), Some(admin));
     assert!(tree::is_search_only(&settings, deep));
-    assert!(!tree::is_search_only(&settings, named(&settings, "Notepad")));
+    assert!(!tree::is_search_only(
+        &settings,
+        named(&settings, "Notepad")
+    ));
 
     // The top level of the list is `search_only`'s, not `tree`'s.
     assert!(tree::locate(&settings, admin).is_none());
@@ -134,7 +135,11 @@ fn move_to_lists_search_only_groups_and_an_item_can_go_there() {
     let inner = named(&settings, "Inner");
     assert!(tree::move_to_group(&mut settings, notepad, inner));
     assert!(tree::is_search_only(&settings, notepad));
-    assert!(!tree::is_inside(&settings, named(&settings, "Work"), notepad));
+    assert!(!tree::is_inside(
+        &settings,
+        named(&settings, "Work"),
+        notepad
+    ));
 }
 
 #[test]
@@ -165,8 +170,8 @@ fn adding_writes_the_defaults_first_and_a_group_or_a_folder_only() {
         "the defaults are still there"
     );
 
-    let tree = y_pop::config::load_str(&settings.to_xml(), &mut Vec::<Variable>::new())
-        .expect("valid");
+    let tree =
+        y_pop::config::load_str(&settings.to_xml(), &mut Vec::<Variable>::new()).expect("valid");
     // A folder with an empty target is the editor's placeholder; y-pop reads it.
     assert!(tree.warnings.is_empty(), "{:?}", tree.warnings);
     assert_eq!(tree.search.expect("search").nodes().count(), 2);
@@ -186,7 +191,10 @@ fn deleting_takes_the_group_with_its_content_and_nothing_else() {
     assert!(tree::item(&settings, admin).is_none());
     assert!(tree::item(&settings, named(&settings, "Scripts")).is_some());
     let xml = settings.to_xml();
-    assert!(xml.contains("<recent/>") && xml.contains("<menus/>"), "{xml}");
+    assert!(
+        xml.contains("<recent/>") && xml.contains("<menus/>"),
+        "{xml}"
+    );
     assert!(!xml.contains("Registry"));
 }
 
@@ -195,18 +203,33 @@ fn a_top_level_group_moves_with_the_browse_list_and_a_folder_does_not() {
     let mut settings = load(XML);
     let admin = named(&settings, "Admin tools");
     let scripts = named(&settings, "Scripts");
-    assert!(search_edit::move_section(&mut settings, SectionKey::Item(admin), false));
+    assert!(search_edit::move_section(
+        &mut settings,
+        SectionKey::Item(admin),
+        false
+    ));
     let first = search_edit::browse_rows(&settings)[0].key;
     assert_eq!(first, SectionKey::Menus);
-    assert!(!search_edit::move_section(&mut settings, SectionKey::Item(scripts), true));
-    assert_eq!(position(&settings, admin), Some(0), "among the top-level items");
+    assert!(!search_edit::move_section(
+        &mut settings,
+        SectionKey::Item(scripts),
+        true
+    ));
+    assert_eq!(
+        position(&settings, admin),
+        Some(0),
+        "among the top-level items"
+    );
 }
 
 #[test]
 fn everything_only_search_has_is_in_all_items() {
     let settings = load(XML);
     assert_eq!(settings.items().count(), 2, "the tray's");
-    let names: Vec<String> = settings.all_items().filter_map(|item| item.name.clone()).collect();
+    let names: Vec<String> = settings
+        .all_items()
+        .filter_map(|item| item.name.clone())
+        .collect();
     for name in ["Work", "Notepad", "Admin tools", "Deep", "Scripts"] {
         assert!(names.iter().any(|known| known == name), "{name}: {names:?}");
     }

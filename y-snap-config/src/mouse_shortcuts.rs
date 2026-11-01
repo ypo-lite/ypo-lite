@@ -301,7 +301,9 @@ fn trigger_group(
                 } else {
                     ButtonStyle::Default
                 })
-                .on_click(context.callback(move |()| Msg::MouseShortcutTriggerChanged(index, trigger)))
+                .on_click(
+                    context.callback(move |()| Msg::MouseShortcutTriggerChanged(index, trigger)),
+                )
                 .content(trigger_label(trigger));
             (trigger.name(), view)
         }))
@@ -334,7 +336,10 @@ mod tests {
     fn a_new_shortcut_skips_what_is_taken() {
         let taken = [shortcut(MouseTrigger::Middle, MOD_WIN)];
         let next = first_free(&taken, &Mouse::default()).expect("something is free");
-        assert_eq!((next.trigger, next.modifiers), (MouseTrigger::WheelRight, MOD_WIN));
+        assert_eq!(
+            (next.trigger, next.modifiers),
+            (MouseTrigger::WheelRight, MOD_WIN)
+        );
 
         // Win+left is a drag here, so it is never offered.
         let mouse = Mouse {
@@ -345,7 +350,10 @@ mod tests {
             resize: None,
         };
         let next = first_free(&[], &mouse).expect("something is free");
-        assert_ne!((next.trigger, next.modifiers), (MouseTrigger::Middle, MOD_WIN));
+        assert_ne!(
+            (next.trigger, next.modifiers),
+            (MouseTrigger::Middle, MOD_WIN)
+        );
     }
 
     #[test]

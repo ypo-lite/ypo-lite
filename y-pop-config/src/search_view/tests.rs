@@ -37,14 +37,20 @@ fn a_switch_equal_to_its_default_writes_nothing() {
     assert!(run(&mut settings, SearchMsg::History(false)));
     assert!(run(&mut settings, SearchMsg::Results(1)));
     let xml = settings.to_xml();
-    assert!(xml.contains(r#"collapsed="true""#) && xml.contains(r#"history="false""#), "{xml}");
+    assert!(
+        xml.contains(r#"collapsed="true""#) && xml.contains(r#"history="false""#),
+        "{xml}"
+    );
     assert!(xml.contains(r#"results="flat""#));
 
     // Back to the default removes the attribute instead of writing it.
     assert!(run(&mut settings, SearchMsg::Collapsed(false)));
     assert!(run(&mut settings, SearchMsg::Results(0)));
     let xml = settings.to_xml();
-    assert!(!xml.contains("collapsed") && !xml.contains("results"), "{xml}");
+    assert!(
+        !xml.contains("collapsed") && !xml.contains("results"),
+        "{xml}"
+    );
 }
 
 #[test]
@@ -72,9 +78,17 @@ fn the_monitor_writes_only_what_differs_from_the_cursor() {
 fn a_section_opens_and_closes_without_changing_the_file() {
     let mut settings = load(r#"<y-pop><search/></y-pop>"#);
     let mut ui = SearchUi::default();
-    assert!(!apply(&mut settings, &mut ui, SearchMsg::Select(SectionKey::Recent)));
+    assert!(!apply(
+        &mut settings,
+        &mut ui,
+        SearchMsg::Select(SectionKey::Recent)
+    ));
     assert_eq!(ui.selected, Some(SectionKey::Recent));
-    assert!(!apply(&mut settings, &mut ui, SearchMsg::Select(SectionKey::Recent)));
+    assert!(!apply(
+        &mut settings,
+        &mut ui,
+        SearchMsg::Select(SectionKey::Recent)
+    ));
     assert_eq!(ui.selected, None);
 }
 
@@ -85,9 +99,17 @@ fn removing_the_open_section_closes_it() {
         selected: Some(SectionKey::Recent),
         ..SearchUi::default()
     };
-    assert!(apply(&mut settings, &mut ui, SearchMsg::Remove(SectionKey::Recent)));
+    assert!(apply(
+        &mut settings,
+        &mut ui,
+        SearchMsg::Remove(SectionKey::Recent)
+    ));
     assert_eq!(ui.selected, None);
-    assert!(!apply(&mut settings, &mut ui, SearchMsg::Remove(SectionKey::Menus)));
+    assert!(!apply(
+        &mut settings,
+        &mut ui,
+        SearchMsg::Remove(SectionKey::Menus)
+    ));
 }
 
 #[test]
@@ -114,8 +136,16 @@ fn recent_and_the_start_menu_are_switches() {
     assert!(se::sections(&settings).defaults, "nothing written yet");
 
     assert!(run(&mut settings, SearchMsg::Recent(false)));
-    let keys: Vec<SectionKey> = se::sections(&settings).rows.iter().map(|row| row.key).collect();
-    assert_eq!(keys, [SectionKey::Menus, SectionKey::StartMenu], "the others stay");
+    let keys: Vec<SectionKey> = se::sections(&settings)
+        .rows
+        .iter()
+        .map(|row| row.key)
+        .collect();
+    assert_eq!(
+        keys,
+        [SectionKey::Menus, SectionKey::StartMenu],
+        "the others stay"
+    );
     assert!(!run(&mut settings, SearchMsg::Recent(false)));
 
     assert!(run(&mut settings, SearchMsg::Recent(true)));
@@ -141,11 +171,18 @@ fn a_menu_with_a_semicolon_does_not_stop_the_others_from_being_chosen() {
 fn turning_off_asks_only_when_it_would_lose_work() {
     let mut plain = load(r#"<y-pop><search hotkey="Alt+Space"/></y-pop>"#);
     let mut ui = SearchUi::default();
-    assert!(apply(&mut plain, &mut ui, SearchMsg::AskTurnOff), "nothing to lose");
+    assert!(
+        apply(&mut plain, &mut ui, SearchMsg::AskTurnOff),
+        "nothing to lose"
+    );
     assert!(!se::is_on(&plain));
 
     let mut settings = load(r#"<y-pop><search><group name="G"/><actions/></search></y-pop>"#);
-    assert!(lost_by_turning_off(&settings).expect("work").contains("your actions"));
+    assert!(
+        lost_by_turning_off(&settings)
+            .expect("work")
+            .contains("your actions")
+    );
     assert!(!apply(&mut settings, &mut ui, SearchMsg::AskTurnOff));
     assert!(ui.confirming_off && se::is_on(&settings));
     assert!(!apply(&mut settings, &mut ui, SearchMsg::KeepOn));
@@ -162,7 +199,10 @@ fn removing_the_hotkey_is_one_message() {
     assert!(run(&mut settings, SearchMsg::RemoveHotkey));
     assert!(!run(&mut settings, SearchMsg::RemoveHotkey));
     let xml = settings.to_xml();
-    assert!(!xml.contains("hotkey") && !xml.contains("override"), "{xml}");
+    assert!(
+        !xml.contains("hotkey") && !xml.contains("override"),
+        "{xml}"
+    );
 }
 
 #[test]
@@ -177,7 +217,9 @@ fn browse_columns_is_the_default_whether_written_or_not() {
 
 #[test]
 fn tray_menus_are_counted_one_by_one_and_the_last_one_stays() {
-    let mut settings = load(&format!(r#"<y-pop><search><menus/></search>{MENUS}</y-pop>"#));
+    let mut settings = load(&format!(
+        r#"<y-pop><search><menus/></search>{MENUS}</y-pop>"#
+    ));
     assert_eq!(counted_menus(&settings), ["Work", "Admin tools", "Games"]);
 
     // Clicking one when all are counted leaves the others.
@@ -186,7 +228,10 @@ fn tray_menus_are_counted_one_by_one_and_the_last_one_stays() {
     assert!(settings.to_xml().contains(r#"include="Work;Admin tools""#));
 
     assert!(run(&mut settings, SearchMsg::Include("Work".into())));
-    assert!(!run(&mut settings, SearchMsg::Include("Admin tools".into())), "the last");
+    assert!(
+        !run(&mut settings, SearchMsg::Include("Admin tools".into())),
+        "the last"
+    );
     assert_eq!(counted_menus(&settings), ["Admin tools"]);
 
     // Counting the rest again returns to "every menu": no include.
@@ -221,12 +266,17 @@ fn the_actions_edit_through_the_messages() {
     assert!(!run(&mut settings, SearchMsg::ClearActionKey(0)));
     assert!(run(&mut settings, SearchMsg::ActionButton(2, true)));
     assert!(run(&mut settings, SearchMsg::MoveAction(2, true)));
-    assert!(!run(&mut settings, SearchMsg::RemoveAction(0)), "open stays");
+    assert!(
+        !run(&mut settings, SearchMsg::RemoveAction(0)),
+        "open stays"
+    );
     assert!(run(&mut settings, SearchMsg::RemoveAction(8)));
-    assert!(se::actions(&settings)
-        .rows
-        .iter()
-        .all(|row| row.id != ActionId::Forget.name() || row.implied));
+    assert!(
+        se::actions(&settings)
+            .rows
+            .iter()
+            .all(|row| row.id != ActionId::Forget.name() || row.implied)
+    );
     assert!(run(&mut settings, SearchMsg::ResetActions));
     assert!(!se::actions(&settings).written);
 }
@@ -240,7 +290,11 @@ fn only_removals_are_offered_back_by_undo() {
     assert!(SearchMsg::Recent(false).undo_label().is_some());
     assert!(SearchMsg::Recent(true).undo_label().is_none());
     assert!(SearchMsg::RemoveHotkey.undo_label().is_none());
-    assert!(SearchMsg::Move(SectionKey::Recent, true).undo_label().is_none());
+    assert!(
+        SearchMsg::Move(SectionKey::Recent, true)
+            .undo_label()
+            .is_none()
+    );
 }
 
 #[test]
@@ -254,7 +308,12 @@ fn edit_search_marks_the_file_changed_and_keeps_undo() {
     assert!(app.dirty);
     let undo = app.undo.take().expect("undo kept");
     assert_eq!(undo.label, "Removed a section");
-    assert!(se::sections(&undo.settings).rows.iter().any(|r| r.key == SectionKey::Recent && r.written));
+    assert!(
+        se::sections(&undo.settings)
+            .rows
+            .iter()
+            .any(|r| r.key == SectionKey::Recent && r.written)
+    );
 }
 
 #[test]
@@ -290,7 +349,10 @@ fn edit_search_goes_to_the_new_page_and_a_removed_one_leaves_it() {
     app.edit_menu(crate::menu_edit::MenuMsg::Add(crate::tree::NewKind::App));
     let inside = app.selected(group);
     assert_ne!(inside, group);
-    assert!(crate::tree::is_search_only(app.settings.as_ref().unwrap(), inside));
+    assert!(crate::tree::is_search_only(
+        app.settings.as_ref().unwrap(),
+        inside
+    ));
 
     // Deleting the group from its page goes back to General, with Undo.
     app.delete_menu(group);

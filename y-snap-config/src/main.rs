@@ -228,6 +228,7 @@ enum Msg {
     WindowResized(WindowSize),
     OverlaySectionSelected(OverlaySection),
     Save,
+    StartupToggled(bool),
     WarningsDismissed,
     ReorderToggled(ListKind),
     /// Swap row `index` with its neighbour above (`up`) or below.
@@ -350,6 +351,15 @@ impl Component for ConfigApp {
             Msg::IconCategorySelected(category) => self.icon_picker.category = category,
             Msg::IconSearchChanged(text) => self.icon_picker.search = text,
             Msg::WarningsDismissed => self.warnings_dismissed = true,
+            // Takes effect at once and is not part of y-snap.xml, so it
+            // neither dirties the settings nor waits for Save. The bar reads
+            // the registry again on the redraw, so a failure leaves the
+            // switch where it was.
+            Msg::StartupToggled(on) => {
+                if let Err(error) = y_core::startup::set_enabled(ipc::STARTUP_NAME, on) {
+                    y_core::log::line(format_args!("start with Windows: {error}"));
+                }
+            }
             Msg::Reload => {
                 self.editing = None;
                 (self.settings, self.missing) = load();
@@ -553,7 +563,10 @@ impl Component for ConfigApp {
                 save_tooltip: "Rewrites y-snap.xml from these settings. Comments and hand formatting in the file \
                                aren't kept.",
                 extra: None,
-                tools: None,
+                tools: Some(shell::startup_toggle(
+                    y_core::startup::is_enabled(ipc::STARTUP_NAME),
+                    context.callback(Msg::StartupToggled),
+                )),
             },
             context.callback(|()| Msg::Reload),
             context.callback(|()| Msg::Save),
@@ -610,6 +623,7 @@ impl ConfigApp {
             | Msg::IconCategorySelected(_)
             | Msg::IconSearchChanged(_)
             | Msg::WarningsDismissed
+            | Msg::StartupToggled(_)
             | Msg::Reload => unreachable!("settled by Component::update"),
 
             Msg::EditHotkey(index) => {
@@ -1106,8 +1120,9 @@ impl ConfigApp {
                 if matches!(self.editing, Some(Editing::MouseShortcut { index, .. })
                     if mouse_shortcuts::problem_at(settings, index).is_some()) =>
             {
-                self.save_error =
-                    Some("the open mouse shortcut has a problem — fix or cancel it first".to_owned());
+                self.save_error = Some(
+                    "the open mouse shortcut has a problem — fix or cancel it first".to_owned(),
+                );
             }
             Msg::Save => match settings.save() {
                 Ok(()) => {

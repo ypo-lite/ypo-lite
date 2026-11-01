@@ -13,10 +13,8 @@ use y_pop::settings::{Item, ItemId, ItemKind, Settings};
 
 use crate::from_file::{FileKind, Origin};
 use crate::icon_picker::IconMsg;
-use crate::menu_edit::{
-    FlagField, MenuMsg, OriginChange, TextField, split_hotkey,
-};
 use crate::key_edit::{KeyMsg, KeyTarget, hotkey_warning};
+use crate::menu_edit::{FlagField, MenuMsg, OriginChange, TextField, split_hotkey};
 use crate::menu_view::MenuUi;
 use crate::tree::{self, MoveDir};
 use crate::ui::key_picker::combo_labels;
@@ -408,7 +406,11 @@ fn fields(
             )
             .into()
         });
-        View::from(Stack::vertical(space::XS).child("field", field).maybe("semicolon", warning))
+        View::from(
+            Stack::vertical(space::XS)
+                .child("field", field)
+                .maybe("semicolon", warning),
+        )
     };
     let tooltip = || {
         field(
@@ -594,16 +596,18 @@ fn fields(
             Stack::vertical(space::L)
                 .child(
                     "fields",
-                    grid(vec![
-                        ("name", name("Name in the menu")),
-                        ("tooltip", tooltip()),
-                        ("keywords", keywords()),
-                        ("icon", icon()),
-                    ]
-                    .into_iter()
-                    .chain((!only).then_some(("shortcuts", shortcuts)))
-                    .chain((!only).then_some(("style", style)))
-                    .collect()),
+                    grid(
+                        vec![
+                            ("name", name("Name in the menu")),
+                            ("tooltip", tooltip()),
+                            ("keywords", keywords()),
+                            ("icon", icon()),
+                        ]
+                        .into_iter()
+                        .chain((!only).then_some(("shortcuts", shortcuts)))
+                        .chain((!only).then_some(("style", style)))
+                        .collect(),
+                    ),
                 )
                 .maybe("switches", (!only).then(|| View::from(switches)))
                 .maybe(

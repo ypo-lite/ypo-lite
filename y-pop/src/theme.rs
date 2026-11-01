@@ -196,10 +196,7 @@ impl ThemeOverrides {
             (self.margin.is_some(), "margin"),
             (self.edge.is_some(), "edge"),
             (self.separator.is_some(), "separator"),
-            (
-                self.background_gradient.is_some(),
-                "<background-gradient>",
-            ),
+            (self.background_gradient.is_some(), "<background-gradient>"),
             (self.icon_gradient.is_some(), "<icon-gradient>"),
         ]
         .into_iter()

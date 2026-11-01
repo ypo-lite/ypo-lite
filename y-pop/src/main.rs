@@ -601,7 +601,10 @@ impl YPop {
                         .args(request.to_args())
                         .spawn()
                     {
-                        y_core::log::line(format_args!("{} didn't start: {error}", ipc::CONFIG_EXE));
+                        y_core::log::line(format_args!(
+                            "{} didn't start: {error}",
+                            ipc::CONFIG_EXE
+                        ));
                     }
                 }
                 None => y_core::shell::open(&app),

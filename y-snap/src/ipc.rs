@@ -20,6 +20,10 @@ use y_core::single_instance;
 /// (`AppInfo::single_instance` derives one from the other).
 pub const CLASS: &str = "YpoLite.YSnap";
 
+/// The value name under `HKCU\...\Run` for "Start with Windows" — the same one
+/// the installer's start-up task writes, so the two stay one setting.
+pub const STARTUP_NAME: &str = "Y-Snap";
+
 /// The settings app's executable, looked for next to `y-snap.exe` by the
 /// tray's "Settings…" item.
 pub const CONFIG_EXE: &str = "y-snap-config.exe";

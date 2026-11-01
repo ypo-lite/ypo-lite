@@ -10,7 +10,6 @@
 //! Writing one turns y-pop's default sections off (any child of `<search>`
 //! does), so adding first writes them out — see [`search_edit::customize`].
 
-
 use y_pop::settings::{Item, ItemId, SearchEntry, Settings};
 
 use crate::search_edit;

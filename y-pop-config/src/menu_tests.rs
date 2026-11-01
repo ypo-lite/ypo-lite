@@ -331,7 +331,8 @@ fn a_tray_menu_emptied_and_retyped_stays_in_include() {
         app.edit_menu(MenuMsg::Text(work, TextField::Name, text.to_owned()));
     }
     assert_eq!(included(&app), ["Job"]);
-    let tree = y_pop::config::load_str(&settings(&app).to_xml(), &mut Vec::new()).expect("readable");
+    let tree =
+        y_pop::config::load_str(&settings(&app).to_xml(), &mut Vec::new()).expect("readable");
     assert!(tree.warnings.is_empty(), "{:?}", tree.warnings);
 }
 
@@ -341,7 +342,10 @@ fn a_semicolon_in_a_listed_menu_waits_until_it_is_gone() {
     let work = open_menu(&mut app, "Work");
     app.edit_menu(MenuMsg::Text(work, TextField::Name, "Wo;rk".to_owned()));
     assert_eq!(included(&app), ["Work"]);
-    assert!(crate::search_edit::name_breaks_include(settings(&app), "Wo;rk"));
+    assert!(crate::search_edit::name_breaks_include(
+        settings(&app),
+        "Wo;rk"
+    ));
     app.edit_menu(MenuMsg::Text(work, TextField::Name, "Worker".to_owned()));
     assert_eq!(included(&app), ["Worker"]);
 }
@@ -875,7 +879,11 @@ fn a_select_request_opens_the_menu_and_unfolds_to_the_item() {
     assert!(!app.dirty, "looking is not an edit");
 
     app.apply_request(y_pop::ipc::Request::Select("9".to_owned()));
-    assert_eq!(app.screen, Screen::Menu(root), "a missing item changes nothing");
+    assert_eq!(
+        app.screen,
+        Screen::Menu(root),
+        "a missing item changes nothing"
+    );
     assert!(app.run_status.as_ref().is_some_and(|(_, ok)| !ok));
 }
 
@@ -907,7 +915,11 @@ fn keywords_and_the_index_flag_are_edited_and_written() {
     let mut app = app();
     let a = id(&app, "A");
     app.edit_menu(MenuMsg::Select(a));
-    app.edit_menu(MenuMsg::Text(a, TextField::Keywords, "mail outlook".to_owned()));
+    app.edit_menu(MenuMsg::Text(
+        a,
+        TextField::Keywords,
+        "mail outlook".to_owned(),
+    ));
     let xml = settings(&app).to_xml();
     assert!(xml.contains(r#"keywords="mail outlook""#), "{xml}");
 

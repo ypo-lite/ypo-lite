@@ -442,14 +442,20 @@ mod tests {
         pushed.padding = 3;
         pushed.margin = 2;
         pushed.border.size = 1;
-        assert_eq!(separator_start(pushed, ""), separator_start(design(), "") + 6);
+        assert_eq!(
+            separator_start(pushed, ""),
+            separator_start(design(), "") + 6
+        );
     }
 
     #[test]
     fn the_icon_columns_rule_and_backdrop_run_through_an_untitled_separator() {
         let mut ruled = design();
         ruled.edge = Some(EdgeRule::Always);
-        assert_eq!(separator_start(ruled, ""), separator_start(design(), "") - 1);
+        assert_eq!(
+            separator_start(ruled, ""),
+            separator_start(design(), "") - 1
+        );
 
         let mut backed = design();
         let red = Color::rgb(255, 0, 0);

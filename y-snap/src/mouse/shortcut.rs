@@ -174,7 +174,10 @@ mod tests {
     #[test]
     fn fires_on_press_and_swallows_the_release() {
         let mut s = shortcuts();
-        assert_eq!(s.press(MouseTrigger::Middle, MOD_WIN, false), Press::Fire(0));
+        assert_eq!(
+            s.press(MouseTrigger::Middle, MOD_WIN, false),
+            Press::Fire(0)
+        );
         assert!(s.release(MouseTrigger::Middle));
         assert!(!s.release(MouseTrigger::Middle));
     }
@@ -192,7 +195,11 @@ mod tests {
         let mut s = shortcuts();
         assert_eq!(s.press(MouseTrigger::Middle, NONE, false), Press::Pass);
         assert_eq!(
-            s.press(MouseTrigger::Middle, HOT_KEY_MODIFIERS(MOD_WIN.0 | MOD_SHIFT.0), false),
+            s.press(
+                MouseTrigger::Middle,
+                HOT_KEY_MODIFIERS(MOD_WIN.0 | MOD_SHIFT.0),
+                false
+            ),
             Press::Pass
         );
         assert!(!s.release(MouseTrigger::Middle));
@@ -248,8 +255,14 @@ mod tests {
     #[test]
     fn the_two_directions_are_independent() {
         let mut s = shortcuts();
-        assert_eq!(s.tilt(MouseTrigger::WheelRight, NONE, 1_000, false), Press::Fire(1));
-        assert_eq!(s.tilt(MouseTrigger::WheelLeft, NONE, 1_050, false), Press::Fire(2));
+        assert_eq!(
+            s.tilt(MouseTrigger::WheelRight, NONE, 1_000, false),
+            Press::Fire(1)
+        );
+        assert_eq!(
+            s.tilt(MouseTrigger::WheelLeft, NONE, 1_050, false),
+            Press::Fire(2)
+        );
     }
 
     #[test]

@@ -41,7 +41,9 @@ pub fn resolve_path(settings: &Settings, path: &str) -> Option<(ItemId, ItemId)>
         Some(rest) => (true, rest),
         None => (false, path),
     };
-    let mut steps = path.split('/').map(|step| step.trim().parse::<usize>().ok());
+    let mut steps = path
+        .split('/')
+        .map(|step| step.trim().parse::<usize>().ok());
     let first = steps.next()??;
     let root = if only {
         crate::search_only::roots(settings).nth(first)?

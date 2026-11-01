@@ -6,8 +6,8 @@
 	%APPDATA%\Ypo-Lite\y-pop.xml. Either place is read on start-up, after a
 	save in y-pop-config, and on ">Reload configuration" in the search window.
 
-	README.md is the full reference for this file; docs/user-manual.md covers
-	<search>.
+	docs/configuration.md is the full reference for this file;
+	docs/user-manual.md covers <search>.
 -->
 <!--
 	theme picks a base skin: "native" (the default if omitted) keeps plain,

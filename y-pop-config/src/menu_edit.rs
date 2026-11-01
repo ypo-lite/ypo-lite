@@ -743,14 +743,16 @@ impl ConfigApp {
             }
 
             MenuMsg::Text(id, field, text) => {
-                let menu_name = field == TextField::Name && id == root && !tree::is_search_only(settings, id);
+                let menu_name =
+                    field == TextField::Name && id == root && !tree::is_search_only(settings, id);
                 // What `<menus include>` knows it as: the name before this
                 // edit, or the last it could write.
                 let listed = menu_name
                     .then(|| {
-                        self.include_names.get(&id).cloned().or_else(|| {
-                            tree::item(settings, id).and_then(|item| item.name.clone())
-                        })
+                        self.include_names
+                            .get(&id)
+                            .cloned()
+                            .or_else(|| tree::item(settings, id).and_then(|item| item.name.clone()))
                     })
                     .flatten();
                 if let Some(item) = tree::item_mut(settings, id) {

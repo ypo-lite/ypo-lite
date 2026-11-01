@@ -8,7 +8,7 @@
 //! the file still loads. Losing every binding because one of them has a typo
 //! would be the worse failure.
 //!
-//! See `README.md` for the schema.
+//! See `docs/configuration.md` for the schema.
 
 use std::fmt;
 use std::fmt::Write as _;
@@ -975,7 +975,10 @@ impl Reader {
             // Only on a tile, where it becomes several tiles; a key can only
             // ever fire one thing.
             if action.is_desktop_list() {
-                self.warn(element, "desktop-list and desktop-send-list only work on an overlay tile");
+                self.warn(
+                    element,
+                    "desktop-list and desktop-send-list only work on an overlay tile",
+                );
                 continue;
             }
 
@@ -1087,7 +1090,10 @@ impl Reader {
             // Required, unlike `<drag>`: a missing value must not silently
             // mean something when "none" can take over a whole button.
             let Some(text) = element.attr("mod") else {
-                self.warn(element, "a <shortcut> needs a mod attribute (or mod=\"none\")");
+                self.warn(
+                    element,
+                    "a <shortcut> needs a mod attribute (or mod=\"none\")",
+                );
                 continue;
             };
             let Some(modifiers) = parse_modifiers(text) else {
@@ -1102,7 +1108,10 @@ impl Reader {
                 continue;
             };
             if action.is_desktop_list() {
-                self.warn(element, "desktop-list and desktop-send-list only work on an overlay tile");
+                self.warn(
+                    element,
+                    "desktop-list and desktop-send-list only work on an overlay tile",
+                );
                 continue;
             }
 

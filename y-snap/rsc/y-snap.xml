@@ -6,7 +6,7 @@
 	%APPDATA%\Ypo-Lite\y-snap.xml. Either place is read on start-up and
 	whenever "Reload configuration" is chosen from the tray menu.
 
-	See README.md for every attribute; this file is the default.
+	See docs/configuration.md for every attribute; this file is the default.
 -->
 <y-snap>
 
@@ -16,7 +16,7 @@
 
 		Mouse shortcuts: a modifier plus a button, a wheel tilt or a side
 		button fires one action. Left out below so a fresh install changes no
-		mouse behaviour; see README.md for what each attribute does.
+		mouse behaviour; see docs/configuration.md for what each attribute does.
 
 		<shortcut button="middle"      mod="Win"  action="overlay"/>
 		<shortcut button="wheel-right" mod="none" action="pin-toggle"/>

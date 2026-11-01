@@ -24,7 +24,9 @@ use y_pop::settings::{HotkeyEntry, ItemId, Settings};
 use crate::menu_edit::{canonical_hotkey, join_hotkey, split_hotkey};
 use crate::search_edit as se;
 use crate::ui::editor::modal;
-use crate::ui::key_picker::{KeyPickerEvents, KeyPickerUi, KeyRules, combo_labels, key_picker_with};
+use crate::ui::key_picker::{
+    KeyPickerEvents, KeyPickerUi, KeyRules, combo_labels, key_picker_with,
+};
 use crate::ui::keys::{self, KeyCategory};
 use crate::ui::prelude::*;
 use crate::{ConfigApp, Msg, roots, tree};
@@ -77,7 +79,9 @@ pub enum KeyMsg {
     Search(String),
     SearchChosen(String),
     /// OK keeps the combination; anything else leaves the file as it was.
-    Closed { accepted: bool },
+    Closed {
+        accepted: bool,
+    },
 }
 
 const SHORTCUT_MODIFIERS: [(&str, HOT_KEY_MODIFIERS); 3] = [
@@ -158,7 +162,14 @@ fn current(settings: &Settings, target: KeyTarget) -> Option<String> {
                 .and_then(|search| search.hotkey.clone())
                 .unwrap_or_default(),
         ),
-        KeyTarget::Action(index) => Some(se::actions(settings).rows.get(index)?.key.clone().unwrap_or_default()),
+        KeyTarget::Action(index) => Some(
+            se::actions(settings)
+                .rows
+                .get(index)?
+                .key
+                .clone()
+                .unwrap_or_default(),
+        ),
         KeyTarget::MenuKey => Some(se::actions(settings).menu_key),
     }
 }
@@ -182,7 +193,10 @@ pub fn hotkey_warning(settings: &Settings, text: &str, own: KeyTarget) -> Option
     let canonical = canonical_hotkey(text)?;
     let same = |other: &str| canonical_hotkey(other).as_deref() == Some(canonical.as_str());
 
-    let search = settings.search.as_ref().and_then(|search| search.hotkey.as_deref());
+    let search = settings
+        .search
+        .as_ref()
+        .and_then(|search| search.hotkey.as_deref());
     if own != KeyTarget::SearchHotkey && search.is_some_and(same) {
         return Some("Also used by the search: only one of them will work.".to_owned());
     }
@@ -311,7 +325,9 @@ pub fn apply(settings: &mut Settings, ui: &mut KeyEditUi, message: KeyMsg) -> bo
         }
         KeyMsg::Closed { accepted } => {
             let done = std::mem::take(ui);
-            let target = done.open.filter(|_| accepted && verdict(settings, &done).accepted);
+            let target = done
+                .open
+                .filter(|_| accepted && verdict(settings, &done).accepted);
             let write = target.and_then(|target| Some((target, draft_text(&done, target)?)));
             return write.is_some_and(|(target, text)| commit(settings, target, &text));
         }

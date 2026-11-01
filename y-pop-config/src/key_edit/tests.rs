@@ -17,7 +17,12 @@ fn open(settings: &mut Settings, target: KeyTarget) -> KeyEditUi {
     ui
 }
 
-fn choose(settings: &mut Settings, ui: &mut KeyEditUi, modifier: HOT_KEY_MODIFIERS, key: VIRTUAL_KEY) {
+fn choose(
+    settings: &mut Settings,
+    ui: &mut KeyEditUi,
+    modifier: HOT_KEY_MODIFIERS,
+    key: VIRTUAL_KEY,
+) {
     ui.modifiers = HOT_KEY_MODIFIERS(0);
     assert!(!apply(settings, ui, KeyMsg::Modifier(modifier)));
     assert!(!apply(settings, ui, KeyMsg::Key(key)));
@@ -52,9 +57,15 @@ fn nothing_is_written_until_ok() {
     let mut settings = load(r#"<y-pop><search/></y-pop>"#);
     let mut ui = open(&mut settings, KeyTarget::SearchHotkey);
     choose(&mut settings, &mut ui, MOD_CONTROL, VK_F5);
-    assert_eq!(settings.search.as_ref().and_then(|s| s.hotkey.clone()), None);
+    assert_eq!(
+        settings.search.as_ref().and_then(|s| s.hotkey.clone()),
+        None
+    );
     assert!(apply(&mut settings, &mut ui, OK));
-    assert_eq!(settings.search.as_ref().and_then(|s| s.hotkey.as_deref()), Some("Ctrl+F5"));
+    assert_eq!(
+        settings.search.as_ref().and_then(|s| s.hotkey.as_deref()),
+        Some("Ctrl+F5")
+    );
 }
 
 #[test]
@@ -97,17 +108,29 @@ fn what_a_chord_refuses_is_said_and_ok_stays_off() {
     assert!(said.problem.expect("a reason").contains("typing"));
 
     choose(&mut settings, &mut ui, MOD_CONTROL, VK_A);
-    assert!(verdict(&settings, &ui).problem.expect("a reason").contains("edits the text"));
+    assert!(
+        verdict(&settings, &ui)
+            .problem
+            .expect("a reason")
+            .contains("edits the text")
+    );
 
     assert!(!apply(&mut settings, &mut ui, OK), "refused");
-    assert_eq!(settings.to_xml(), before, "not even the list is written out");
+    assert_eq!(
+        settings.to_xml(),
+        before,
+        "not even the list is written out"
+    );
 }
 
 #[test]
 fn a_shortcut_another_action_has_is_refused_naming_it() {
     let mut settings = load(r#"<y-pop><search/></y-pop>"#);
     let rows = se::actions(&settings).rows;
-    let reveal = rows.iter().position(|row| row.id == "reveal").expect("reveal");
+    let reveal = rows
+        .iter()
+        .position(|row| row.id == "reveal")
+        .expect("reveal");
     let edit = rows.iter().position(|row| row.id == "edit").expect("edit");
 
     let mut ui = open(&mut settings, KeyTarget::Action(reveal));
@@ -141,7 +164,10 @@ fn a_chosen_shortcut_is_written_as_y_pop_reads_it() {
 #[test]
 fn shortcuts_show_as_keycaps_even_when_a_hotkey_could_not_read_them() {
     assert_eq!(shortcut_labels("Ctrl+Del"), ["Ctrl", "Del"]);
-    assert_eq!(shortcut_labels("Ctrl+Shift+Enter"), ["Ctrl", "Shift", "Enter"]);
+    assert_eq!(
+        shortcut_labels("Ctrl+Shift+Enter"),
+        ["Ctrl", "Shift", "Enter"]
+    );
     assert_eq!(shortcut_labels("F5"), ["F5"]);
     assert_eq!(shortcut_labels("Ctrl+7"), ["Ctrl", "7"]);
     assert!(shortcut_labels("nonsense").is_empty());
@@ -153,11 +179,17 @@ fn shortcuts_show_as_keycaps_even_when_a_hotkey_could_not_read_them() {
 fn opening_on_a_shortcut_keeps_it() {
     let mut settings = load(r#"<y-pop><search/></y-pop>"#);
     let rows = se::actions(&settings).rows;
-    let forget = rows.iter().position(|row| row.id == "forget").expect("forget");
+    let forget = rows
+        .iter()
+        .position(|row| row.id == "forget")
+        .expect("forget");
     let mut ui = open(&mut settings, KeyTarget::Action(forget));
     assert_eq!(ui.key, Some(VK_DELETE));
     assert!(!apply(&mut settings, &mut ui, OK), "nothing changed");
-    assert!(se::actions(&settings).written.eq(&false), "so nothing is written out");
+    assert!(
+        se::actions(&settings).written.eq(&false),
+        "so nothing is written out"
+    );
 }
 
 const SHARED: &str = r#"<y-pop><search hotkey="Alt+Space"/>
@@ -170,10 +202,26 @@ fn a_hotkey_conflict_is_seen_from_both_sides() {
     let menus: Vec<ItemId> = crate::roots::menus(&settings).map(|item| item.id).collect();
     let warning = |text, own| hotkey_warning(&settings, text, own);
 
-    assert!(warning("Alt+Space", KeyTarget::Item(menus[0], 0)).expect("search").contains("the search"));
-    assert!(warning("Alt+Space", KeyTarget::SearchHotkey).expect("A").contains("Also used by A"));
-    assert!(warning("Win+Y", KeyTarget::Item(menus[0], 1)).expect("own").contains("another hotkey of this item"));
-    assert!(warning("Win+Y", KeyTarget::NewHotkey(menus[1])).expect("A").contains("Also used by A"));
+    assert!(
+        warning("Alt+Space", KeyTarget::Item(menus[0], 0))
+            .expect("search")
+            .contains("the search")
+    );
+    assert!(
+        warning("Alt+Space", KeyTarget::SearchHotkey)
+            .expect("A")
+            .contains("Also used by A")
+    );
+    assert!(
+        warning("Win+Y", KeyTarget::Item(menus[0], 1))
+            .expect("own")
+            .contains("another hotkey of this item")
+    );
+    assert!(
+        warning("Win+Y", KeyTarget::NewHotkey(menus[1]))
+            .expect("A")
+            .contains("Also used by A")
+    );
     assert_eq!(warning("Win+J", KeyTarget::Item(menus[1], 0)), None);
     assert_eq!(warning("Ctrl+F5", KeyTarget::SearchHotkey), None);
 }

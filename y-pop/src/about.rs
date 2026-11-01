@@ -38,12 +38,7 @@ pub fn body(facts: &Facts) -> String {
         "Settings app: not installed"
     };
 
-    let fixed = [
-        "Tray menus, hotkeys and search",
-        &counts,
-        &memory,
-        settings,
-    ];
+    let fixed = ["Tray menus, hotkeys and search", &counts, &memory, settings];
 
     // The path's line is `Config: ` + path, and there are four newlines
     // between five lines.

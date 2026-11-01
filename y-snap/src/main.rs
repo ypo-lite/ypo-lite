@@ -62,6 +62,7 @@ const IDM_RESTORE_ALL: u32 = IDM_FIRST + 5;
 // entries start at `hidden::IDM_ENTRY_FIRST`, well clear of these.
 const IDM_ENTRY_OPEN: u32 = IDM_FIRST + 6;
 const IDM_ENTRY_CLOSE: u32 = IDM_FIRST + 7;
+const IDM_STARTUP: u32 = IDM_FIRST + 8;
 
 /// How many warnings a balloon shows before giving up and pointing at the
 /// file. A notification the user cannot read is a notification wasted.
@@ -166,20 +167,19 @@ impl YSnap {
             }
         }
 
-        self.mouse_hook =
-            match mouse::MouseHook::install(
-                hwnd,
-                settings.mouse,
-                &settings.mouse_shortcuts,
-                &settings.min_button,
-            ) {
-                Ok(hook) => Some(hook),
-                Err(error) => {
-                    let message = format!("Could not install the mouse hook: {error}");
-                    self.notify(APP.name, &message, Notify::Error);
-                    None
-                }
-            };
+        self.mouse_hook = match mouse::MouseHook::install(
+            hwnd,
+            settings.mouse,
+            &settings.mouse_shortcuts,
+            &settings.min_button,
+        ) {
+            Ok(hook) => Some(hook),
+            Err(error) => {
+                let message = format!("Could not install the mouse hook: {error}");
+                self.notify(APP.name, &message, Notify::Error);
+                None
+            }
+        };
         self.min_overlay = Some(min_overlay::MinOverlay::new(
             hwnd,
             settings.min_button.items.clone(),
@@ -525,7 +525,9 @@ impl YSnap {
         // Declared before the menu so it is dropped after it: Windows does
         // not free an item's bitmap, and the menu reads it until it is gone.
         let mut icons: Vec<Bitmap> = Vec::new();
-        let Ok(menu) = PopupMenu::new() else { return };
+        let Ok(mut menu) = PopupMenu::new() else {
+            return;
+        };
 
         let _ = menu.add_disabled_item(APP.name);
         let _ = menu.add_separator();
@@ -547,10 +549,16 @@ impl YSnap {
             (None, None) => {}
         }
 
-        let _ = menu.add_item(IDM_SETTINGS, "Settings…");
-        let _ = menu.add_item(IDM_OPEN_CONFIG, "Edit y-snap.xml");
-        let _ = menu.add_item(IDM_RELOAD, "Reload configuration");
+        // Kept in a submenu so the tray menu itself stays short.
+        if let Ok(configuration) = PopupMenu::new() {
+            let _ = configuration.add_item(IDM_SETTINGS, "Settings…");
+            let _ = configuration.add_item(IDM_OPEN_CONFIG, "Edit y-snap.xml");
+            let _ = configuration.add_item(IDM_RELOAD, "Reload configuration");
+            let _ = menu.add_submenu("Configuration", configuration);
+        }
         let _ = menu.add_separator();
+        let startup = y_core::startup::is_enabled(ipc::STARTUP_NAME);
+        let _ = menu.add_check_item(IDM_STARTUP, "Start with Windows", startup);
         let _ = menu.add_item(IDM_ABOUT, "About");
         let _ = menu.add_item(IDM_EXIT, "Exit");
 
@@ -558,6 +566,7 @@ impl YSnap {
             Some(IDM_SETTINGS) => self.open_settings(),
             Some(IDM_RELOAD) => self.load(hwnd),
             Some(IDM_OPEN_CONFIG) => self.open_config(),
+            Some(IDM_STARTUP) => self.toggle_startup(),
             Some(IDM_ABOUT) => self.show_about(),
             Some(IDM_RESTORE_ALL) => self.hidden.restore_all(),
             Some(IDM_EXIT) => self.quit(hwnd),
@@ -570,6 +579,15 @@ impl YSnap {
         }
 
         let _ = memory::trim_working_set();
+    }
+
+    /// Flips the `Run` registration, telling the user when it fails.
+    fn toggle_startup(&mut self) {
+        let enable = !y_core::startup::is_enabled(ipc::STARTUP_NAME);
+        if let Err(error) = y_core::startup::set_enabled(ipc::STARTUP_NAME, enable) {
+            let message = format!("Could not change Start with Windows: {error}");
+            self.notify(APP.name, &message, Notify::Error);
+        }
     }
 
     /// The traynized windows at the top of the menu, one item each with the

@@ -23,7 +23,9 @@ const MENUS: &str = r#"<group name="Work"/><group name="Admin tools"/><group nam
 
 #[test]
 fn a_search_with_nothing_in_it_lists_the_defaults() {
-    let settings = load(&format!(r#"<y-pop><search hotkey="Alt+Space"/>{MENUS}</y-pop>"#));
+    let settings = load(&format!(
+        r#"<y-pop><search hotkey="Alt+Space"/>{MENUS}</y-pop>"#
+    ));
     let list = sections(&settings);
     assert!(list.defaults);
     assert_eq!(
@@ -35,7 +37,8 @@ fn a_search_with_nothing_in_it_lists_the_defaults() {
 
 #[test]
 fn actions_and_comments_alone_leave_the_defaults() {
-    let settings = load(r#"<y-pop><search><!-- c --><actions menu-key="Ctrl+K"/></search></y-pop>"#);
+    let settings =
+        load(r#"<y-pop><search><!-- c --><actions menu-key="Ctrl+K"/></search></y-pop>"#);
     assert!(sections(&settings).defaults);
 }
 
@@ -47,7 +50,11 @@ fn a_menus_the_file_lacks_is_implied_after_recent_or_first() {
         [SectionKey::Recent, SectionKey::Menus, SectionKey::StartMenu]
     );
     assert_eq!(
-        sections(&after).rows.iter().map(|r| r.written).collect::<Vec<_>>(),
+        sections(&after)
+            .rows
+            .iter()
+            .map(|r| r.written)
+            .collect::<Vec<_>>(),
         [true, false, true]
     );
 
@@ -187,13 +194,22 @@ fn removing_what_is_not_there_writes_nothing() {
     let mut settings = load(r#"<y-pop><search/></y-pop>"#);
     let group = load(r#"<y-pop><search><menus/></search></y-pop>"#);
     assert!(remove_section(&mut settings, SectionKey::Plugin(0)).is_none());
-    assert!(sections(&settings).defaults, "the defaults were not written out");
-    assert!(sections(&group).rows.iter().all(|row| row.key != SectionKey::Recent));
+    assert!(
+        sections(&settings).defaults,
+        "the defaults were not written out"
+    );
+    assert!(
+        sections(&group)
+            .rows
+            .iter()
+            .all(|row| row.key != SectionKey::Recent)
+    );
 }
 
 #[test]
 fn a_second_recent_y_pop_ignored_goes_with_the_first() {
-    let mut settings = load(r#"<y-pop><search><recent count="3"/><recent count="9"/><menus/></search></y-pop>"#);
+    let mut settings =
+        load(r#"<y-pop><search><recent count="3"/><recent count="9"/><menus/></search></y-pop>"#);
     assert!(remove_section(&mut settings, SectionKey::Recent).is_some());
     assert_eq!(keys(&settings), [SectionKey::Menus]);
 }
@@ -215,10 +231,16 @@ fn sections_can_go_back_to_the_defaults() {
     ));
     assert!(sections_customised(&settings));
     assert!(reset_sections(&mut settings));
-    assert!(sections(&settings).defaults, "nothing left: y-pop's own defaults");
+    assert!(
+        sections(&settings).defaults,
+        "nothing left: y-pop's own defaults"
+    );
     assert!(!sections_customised(&settings));
     assert!(!reset_sections(&mut settings));
-    assert!(settings.to_xml().contains("Ctrl+K"), "the actions are another matter");
+    assert!(
+        settings.to_xml().contains("Ctrl+K"),
+        "the actions are another matter"
+    );
 }
 
 #[test]
@@ -228,9 +250,15 @@ fn going_back_to_the_defaults_keeps_groups_and_writes_the_three() {
     );
     assert!(reset_sections(&mut settings));
     let rows = keys(&settings);
-    assert_eq!(rows[..3], [SectionKey::Recent, SectionKey::Menus, SectionKey::StartMenu]);
+    assert_eq!(
+        rows[..3],
+        [SectionKey::Recent, SectionKey::Menus, SectionKey::StartMenu]
+    );
     assert!(matches!(rows[3], SectionKey::Item(_)));
-    assert_eq!(recent_count(&settings), y_pop::model::Section::DEFAULT_RECENT);
+    assert_eq!(
+        recent_count(&settings),
+        y_pop::model::Section::DEFAULT_RECENT
+    );
     assert!(!sections_customised(&settings));
     read_back(&settings);
 }
@@ -272,7 +300,10 @@ fn only_the_browse_list_moves_past_comments_and_actions() {
 fn a_move_that_can_not_happen_writes_nothing() {
     let mut settings = load(r#"<y-pop><search/></y-pop>"#);
     assert!(!move_section(&mut settings, SectionKey::Menus, true));
-    assert!(sections(&settings).defaults, "the defaults were not written out");
+    assert!(
+        sections(&settings).defaults,
+        "the defaults were not written out"
+    );
 }
 
 #[test]
@@ -289,16 +320,33 @@ fn a_renamed_tray_menu_stays_in_include() {
     let mut settings = load(&format!(
         r#"<y-pop><search><menus include="Work;Admin tools"/></search>{MENUS}</y-pop>"#
     ));
-    assert_eq!(rename_in_include(&mut settings, "Admin tools", "Tools"), Rename::Renamed);
+    assert_eq!(
+        rename_in_include(&mut settings, "Admin tools", "Tools"),
+        Rename::Renamed
+    );
     assert_eq!(include_names(&settings), ["Work", "Tools"]);
     // A name that can't be written waits, for the caller to try again.
-    assert_eq!(rename_in_include(&mut settings, "Tools", "A;B"), Rename::Waiting);
-    assert_eq!(rename_in_include(&mut settings, "Tools", ""), Rename::Waiting);
-    assert_eq!(rename_in_include(&mut settings, "Games", "Fun"), Rename::NotListed);
+    assert_eq!(
+        rename_in_include(&mut settings, "Tools", "A;B"),
+        Rename::Waiting
+    );
+    assert_eq!(
+        rename_in_include(&mut settings, "Tools", ""),
+        Rename::Waiting
+    );
+    assert_eq!(
+        rename_in_include(&mut settings, "Games", "Fun"),
+        Rename::NotListed
+    );
     assert_eq!(include_names(&settings), ["Work", "Tools"]);
 
-    let mut without = load(&format!(r#"<y-pop><search><menus/></search>{MENUS}</y-pop>"#));
-    assert_eq!(rename_in_include(&mut without, "Work", "Jobs"), Rename::NotListed);
+    let mut without = load(&format!(
+        r#"<y-pop><search><menus/></search>{MENUS}</y-pop>"#
+    ));
+    assert_eq!(
+        rename_in_include(&mut without, "Work", "Jobs"),
+        Rename::NotListed
+    );
 }
 
 #[test]
@@ -318,21 +366,33 @@ fn a_deleted_tray_menu_leaves_include() {
 
     let settings = deleted("Work;Games", "Work");
     assert_eq!(include_names(&settings), ["Games"]);
-    assert!(read_back(&settings).search.expect("search").includes_menu("Games"));
+    assert!(
+        read_back(&settings)
+            .search
+            .expect("search")
+            .includes_menu("Games")
+    );
 
     // The only one listed: not "nothing counts", as y-pop would read a name
     // that matches nothing, but every menu again.
     let settings = deleted("Work", "Work");
     assert!(!settings.to_xml().contains("include"));
-    assert!(read_back(&settings).search.expect("search").includes_menu("Games"));
+    assert!(
+        read_back(&settings)
+            .search
+            .expect("search")
+            .includes_menu("Games")
+    );
 }
 
 #[test]
 fn a_menu_of_the_same_name_keeps_the_entry() {
-    let mut settings = load(
-        r#"<y-pop><search><menus include="Work"/></search><group name="Work"/></y-pop>"#,
+    let mut settings =
+        load(r#"<y-pop><search><menus include="Work"/></search><group name="Work"/></y-pop>"#);
+    assert!(
+        !drop_from_include(&mut settings, "Work"),
+        "this one still exists"
     );
-    assert!(!drop_from_include(&mut settings, "Work"), "this one still exists");
     assert_eq!(include_names(&settings), ["Work"]);
 }
 
@@ -367,7 +427,11 @@ fn rows_y_pop_drops_are_marked() {
         "open, then what was written"
     );
     // y-pop gives Ctrl+E to edit, so nothing is wrong with that row.
-    assert!(key_problems(&settings).is_empty(), "{:?}", key_problems(&settings));
+    assert!(
+        key_problems(&settings).is_empty(),
+        "{:?}",
+        key_problems(&settings)
+    );
 }
 
 #[test]
@@ -413,7 +477,11 @@ fn browse_and_the_other_fields_round_trip() {
 // ---- actions -----------------------------------------------------------
 
 fn ids(settings: &Settings) -> Vec<String> {
-    actions(settings).rows.into_iter().map(|row| row.id).collect()
+    actions(settings)
+        .rows
+        .into_iter()
+        .map(|row| row.id)
+        .collect()
 }
 
 #[test]
@@ -480,12 +548,19 @@ fn the_first_action_edit_writes_the_defaults_out() {
 
     let view = actions(&settings);
     assert!(view.written);
-    assert_eq!(view.rows.len(), ActionId::ALL.len(), "the other actions stay");
+    assert_eq!(
+        view.rows.len(),
+        ActionId::ALL.len(),
+        "the other actions stay"
+    );
     assert_eq!(view.rows[1].key.as_deref(), Some("Ctrl+Shift+O"));
     let tree = read_back(&settings);
     let read = &tree.search.expect("search").actions;
     assert_eq!(read.actions.len(), ActionId::ALL.len());
-    assert_eq!(read.actions[1].key.map(|k| k.to_string()).as_deref(), Some("Ctrl+Shift+O"));
+    assert_eq!(
+        read.actions[1].key.map(|k| k.to_string()).as_deref(),
+        Some("Ctrl+Shift+O")
+    );
 }
 
 #[test]
@@ -505,13 +580,17 @@ fn actions_are_added_removed_and_moved_but_open_stays() {
     assert!(!move_action(&mut settings, 2, false));
     assert!(remove_action(&mut settings, 1));
     assert_eq!(ids(&settings), ["open", "edit"]);
-    assert!(settings.to_xml().contains("<!-- c -->"), "the comment stays");
+    assert!(
+        settings.to_xml().contains("<!-- c -->"),
+        "the comment stays"
+    );
     read_back(&settings);
 }
 
 #[test]
 fn an_implied_open_is_written_when_the_list_is_edited() {
-    let mut settings = load(r#"<y-pop><search><actions><action do="edit"/></actions></search></y-pop>"#);
+    let mut settings =
+        load(r#"<y-pop><search><actions><action do="edit"/></actions></search></y-pop>"#);
     assert!(actions(&settings).rows[0].implied);
     assert!(set_action_button(&mut settings, 1, true));
     let view = actions(&settings);
@@ -542,9 +621,8 @@ fn the_menu_key_and_quick_pick_are_written_only_when_not_the_default() {
 
 #[test]
 fn reset_removes_actions_and_nothing_else() {
-    let mut settings = load(
-        r#"<y-pop><search><recent/><actions><action do="edit"/></actions></search></y-pop>"#,
-    );
+    let mut settings =
+        load(r#"<y-pop><search><recent/><actions><action do="edit"/></actions></search></y-pop>"#);
     assert!(reset_actions(&mut settings));
     assert!(!reset_actions(&mut settings));
     assert!(!actions(&settings).written);
@@ -568,8 +646,8 @@ fn the_shortcuts_y_pop_would_refuse_are_found_with_their_row() {
     assert!(problems[2].1.contains("Ctrl or Alt"));
 
     // y-pop agrees on each: it warns once per problem.
-    let tree = y_pop::config::load_str(&settings.to_xml(), &mut Vec::<Variable>::new())
-        .expect("valid");
+    let tree =
+        y_pop::config::load_str(&settings.to_xml(), &mut Vec::<Variable>::new()).expect("valid");
     assert_eq!(tree.warnings.len(), problems.len(), "{:?}", tree.warnings);
 }
 

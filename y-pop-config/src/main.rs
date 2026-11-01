@@ -30,11 +30,11 @@ mod from_file;
 mod general;
 mod icon_picker;
 mod inspector;
+mod key_edit;
 mod menu_edit;
 mod menu_view;
 mod prefs;
 mod roots;
-mod key_edit;
 mod search_edit;
 mod search_only;
 mod search_view;
@@ -271,6 +271,7 @@ enum Msg {
     OpenConfigFolder,
     EditConfigXml,
     ShowCommentsToggled(bool),
+    StartupToggled(bool),
     NotesEdited(String),
     NotesReady,
 
@@ -567,8 +568,8 @@ impl Component for ConfigApp {
         });
         // A tray menu shown as two panes scrolls them itself: the page stays
         // put, and gives the screen the window's height.
-        let pinned =
-            self.screen
+        let pinned = self
+            .screen
             .menu_root()
             .is_some_and(|id| menu_view::is_pinned(settings, id, viewport));
         let page: View = if pinned {
@@ -813,6 +814,15 @@ impl ConfigApp {
             Msg::ShowCommentsToggled(on) => {
                 self.prefs.show_comments = on;
                 self.prefs.save(&prefs::path_for(&self.path));
+                return;
+            }
+            // Takes effect at once and is not part of y-pop.xml; the bar
+            // reads the registry again on the redraw, so a failure leaves
+            // the switch where it was.
+            Msg::StartupToggled(on) => {
+                if let Err(error) = y_core::startup::set_enabled(ipc::STARTUP_NAME, on) {
+                    y_core::log::line(format_args!("start with Windows: {error}"));
+                }
                 return;
             }
             Msg::OpenConfigFolder => {
@@ -1155,23 +1165,36 @@ impl ConfigApp {
         }
     }
 
-    /// The "show comments" toggle, on the screens that have comments to show.
-    fn bar_tools(&self, settings: &Settings, context: &ViewContext<Self>) -> Option<View> {
-        let count = match self.screen {
-            Screen::Menu(id) | Screen::SearchOnly(id) => tree::count_comments(settings, id),
-            Screen::Variables => variables::count_comments(settings),
-            _ => return None,
-        };
-        let on = self.prefs.show_comments;
-        let tooltip = format!("{} comments ({count})", if on { "Hide" } else { "Show" });
-        Some(
-            ToggleButton::new()
-                .is_checked(on)
-                .min_width(0.0)
-                .on_is_checked_changed(context.callback(Msg::ShowCommentsToggled))
-                .content(SymbolIcon::new().symbol(Symbol::Comment))
-                .tooltip(tooltip),
-        )
+    /// The bar's small controls: "Start with Windows" everywhere, and the
+    /// "show comments" toggle on the screens that have comments to show.
+    fn bar_tools(&self, settings: Option<&Settings>, context: &ViewContext<Self>) -> View {
+        let comments = settings.and_then(|settings| {
+            let count = match self.screen {
+                Screen::Menu(id) | Screen::SearchOnly(id) => tree::count_comments(settings, id),
+                Screen::Variables => variables::count_comments(settings),
+                _ => return None,
+            };
+            let on = self.prefs.show_comments;
+            let tooltip = format!("{} comments ({count})", if on { "Hide" } else { "Show" });
+            Some(
+                ToggleButton::new()
+                    .is_checked(on)
+                    .min_width(0.0)
+                    .on_is_checked_changed(context.callback(Msg::ShowCommentsToggled))
+                    .content(SymbolIcon::new().symbol(Symbol::Comment))
+                    .tooltip(tooltip),
+            )
+        });
+        Stack::horizontal(space::M)
+            .child(
+                "startup",
+                shell::startup_toggle(
+                    y_core::startup::is_enabled(ipc::STARTUP_NAME),
+                    context.callback(Msg::StartupToggled),
+                ),
+            )
+            .maybe("comments", comments)
+            .into()
     }
 
     /// The bar along the bottom: status, an inline question or an Undo
@@ -1230,7 +1253,7 @@ impl ConfigApp {
                                can't load are kept; only the layout is regenerated. The first save of a session keeps \
                                the old file as y-pop.xml.bak.",
                 extra,
-                tools: settings.and_then(|settings| self.bar_tools(settings, context)),
+                tools: Some(self.bar_tools(settings, context)),
             },
             context.callback(|()| Msg::Reload),
             context.callback(|()| Msg::Save),

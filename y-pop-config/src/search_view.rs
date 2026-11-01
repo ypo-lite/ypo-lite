@@ -94,7 +94,9 @@ impl SearchMsg {
     pub fn undo_label(&self) -> Option<&'static str> {
         match self {
             Self::TurnOff | Self::AskTurnOff => Some("Turned search off"),
-            Self::Remove(_) | Self::Recent(false) | Self::StartMenu(false) => Some("Removed a section"),
+            Self::Remove(_) | Self::Recent(false) | Self::StartMenu(false) => {
+                Some("Removed a section")
+            }
             Self::ResetSections => Some("Reset the sections"),
             Self::RemoveAction(_) => Some("Removed an action"),
             Self::ResetActions => Some("Reset the actions"),
@@ -119,7 +121,11 @@ pub fn counted_menus(settings: &Settings) -> Vec<String> {
         return all;
     }
     all.into_iter()
-        .filter(|menu| listed.iter().any(|name| y_pop::model::same_menu(name, menu)))
+        .filter(|menu| {
+            listed
+                .iter()
+                .any(|name| y_pop::model::same_menu(name, menu))
+        })
         .collect()
 }
 
@@ -132,7 +138,9 @@ pub fn lost_by_turning_off(settings: &Settings) -> Option<String> {
         1 => Some("a search-only group or folder".to_owned()),
         n => Some(format!("{n} search-only groups and folders")),
     };
-    let actions = se::actions(settings).written.then(|| "your actions".to_owned());
+    let actions = se::actions(settings)
+        .written
+        .then(|| "your actions".to_owned());
     match (items, actions) {
         (Some(items), Some(actions)) => Some(format!("{items} and {actions}")),
         (items, actions) => items.or(actions),
@@ -163,7 +171,9 @@ pub fn apply(settings: &mut Settings, ui: &mut SearchUi, message: SearchMsg) -> 
         SearchMsg::RemoveHotkey => se::set_hotkey(settings, ""),
         SearchMsg::Override(on) => se::set_override(settings, on),
         SearchMsg::Collapsed(on) => flag(settings, on, false, |s| s.collapsed, se::set_collapsed),
-        SearchMsg::RowActions(on) => flag(settings, on, true, |s| s.row_actions, se::set_row_actions),
+        SearchMsg::RowActions(on) => {
+            flag(settings, on, true, |s| s.row_actions, se::set_row_actions)
+        }
         SearchMsg::History(on) => flag(settings, on, true, |s| s.history, se::set_history),
         SearchMsg::Monitor(choice) => {
             let mode = match choice {
@@ -189,7 +199,9 @@ pub fn apply(settings: &mut Settings, ui: &mut SearchUi, message: SearchMsg) -> 
             ui.selected = (ui.selected != Some(key)).then_some(key);
             false
         }
-        SearchMsg::Recent(on) => section_switch(settings, SectionKey::Recent, SectionAdd::Recent, on),
+        SearchMsg::Recent(on) => {
+            section_switch(settings, SectionKey::Recent, SectionAdd::Recent, on)
+        }
         SearchMsg::StartMenu(on) => {
             section_switch(settings, SectionKey::StartMenu, SectionAdd::StartMenu, on)
         }
@@ -233,7 +245,8 @@ pub fn apply(settings: &mut Settings, ui: &mut SearchUi, message: SearchMsg) -> 
             // to count it, so it isn't part of what is chosen among.
             let usable = |name: &String| !name.contains(';');
             let all: Vec<String> = menu_names(settings).into_iter().filter(usable).collect();
-            let mut counted: Vec<String> = counted_menus(settings).into_iter().filter(usable).collect();
+            let mut counted: Vec<String> =
+                counted_menus(settings).into_iter().filter(usable).collect();
             match counted.iter().position(|menu| *menu == name) {
                 // The last one stays: no `include` means every menu.
                 Some(_) if counted.len() == 1 => return false,
@@ -284,11 +297,7 @@ fn flag(
     get: fn(&y_pop::settings::SearchSettings) -> Option<bool>,
     set: fn(&mut Settings, Option<bool>) -> bool,
 ) -> bool {
-    let current = settings
-        .search
-        .as_ref()
-        .and_then(get)
-        .unwrap_or(default);
+    let current = settings.search.as_ref().and_then(get).unwrap_or(default);
     current != on && set(settings, (on != default).then_some(on))
 }
 
@@ -300,7 +309,9 @@ pub fn section_title(settings: &Settings, key: SectionKey) -> String {
         SectionKey::Recent => "Recent".to_owned(),
         SectionKey::Menus => "Tray menus".to_owned(),
         SectionKey::StartMenu => "Start menu".to_owned(),
-        SectionKey::Plugin(n) => plugin_attr(settings, n, "name").unwrap_or_else(|| "Plugin".to_owned()),
+        SectionKey::Plugin(n) => {
+            plugin_attr(settings, n, "name").unwrap_or_else(|| "Plugin".to_owned())
+        }
         SectionKey::Item(id) => crate::tree::item(settings, id)
             .map(roots::label)
             .unwrap_or_default(),
@@ -466,7 +477,10 @@ fn hotkey_control(settings: &Settings, context: &ViewContext<ConfigApp>) -> View
 
     let mut control = Stack::vertical(space::XS).child("line", line);
     if set && labels.is_empty() {
-        control = control.child("invalid", text::caption("Not a key combination: y-pop ignores it."));
+        control = control.child(
+            "invalid",
+            text::caption("Not a key combination: y-pop ignores it."),
+        );
     }
     if let Some(warning) = hotkey_warning(settings, &hotkey, KeyTarget::SearchHotkey) {
         control = control.child("warning", text::caption(warning));
@@ -610,7 +624,10 @@ fn empty_box(
 
     let mut foot = vec![(
         "Add group",
-        add_button("Add group", search_callback(context, |()| SearchMsg::AddGroup)),
+        add_button(
+            "Add group",
+            search_callback(context, |()| SearchMsg::AddGroup),
+        ),
     )];
     if se::sections_customised(settings) {
         foot.push((
@@ -626,8 +643,17 @@ fn empty_box(
 
     let body = Stack::vertical(space::M)
         .child("recent", recent_setting(settings, viewport, context))
-        .child("browse", field("Browse list", table.rows(rows).build(viewport)))
-        .child("foot", AutoGrid::new(220.0).max_columns(2).items(foot).build(viewport));
+        .child(
+            "browse",
+            field("Browse list", table.rows(rows).build(viewport)),
+        )
+        .child(
+            "foot",
+            AutoGrid::new(220.0)
+                .max_columns(2)
+                .items(foot)
+                .build(viewport),
+        );
     section("Empty box", body)
 }
 
@@ -645,9 +671,20 @@ fn beside(label: &str, control: impl Into<View>) -> View {
 
 /// Recent is on top of the box or isn't there. History feeds it, so without
 /// history it is greyed out, whatever the file says.
-fn recent_setting(settings: &Settings, viewport: Viewport, context: &ViewContext<ConfigApp>) -> View {
-    let history = settings.search.as_ref().and_then(|s| s.history).unwrap_or(true);
-    let on = se::sections(settings).rows.iter().any(|row| row.key == SectionKey::Recent);
+fn recent_setting(
+    settings: &Settings,
+    viewport: Viewport,
+    context: &ViewContext<ConfigApp>,
+) -> View {
+    let history = settings
+        .search
+        .as_ref()
+        .and_then(|s| s.history)
+        .unwrap_or(true);
+    let on = se::sections(settings)
+        .rows
+        .iter()
+        .any(|row| row.key == SectionKey::Recent);
 
     let mut control = Stack::horizontal(space::M);
     if on && history {
@@ -727,7 +764,11 @@ fn results(settings: &Settings, viewport: Viewport, context: &ViewContext<Config
 }
 
 /// What is searched without being a row of the box.
-fn also_searched(settings: &Settings, viewport: Viewport, context: &ViewContext<ConfigApp>) -> View {
+fn also_searched(
+    settings: &Settings,
+    viewport: Viewport,
+    context: &ViewContext<ConfigApp>,
+) -> View {
     let rows: Vec<Row> = se::other_rows(settings)
         .iter()
         .map(|row| {
@@ -756,13 +797,21 @@ fn also_searched(settings: &Settings, viewport: Viewport, context: &ViewContext<
                 .into();
             Row::new(
                 format!("{key:?}"),
-                vec![text::body(section_title(settings, key)).into(), what, actions.into()],
+                vec![
+                    text::body(section_title(settings, key)).into(),
+                    what,
+                    actions.into(),
+                ],
             )
         })
         .collect();
-    let table = Table::new(&OTHER_COLUMNS).empty_message("No folders here: your tray menus' are searched anyway.");
+    let table = Table::new(&OTHER_COLUMNS)
+        .empty_message("No folders here: your tray menus' are searched anyway.");
 
-    let start_on = se::sections(settings).rows.iter().any(|row| row.key == SectionKey::StartMenu);
+    let start_on = se::sections(settings)
+        .rows
+        .iter()
+        .any(|row| row.key == SectionKey::StartMenu);
     let mut start = Stack::horizontal(space::M);
     if start_on {
         start = start.child(
@@ -792,7 +841,10 @@ fn also_searched(settings: &Settings, viewport: Viewport, context: &ViewContext<
                 .keep_columns()
                 .items([(
                     "Add folder",
-                    add_button("Add folder", search_callback(context, |()| SearchMsg::AddFolder)),
+                    add_button(
+                        "Add folder",
+                        search_callback(context, |()| SearchMsg::AddFolder),
+                    ),
                 )])
                 .build(viewport),
         )
@@ -827,25 +879,26 @@ fn menus_fields(settings: &Settings, viewport: Viewport, context: &ViewContext<C
 
     let counted = counted_menus(settings);
     let usable_counted = counted.iter().filter(|name| !name.contains(';')).count();
-    let menus = menu_names(settings).into_iter().enumerate().map(|(index, name)| {
-        let on = counted.contains(&name);
-        let usable = !name.contains(';');
-        let last = on && usable_counted == 1;
-        let shown = roots::mnemonic(&name);
-        // A selected look, not a toggle: see the toolkit's trap table.
-        let chosen = button(
-            &shown,
-            on,
-            usable && !last,
-            search_callback(context, move |()| SearchMsg::Include(name.clone())),
-        );
-        (index.to_string(), chosen)
-    });
+    let menus = menu_names(settings)
+        .into_iter()
+        .enumerate()
+        .map(|(index, name)| {
+            let on = counted.contains(&name);
+            let usable = !name.contains(';');
+            let last = on && usable_counted == 1;
+            let shown = roots::mnemonic(&name);
+            // A selected look, not a toggle: see the toolkit's trap table.
+            let chosen = button(
+                &shown,
+                on,
+                usable && !last,
+                search_callback(context, move |()| SearchMsg::Include(name.clone())),
+            );
+            (index.to_string(), chosen)
+        });
 
-    let mut counted_box = Stack::vertical(space::S).child(
-        "menus",
-        AutoGrid::new(150.0).items(menus).build(viewport),
-    );
+    let mut counted_box =
+        Stack::vertical(space::S).child("menus", AutoGrid::new(150.0).items(menus).build(viewport));
     let unknown = se::unknown_includes(settings);
     if !unknown.is_empty() {
         counted_box = counted_box.child(
@@ -859,7 +912,9 @@ fn menus_fields(settings: &Settings, viewport: Viewport, context: &ViewContext<C
     if menu_names(settings).iter().any(|name| name.contains(';')) {
         counted_box = counted_box.child(
             "semicolon",
-            text::caption("A menu whose name has a ; can't be chosen: it counts only while all of them do."),
+            text::caption(
+                "A menu whose name has a ; can't be chosen: it counts only while all of them do.",
+            ),
         );
     }
     counted_box = counted_box.child(
@@ -905,16 +960,16 @@ fn menu_key_control(view: &se::ActionsView, context: &ViewContext<ConfigApp>) ->
     )
 }
 
-fn actions_card(
-    settings: &Settings,
-    viewport: Viewport,
-    context: &ViewContext<ConfigApp>,
-) -> View {
+fn actions_card(settings: &Settings, viewport: Viewport, context: &ViewContext<ConfigApp>) -> View {
     let view = se::actions(settings);
     let problems = se::key_problems(settings);
     let count = view.rows.len();
     let table = Table::new(&ACTION_COLUMNS);
-    let buttons_shown = settings.search.as_ref().and_then(|s| s.row_actions).unwrap_or(true);
+    let buttons_shown = settings
+        .search
+        .as_ref()
+        .and_then(|s| s.row_actions)
+        .unwrap_or(true);
 
     let rows: Vec<Row> = view
         .rows
@@ -954,9 +1009,15 @@ fn actions_card(
             let problem = problems
                 .iter()
                 .find(|(at, _)| *at == Some(index))
-                .map(|(_, text)| text::caption(format!("y-pop ignores this shortcut: {text}")).into());
+                .map(|(_, text)| {
+                    text::caption(format!("y-pop ignores this shortcut: {text}")).into()
+                });
             // An ignored row can repeat an id, so it goes by its place.
-            let key = if row.ignored { format!("#{index}") } else { row.id.clone() };
+            let key = if row.ignored {
+                format!("#{index}")
+            } else {
+                row.id.clone()
+            };
             Row::new(
                 key,
                 vec![
@@ -972,12 +1033,18 @@ fn actions_card(
 
     let mut menu_key = Stack::vertical(space::XS).child("key", menu_key_control(&view, context));
     if let Some((_, problem)) = problems.iter().find(|(at, _)| at.is_none()) {
-        menu_key = menu_key.child("problem", text::caption(format!("y-pop uses Alt+Enter instead: {problem}")));
+        menu_key = menu_key.child(
+            "problem",
+            text::caption(format!("y-pop uses Alt+Enter instead: {problem}")),
+        );
     }
     let settings_grid = AutoGrid::new(220.0)
         .max_columns(2)
         .items([
-            ("menu-key", field("Key that opens the action menu", menu_key)),
+            (
+                "menu-key",
+                field("Key that opens the action menu", menu_key),
+            ),
             (
                 "quick-pick",
                 labeled_switch(
@@ -1079,9 +1146,7 @@ impl ConfigApp {
             return;
         };
         self.run_status = None;
-        let undo = message
-            .undo_label()
-            .map(|label| (label, settings.clone()));
+        let undo = message.undo_label().map(|label| (label, settings.clone()));
         if apply(settings, &mut self.search_ui, message) {
             if let Some((label, before)) = undo {
                 self.undo = Some(crate::Undo {

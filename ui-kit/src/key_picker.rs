@@ -180,7 +180,10 @@ pub fn key_picker_with(
 
     Stack::vertical(space::L)
         .child("readout", readout)
-        .maybe("problem", problem.map(|problem| text::caption(problem).into()))
+        .maybe(
+            "problem",
+            problem.map(|problem| text::caption(problem).into()),
+        )
         .child("controls", controls.build(viewport))
         .child(
             "category",
@@ -245,21 +248,26 @@ fn key_grid(
     AutoGrid::new(category.min_button_width())
         .max_columns(13)
         .gap(space::XS, space::XS)
-        .items(category.keys().filter(|&(_, key)| allows(key)).map(|(label, key)| {
-            let on_key = on_key.clone();
-            let button: View = Button::new()
-                .style(if Some(key) == current {
-                    ButtonStyle::Accent
-                } else {
-                    ButtonStyle::Default
-                })
-                .min_width(0.0)
-                .fill()
-                .on_click(Callback::new(move |()| {
-                    let _ = on_key.call(key);
-                }))
-                .content(label);
-            (label, button)
-        }))
+        .items(
+            category
+                .keys()
+                .filter(|&(_, key)| allows(key))
+                .map(|(label, key)| {
+                    let on_key = on_key.clone();
+                    let button: View = Button::new()
+                        .style(if Some(key) == current {
+                            ButtonStyle::Accent
+                        } else {
+                            ButtonStyle::Default
+                        })
+                        .min_width(0.0)
+                        .fill()
+                        .on_click(Callback::new(move |()| {
+                            let _ = on_key.call(key);
+                        }))
+                        .content(label);
+                    (label, button)
+                }),
+        )
         .build(viewport)
 }
