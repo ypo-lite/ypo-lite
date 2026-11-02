@@ -21,16 +21,17 @@ whichever window the pointer happens to be over.
 - **Ready at once.** The defaults are useful from the first start, and every one
   of them can be changed.
 - **Portable.** Drop `y-snap.xml` next to `y-snap.exe` and take it with you.
+- **Flexible.** You can configure every actions, shortcuts, hotkeys.
 
 ## Move and resize from anywhere
 
-Hold `Alt` and drag with the left button to move a window, with the right button
+Hold `Alt` (configurable) and drag with the left button to move a window, with the right button
 to resize it, from anywhere inside it. Resizing pulls the corner nearest to where
 you pressed. The buttons and modifiers are yours to change.
 
 ## One popup, every action
 
-`Ctrl+Space` opens a grid of tiles over the window, which gets a coloured outline
+`Ctrl+Space` (configurable) opens a grid of tiles over the window, which gets a coloured outline
 so you can see which one it is. One key press or one click does the action.
 Tiles show what is on: *Restore*, *Unpin*, *Remove top*.
 

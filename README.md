@@ -43,10 +43,13 @@ The settings apps need the
 2.4 or later. If you use the zip and it is missing, they offer to open that
 page. Y-Snap and Y-Pop don't need it.
 
-The executables are not code-signed yet, so Windows SmartScreen may warn you
-the first time you run them. Each release lists SHA-256 checksums, and
-`gh attestation verify <file> --repo ypo-lite/ypo-lite` confirms a file was
-built by this repository's release workflow.
+The executables and the installer are signed with the project's own self-signed
+certificate, `CN=Ypo-Lite`, published as
+[`installer/ypo-lite-signing.cer`](installer/ypo-lite-signing.cer). No public
+authority has vouched for it, so Windows still reports the publisher as unknown
+and SmartScreen may warn you the first time you run them. Each release lists
+SHA-256 checksums, and `gh attestation verify <file> --repo ypo-lite/ypo-lite`
+confirms a file was built by this repository's release workflow.
 
 ### Where the configuration lives
 
