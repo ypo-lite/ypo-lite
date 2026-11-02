@@ -4,6 +4,9 @@
 # By hand (Actions > release > Run workflow): builds only, and keeps the files as
 # a workflow artifact. Run it on main before tagging: release tags are immutable,
 # so a tag whose build fails cannot be moved to a fixed commit.
+#
+# Both sign with the key in the `release` environment, which only main and
+# release/* tags can use, so this workflow cannot run on another branch.
 name: release
 
 on:
@@ -17,8 +20,11 @@ jobs:
   build:
     runs-on: windows-2025
     timeout-minutes: 45
+    environment: release
     permissions:
       contents: read
+    env:
+      TAG: ${{ github.event_name == 'push' && github.ref_name || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -33,10 +39,30 @@ jobs:
       - name: Install Inno Setup
         run: choco install innosetup --version=6.7.1 --no-progress -y
 
-      - name: Build the zip and the installer
+      - name: Build the executables
+        run: ./scripts/release.ps1 -Tag $env:TAG -BuildOnly
+
+      # After the build, so that no build script can reach the key. It is imported
+      # as non-exportable. Windows PowerShell has the PKI module built in.
+      - name: Import the signing key
+        id: key
+        shell: powershell
         env:
-          TAG: ${{ github.event_name == 'push' && github.ref_name || '' }}
-        run: ./scripts/release.ps1 -Tag $env:TAG
+          SIGNING_PFX: ${{ secrets.SIGNING_PFX }}
+          SIGNING_PFX_PASSWORD: ${{ secrets.SIGNING_PFX_PASSWORD }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pfx = Join-Path $env:RUNNER_TEMP 'signing.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:SIGNING_PFX))
+          $password = ConvertTo-SecureString $env:SIGNING_PFX_PASSWORD -AsPlainText -Force
+          $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          Remove-Item $pfx
+          Add-Content $env:GITHUB_OUTPUT "thumbprint=$($cert.Thumbprint)" -Encoding ascii
+
+      - name: Sign, and build the zip and the installer
+        env:
+          THUMBPRINT: ${{ steps.key.outputs.thumbprint }}
+        run: ./scripts/release.ps1 -Tag $env:TAG -SkipBuild -CertThumbprint $env:THUMBPRINT
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

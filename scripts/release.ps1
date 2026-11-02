@@ -16,14 +16,22 @@
   Raw signtool arguments instead of a thumbprint, e.g. for Azure Trusted Signing:
   '/dlib "...\Azure.CodeSigning.Dlib.dll" /dmdf metadata.json'. Wins over -CertThumbprint.
 
-.PARAMETER NoSign
-  Build the installer unsigned (the default when neither signing option is given).
+  Without either option, everything is built unsigned.
+
+.PARAMETER BuildOnly
+  Stops after cargo build. With -SkipBuild, this lets the workflow compile before
+  the signing key is on the machine, out of reach of the build scripts.
+
+.PARAMETER SkipBuild
+  Signs and packages the executables already in target\release.
 #>
 param(
     [string]$Tag,
     [string]$CertThumbprint,
     [string]$SignArgs,
-    [string]$TimestampUrl = 'http://timestamp.acs.microsoft.com'
+    [string]$TimestampUrl = 'http://timestamp.digicert.com',
+    [switch]$BuildOnly,
+    [switch]$SkipBuild
 )
 
 $ErrorActionPreference = 'Stop'
@@ -54,20 +62,26 @@ function Find-Tool($name, $candidates) {
     throw "$name not found: install it or add it to PATH."
 }
 
-$iscc = Find-Tool 'ISCC.exe' @(
-    "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",
-    "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
-    "$env:ProgramFiles\Inno Setup 6\ISCC.exe")
+if (-not $BuildOnly) {
+    $iscc = Find-Tool 'ISCC.exe' @(
+        "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",
+        "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+        "$env:ProgramFiles\Inno Setup 6\ISCC.exe")
 
-if ($signing) {
-    $signtool = Find-Tool 'signtool.exe' @(
-        "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe")
+    if ($signing) {
+        $signtool = Find-Tool 'signtool.exe' @(
+            "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe")
+    }
 }
 
-Write-Host "== cargo build --release ($version)"
-$packages = $apps | ForEach-Object { '-p'; $_ }
-cargo build --release --locked @packages
-if ($LASTEXITCODE) { throw 'cargo build failed' }
+if (-not $SkipBuild) {
+    Write-Host "== cargo build --release ($version)"
+    $packages = $apps | ForEach-Object { '-p'; $_ }
+    cargo build --release --locked @packages
+    if ($LASTEXITCODE) { throw 'cargo build failed' }
+}
+
+if ($BuildOnly) { return }
 
 if ($signing) {
     Write-Host '== signing executables'
@@ -80,7 +94,9 @@ if ($signing) {
 Write-Host '== building installer'
 $isccArgs = @("/DAppVersion=$version")
 if ($signing) {
-    $isccArgs += '/DSign=1', "/Ssigntool=`"$signtool`" $signtoolArgs `$f"
+    # $q is Inno Setup's own quote: a real one inside an argument does not survive
+    # the way PowerShell passes arguments to a program.
+    $isccArgs += '/DSign=1', "/Ssigntool=`$q$signtool`$q $signtoolArgs `$f"
 }
 & $iscc @isccArgs installer\ypo-lite.iss
 if ($LASTEXITCODE) { throw 'ISCC failed' }
