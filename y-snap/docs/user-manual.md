@@ -283,6 +283,7 @@ The full rules are in the [configuration reference](configuration.md#shortcut).
 **With the settings app.** Double-click the tray icon, or choose **Settings…**. It
 has a page each for *Hotkeys*, *Mouse gestures*, *Mouse shortcuts*, *Action overlay*
 and *Minimize button*, and y-snap applies what you save without being restarted.
+Every page is described in the [settings app's manual](../../y-snap-config/docs/user-manual.md).
 
 **By hand.** Choose **Edit y-snap.xml**, save, then choose **Reload configuration**.
 y-snap does not notice an edit on its own.

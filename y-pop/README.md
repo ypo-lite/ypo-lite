@@ -92,9 +92,7 @@ complete `y-pop.xml`:
 </y-pop>
 ```
 
-<!-- Add once taken:
-![y-pop-config](docs/images/y-pop_settings_01.png)
--->
+![y-pop-config](../y-pop-config/docs/images/y-pop-cfg_01_hotkeys.png)
 
 An unknown attribute or a bad key combination costs you that one setting: y-pop
 warns about it and loads the rest. A reload that fails keeps what is already
@@ -113,6 +111,7 @@ above to get the search window.
 | --- | --- |
 | [User manual](docs/user-manual.md) | using the search window: keys, prefixes, sections, actions, and everything inside `<search>` |
 | [Configuration reference](docs/configuration.md) | every setting of `y-pop.xml` outside `<search>`: tray icons, items, hotkeys, variables, themes and skins |
+| [Settings app](../y-pop-config/docs/user-manual.md) | using y-pop-config: every page, the app picker, drag and drop, the skin |
 | [Development](docs/development.md) | how the code is organised, and the design notes |
 
 y-pop is the Rust rewrite of [PortAL](http://glatigny.github.io/guipro/), part of

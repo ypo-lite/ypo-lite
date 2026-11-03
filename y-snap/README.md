@@ -92,9 +92,7 @@ Or edit `y-snap.xml`, where a key reads the way you press it:
 <hotkey key="Win+Alt+T" action="always-on-top" target="pointed"/>
 ```
 
-<!-- Add once taken:
-![y-snap-config](docs/images/y-snap_settings_01.png)
--->
+![y-snap-config](../y-snap-config/docs/images/y-snap-cfg_04_overlay_01.png)
 
 An unknown action or a bad key combination costs you that one setting: y-snap warns
 about it and loads the rest.
@@ -110,6 +108,7 @@ y-snap runs on Windows 10 and 11 (x64). The
 | --- | --- |
 | [User manual](docs/user-manual.md) | how to use y-snap: the defaults, common changes, troubleshooting |
 | [Configuration reference](docs/configuration.md) | every setting of `y-snap.xml` |
+| [Settings app](../y-snap-config/docs/user-manual.md) | using y-snap-config: every page, with screenshots |
 | [Development](docs/development.md) | how the code is organised, and the design notes |
 
 y-snap is the Rust rewrite of [HulK](http://glatigny.github.io/guipro/), part of
