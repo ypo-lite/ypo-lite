@@ -1,4 +1,4 @@
-# y-snap
+# Y-Snap
 
 **Your windows, handled from wherever your pointer is.** Move and resize any
 window from anywhere inside it, and minimize, roll up, fade, hide or pin it from
@@ -13,7 +13,7 @@ maximize, close, roll up, fade, strip the frame, hide from the taskbar, hide
 behind a tray icon, pin to every virtual desktop or send to another one, on
 whichever window the pointer happens to be over.
 
-## Why y-snap
+## Why Y-Snap
 
 - **Light.** One native executable of about 300 KB. No runtime, no background
   service, and nothing injected into your other programs.

@@ -21,9 +21,11 @@ executable, with no DLL plugins and no background service.
 | **[Y-Pop](y-pop/README.md)** | A tray icon whose menu launches your programs, and a search window that finds them as you type | PortAL | Usable |
 | **Y-Coustic** | Volume manager | VulCan | *Work in progress* |
 
-Y-Snap and Y-Pop are configured through one XML file each. `y-snap-config` and
-`y-pop-config` are the WinUI 3 settings apps that edit those files, if you
-would rather not edit them by hand.
+Y-Snap and Y-Pop are configured through one XML file each. [`y-snap-config`](y-snap-config/README.md)
+and [`y-pop-config`](y-pop-config/README.md) are the WinUI 3 settings apps that edit those files, if
+you would rather not edit them by hand. Their manuals:
+[y-snap-config](y-snap-config/docs/user-manual.md) and
+[y-pop-config](y-pop-config/docs/user-manual.md).
 
 ## Install
 
@@ -76,10 +78,10 @@ cargo run -p y-snap      # debug run of one tool
 | Path | Content |
 | --- | --- |
 | `y-snap`, `y-pop` | the tools |
-| `y-snap-config`, `y-pop-config` | their WinUI 3 settings apps |
+| [`y-snap-config`](y-snap-config/README.md), [`y-pop-config`](y-pop-config/README.md) | their WinUI 3 settings apps ([manual](y-snap-config/docs/user-manual.md), [manual](y-pop-config/docs/user-manual.md)) |
 | `y-term`, `y-coustic` | placeholders for the next tools |
 | [`core`](core/README.md) | shared Win32 plumbing: tray icon, hotkeys, overlays, menus, configuration |
-| [`ui-kit`](ui-kit/docs/ui-toolkit.md) | the WinUI toolkit shared by the settings apps |
+| [`ui-kit`](ui-kit/README.md) | the WinUI toolkit shared by the settings apps ([guide](ui-kit/docs/ui-toolkit.md)) |
 | [`skeleton`](skeleton/README.md) | a self-contained reference application, with the Win32 rationale behind `core` |
 
 ## License

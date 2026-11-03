@@ -1,6 +1,6 @@
-# y-pop
+# Y-Pop
 
-**Your programs, one keystroke away.** y-pop puts your launchers in the
+**Your programs, one keystroke away.** Y-Pop puts your launchers in the
 notification area: tray menus you organise yourself, hotkeys that open a menu or
 start one program, and a search window that finds them as you type.
 
@@ -13,7 +13,7 @@ start one program, and a search window that finds them as you type.
 ![Searching, then going inside a group](docs/images/y-pop_search_02.gif)
 -->
 
-## Why y-pop
+## Why Y-Pop
 
 - **Light.** One native executable of about 650 KB. No runtime, no DLL plugins,
   no background service.

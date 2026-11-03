@@ -1,4 +1,4 @@
-# y-core
+# Y-Core
 
 What every Ypo-Lite application would otherwise write again: the `skeleton/`
 reference application, made reusable. The `unsafe` and the Win32 plumbing live
