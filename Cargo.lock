@@ -209,7 +209,7 @@ checksum = "06bdbd8cfc056b8d2e2e85f29b56a3bdbecb527cef81eb39e3e7b98af4652770"
 
 [[package]]
 name = "ui-kit"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "windows",
  "windows-reactor",
@@ -487,7 +487,7 @@ dependencies = [
 
 [[package]]
 name = "y-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "embed-resource",
  "windows",
@@ -496,7 +496,7 @@ dependencies = [
 
 [[package]]
 name = "y-coustic"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "windows",
  "y-core",
@@ -504,7 +504,7 @@ dependencies = [
 
 [[package]]
 name = "y-pop"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "windows",
  "y-core",
@@ -512,7 +512,7 @@ dependencies = [
 
 [[package]]
 name = "y-pop-config"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "ui-kit",
  "windows",
@@ -523,7 +523,7 @@ dependencies = [
 
 [[package]]
 name = "y-snap"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "windows",
  "y-core",
@@ -531,7 +531,7 @@ dependencies = [
 
 [[package]]
 name = "y-snap-config"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "ui-kit",
  "windows",
@@ -542,7 +542,7 @@ dependencies = [
 
 [[package]]
 name = "y-term"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "windows",
  "y-core",

@@ -21,6 +21,19 @@
 		<shortcut button="middle"      mod="Win"  action="overlay"/>
 		<shortcut button="wheel-right" mod="none" action="pin-toggle"/>
 		<shortcut button="x1"          mod="Alt"  action="desktop-move" desktop="2"/>
+
+		Several monitors: move the window under the pointer to the previous or
+		next monitor, and take the pointer along. The side buttons are "back"
+		(x1) and "forward" (x2); the wheel tilts left and right.
+
+		<shortcut button="x1"          mod="Win"  action="monitor-move-prev"/>
+		<shortcut button="x2"          mod="Win"  action="monitor-move-next"/>
+		<shortcut button="wheel-left"  mod="Win"  action="monitor-move-prev"/>
+		<shortcut button="wheel-right" mod="Win"  action="monitor-move-next"/>
+
+		allow-maximized="true" lets a drag or resize act on a maximized window
+		like on any other. Left off, a maximized window stays where it is; drag
+		it to another monitor and it goes there, still maximized.
 	-->
 	<mouse>
 		<drag   button="left"  mod="Alt"/>
@@ -43,6 +56,9 @@
 		<hotkey key="Ctrl+Shift+P"   action="center-cursor" target="focused"/>
 		<!-- <hotkey key="Win+Alt+Left"  action="desktop-prev"/> -->
 		<!-- <hotkey key="Win+Alt+Right" action="desktop-next"/> -->
+		<!-- monitor-move-* takes the pointer along, monitor-send-* leaves it. -->
+		<!-- <hotkey key="Ctrl+Win+Alt+Left"  action="monitor-move-prev" target="focused"/> -->
+		<!-- <hotkey key="Ctrl+Win+Alt+Right" action="monitor-move-next" target="focused"/> -->
 	</hotkeys>
 
 	<!--
@@ -82,6 +98,9 @@
 		<action key="N"     action="desktop-new"  label="New desktop"  icon="➕"/>
 		<action key="Left"  action="desktop-send-prev" label="Prev desktop" icon="⏮️"/>
 		<action key="Right" action="desktop-send-next" label="Next desktop" icon="⏭️"/>
+
+		<action key="Up"    action="monitor-send-prev" label="Prev monitor" icon="⏪"/>
+		<action key="Down"  action="monitor-send-next" label="Next monitor" icon="⏩"/>
 
 		<!--
 			Expands into one tile per virtual desktop when the overlay opens,

@@ -3,8 +3,8 @@
 // Identifiers must stay in sync with `y_core::resources`.
 // Paths are relative to this file.
 //
-// The version numbers below are checked against Cargo.toml at build time,
-// so bumping the crate version without touching this file fails the build.
+// The version is not written here: `@VERSION@` ("0.2.0.0") and `@VERSION_COMMAS@`
+// ("0,2,0,0") are filled in from Cargo.toml by `y_core::build` at build time.
 
 /////////////////////////////////////////////////////////////////////////////
 // Icon
@@ -20,8 +20,8 @@ IDI_APP_ICON ICON "y-snap-config.ico"
 // Version information (Explorer's "Details" tab)
 
 1 VERSIONINFO
- FILEVERSION    0,2,0,0
- PRODUCTVERSION 0,2,0,0
+ FILEVERSION    @VERSION_COMMAS@
+ PRODUCTVERSION @VERSION_COMMAS@
  FILEFLAGSMASK  0x3fL
  FILEFLAGS      0x0L
  FILEOS         0x40004L   // VOS_NT_WINDOWS32
@@ -34,12 +34,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName",      "ypo-lite"
             VALUE "FileDescription",  "y-snap-config"
-            VALUE "FileVersion",      "0.2.0.0"
+            VALUE "FileVersion",      "@VERSION@"
             VALUE "InternalName",     "y-snap-config"
             VALUE "LegalCopyright",   "Copyright (C) 2026"
             VALUE "OriginalFilename", "y-snap-config.exe"
             VALUE "ProductName",      "y-snap-config"
-            VALUE "ProductVersion",   "0.2.0.0"
+            VALUE "ProductVersion",   "@VERSION@"
         END
     END
     BLOCK "VarFileInfo"

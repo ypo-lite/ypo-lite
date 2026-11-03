@@ -75,6 +75,17 @@ pub enum Action {
     DesktopSendList,
     /// Show the window on every desktop, or only on its own.
     PinToggle,
+
+    // Monitors. Next and previous follow the monitors' places on the desktop,
+    // left to right then top to bottom, and wrap round at the ends.
+    /// Move the window to the next monitor; the pointer goes with it.
+    MonitorMoveNext,
+    /// Move the window to the previous monitor; the pointer goes with it.
+    MonitorMovePrev,
+    /// Like `monitor-move-next`, but the pointer stays where it is.
+    MonitorSendNext,
+    /// Like `monitor-move-prev`, but the pointer stays where it is.
+    MonitorSendPrev,
 }
 
 impl Action {
@@ -113,6 +124,11 @@ impl Action {
             "desktop-send-list" => Self::DesktopSendList,
             "pin-toggle" => Self::PinToggle,
 
+            "monitor-move-next" => Self::MonitorMoveNext,
+            "monitor-move-prev" => Self::MonitorMovePrev,
+            "monitor-send-next" => Self::MonitorSendNext,
+            "monitor-send-prev" => Self::MonitorSendPrev,
+
             _ => return None,
         })
     }
@@ -148,6 +164,10 @@ impl Action {
             Self::DesktopList => "desktop-list",
             Self::DesktopSendList => "desktop-send-list",
             Self::PinToggle => "pin-toggle",
+            Self::MonitorMoveNext => "monitor-move-next",
+            Self::MonitorMovePrev => "monitor-move-prev",
+            Self::MonitorSendNext => "monitor-send-next",
+            Self::MonitorSendPrev => "monitor-send-prev",
         }
     }
 
@@ -256,6 +276,10 @@ mod tests {
             Action::DesktopList,
             Action::DesktopSendList,
             Action::PinToggle,
+            Action::MonitorMoveNext,
+            Action::MonitorMovePrev,
+            Action::MonitorSendNext,
+            Action::MonitorSendPrev,
         ] {
             assert_eq!(Action::from_name(action.name()), Some(action));
         }

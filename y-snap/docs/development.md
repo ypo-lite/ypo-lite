@@ -43,6 +43,21 @@ does no drawing or window moves itself: it posts them to the owner window. A
 timer checks that the hook is still alive and reinstalls it if not. See the
 module doc of `mouse/mod.rs`.
 
+**Maximized windows and monitors.** With `allow-maximized` off, a press on a
+maximized window starts a `Pinned` gesture (`mouse/gesture.rs`): claimed, with the
+modifier guard armed, but the window does not follow. A pinned drag only watches
+`handle_at(pt)` (a bare `MonitorFromPoint`, hook-safe) and, when the monitor
+changes, posts `WM_GESTURE_MONITOR` with the point; the move runs on the message
+loop (`apply_pending_monitor`, latest wins, a no-op if the window is already
+there). `window::move_to_monitor` does the work for the four `monitor-*` actions
+too. A maximized window is carried by `move_maximized`: `SetWindowPos` while still
+maximized, then `SetWindowPlacement` to record where it restores to. It was chosen
+by a probe over restore-then-maximize variants (B, C), which landed right but
+showed the restore/maximize animation, and over a single placement call, which
+failed. `rcNormalPosition` is in workspace coordinates, shifted by a taskbar on the
+top or left, except for tool windows (what `hide-taskbar` makes). Design notes and
+results: [`design/multi-monitor-plan.md`](design/multi-monitor-plan.md).
+
 **The minimize button.** Its position is estimated from the window's frame and
 the caption metrics (`mouse::hover::min_button_rect`), because hit-testing another
 process's window from inside a low-level hook risks that same timeout. Detection

@@ -8,7 +8,7 @@ Three changes to how y-snap treats monitors, plus a survey of what could follow:
 3. Actions that send a window to the previous or next monitor.
 4. Other multi-monitor features worth adding: see [Investigation](#investigation).
 
-Nothing is built yet. Status is in [Progress](#progress).
+All phases are built; the manual checks below are the remaining work. Status is in [Progress](#progress).
 
 ## Where things stand
 
@@ -95,31 +95,28 @@ can be named: hotkeys, shortcuts, overlay tiles, the minimize-button popup.
 
 ## Phases
 
-### Phase 0 — Probe the maximized move
+### Phase 0 — Probe the maximized move ✅
 
-The whole of item 2 rests on one unanswered question: how to take a window that *is*
-maximized to another monitor so that it lands right and restores there. Documentation
-does not settle it, and it needs real windows, so it is a probe, as in the mouse
-shortcuts plan: `--features probe`, run by the user, removed afterwards.
+The whole of item 2 rested on one unanswered question: how to take a window that *is*
+maximized to another monitor so that it lands right and restores there. It needed real
+windows, so it was a probe, as in the mouse shortcuts plan. Historical: the probe code
+(`src/probe.rs`, the `probe` feature) is gone.
 
-| Candidate | Sequence |
-| --- | --- |
-| A. In place | `GetWindowPlacement`, move `rcNormalPosition` to the target, `SetWindowPlacement` with `SW_SHOWMAXIMIZED` |
-| B. AltSnap's shape | The same, but `SW_RESTORE` first, then a second `SetWindowPlacement` with `SW_SHOWMAXIMIZED` |
-| C. Plain | `ShowWindow(SW_RESTORE)`, `SetWindowPos` onto the target, `ShowWindow(SW_MAXIMIZE)` |
+| Candidate | Sequence | Result (user's monitors) |
+| --- | --- | --- |
+| A. In place | `GetWindowPlacement`, move `rcNormalPosition` to the target, `SetWindowPlacement` with `SW_SHOWMAXIMIZED` | Did not work |
+| B. AltSnap's shape | The same, but `SW_RESTORE` first, then a second `SetWindowPlacement` with `SW_SHOWMAXIMIZED` | Lands right, but the restore/maximize animation shows |
+| C. Plain | `ShowWindow(SW_RESTORE)`, `SetWindowPos` onto the target, `ShowWindow(SW_MAXIMIZE)` | Same as B |
+| B/C + DWM | B or C with `DWMWA_TRANSITIONS_FORCEDISABLED` set on the window meanwhile | B: better, less animation |
+| **D. Never restore** | `SetWindowPos` while still maximized (same place on the target's work area, frame overhang included), then `SetWindowPlacement` with the moved `rcNormalPosition` and `SW_SHOWMAXIMIZED` | **Best: no visible animation. Un-maximize afterwards lands on the target. Chosen** |
 
-Prefer the first that passes. For each, on Notepad, a Chromium browser, VS Code,
-Explorer and an Office app, across the scaled and unscaled screens, record:
+D is what `window::move_maximized` does. The shell's own move
+(`Win+Shift+Left/Right`) shows no animation either, which is the feel D matches.
 
-- [ ] Fills the target's work area, taskbar included in the sums.
-- [ ] Un-maximize lands on the target, at a sensible size.
-- [ ] Flicker or animation.
-- [ ] Whether it takes the foreground from another window. `ShowWindow` and placement
-      with a maximized `showCmd` activate; a background window activated by a drag may
-      be acceptable, but it should be a known cost.
-- [ ] Where a taskbar on the top or left puts the result. `rcNormalPosition` is in
-      workspace coordinates, not screen coordinates, except for `WS_EX_TOOLWINDOW`
-      windows, which is what y-snap's own `hide-taskbar` sets. Both cases need a test.
+Not recorded: a run across every application, a taskbar on the top or left, and a
+`hide-taskbar` window. The code handles the workspace-versus-screen origin, but those
+stay on the [Manual checks](#manual-checks) list. The foreground question was not
+measured either: see the manual checks.
 
 ### Phase 1 — Monitor list and placement
 
@@ -268,9 +265,9 @@ Item 4: what else is worth having. Ranked by fit with "do just what they need to
 
 | Phase | Status | Notes |
 | --- | --- | --- |
-| 0. Probe | ⬜ | Needs the user's monitors; decides `move_to_monitor` |
-| 1. Monitor list and placement | ⬜ | Can start before Phase 0 ends, except for the maximized branch |
-| 2. Maximized gestures | ⬜ | |
-| 3. Monitor actions | ⬜ | |
-| 4. `y-snap-config` | ⬜ | |
-| 5. Documentation and defaults | ⬜ | |
+| 0. Probe | ✅ | Candidate D chosen: no animation, restores on the target. Probe code removed |
+| 1. Monitor list and placement | ✅ | `Monitor::all`/`handle`/`handle_at`/`sort_spatially`, `placed_rect` (6 tests), `move_to_monitor` with `move_maximized` (D). No caller until Phase 3 |
+| 2. Maximized gestures | ✅ | Built: `allow-maximized` (config, round-trip and warning tests), `Pinned` state and `Step` in `gesture.rs`, `WM_GESTURE_MONITOR` + `apply_pending_monitor`. Needs the live manual checks (wobble on the boundary above all) |
+| 3. Monitor actions | ✅ | Four actions in `action.rs`/`actions.rs` (`to_monitor`, `scaled_point` with 2 tests); icon suggestions added in `y-snap-config/src/icons.rs` so the workspace compiles. Not yet live-checked; not yet offered in the config UI (Phase 4) |
+| 4. `y-snap-config` | ✅ | Built: "Allow on maximized windows" switch on the Mouse screen, `ACTIONS` 30 and `OVERLAY_ACTIONS` 32 (the mouse-shortcuts screen reads `ACTIONS`), icons (⏩ ⏪ added to the catalog). Not yet looked at in the running app |
+| 5. Documentation and defaults | ✅ | Manual (new *Several monitors* section, maximized rule and behaviour-change note), README, configuration reference, development notes, `rsc/y-snap.xml` (tiles on `Up`/`Down`, commented hotkeys and mouse shortcuts incl. the side buttons) |

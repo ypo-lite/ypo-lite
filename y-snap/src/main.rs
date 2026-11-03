@@ -826,6 +826,11 @@ impl TrayApp for YSnap {
                 Some(LRESULT(0))
             }
 
+            mouse::WM_GESTURE_MONITOR => {
+                mouse::apply_pending_monitor();
+                Some(LRESULT(0))
+            }
+
             WM_TIMER if wparam.0 == mouse::REHOOK_TIMER_ID => {
                 if let Some(hook) = self.mouse_hook.as_mut() {
                     hook.check_liveness();

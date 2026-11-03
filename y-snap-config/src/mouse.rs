@@ -69,10 +69,24 @@ pub fn mouse_view(mouse: &Mouse, viewport: Viewport, context: &ViewContext<Confi
     page(
         "Mouse gestures",
         "Hold the modifiers and use the button anywhere on a window — no need to aim for the title bar or an edge.",
-        Stack::vertical(space::L).child("cards", grid.items(cards).build(viewport)).child(
-            "note",
-            note("A gesture that's switched off has no button assigned; switching it on starts from Left with no modifiers."),
-        ),
+        Stack::vertical(space::L)
+            .child("cards", grid.items(cards).build(viewport))
+            .child(
+                "maximized",
+                labeled_switch(
+                    "Allow on maximized windows",
+                    mouse.allow_maximized,
+                    context.callback(Msg::AllowMaximizedToggled),
+                ),
+            )
+            .child(
+                "maximized-note",
+                note("Off: a maximized window stays where it is. Drag it to another monitor and it goes there, still maximized; resizing it does nothing. On: it moves and resizes like any other window."),
+            )
+            .child(
+                "note",
+                note("A gesture that's switched off has no button assigned; switching it on starts from Left with no modifiers."),
+            ),
     )
 }
 

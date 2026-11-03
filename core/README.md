@@ -33,7 +33,7 @@ loop. Everything else is picked à la carte.
 | `resources` | icons embedded by `build.rs` |
 | `memory` | one-shot working set trim |
 | `ids` | message and command ids reserved by the core |
-| `build` | `build.rs` helper: compiles the `.rc`, keeps its version in sync |
+| `build` | `build.rs` helper: compiles the `.rc`, filling its `@VERSION@` / `@VERSION_COMMAS@` tokens from the crate's version |
 
 The Win32 rationale behind each of these — why a hidden top-level window and
 not `HWND_MESSAGE`, why notification icon version 4, why the tray menu needs

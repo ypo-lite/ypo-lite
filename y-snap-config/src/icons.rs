@@ -62,6 +62,8 @@ const ARROWS: &[Entry] = &[
     ("▶️", "right triangle next play"),
     ("⏮️", "previous track first"),
     ("⏭️", "next track last"),
+    ("⏪", "rewind fast backward previous"),
+    ("⏩", "fast forward next"),
     ("↩️", "return back undo restore"),
     ("🔄", "reload refresh cycle"),
     ("🔃", "reload clockwise refresh"),
@@ -232,6 +234,10 @@ pub fn suggestions(action: Action) -> &'static [&'static str] {
         Action::PinToggle => &["📌", "📍", "🧷"],
         Action::DesktopList => &["🗂️", "🖥️", "🔢"],
         Action::DesktopSendList => &["📤", "🗂️", "🖥️"],
+        Action::MonitorMoveNext => &["⏩", "🖥️", "➡️"],
+        Action::MonitorMovePrev => &["⏪", "🖥️", "⬅️"],
+        Action::MonitorSendNext => &["⏭️", "📤", "➡️"],
+        Action::MonitorSendPrev => &["⏮️", "📤", "⬅️"],
     }
 }
 

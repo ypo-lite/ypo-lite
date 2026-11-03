@@ -27,7 +27,8 @@ whichever window the pointer happens to be over.
 
 Hold `Alt` (configurable) and drag with the left button to move a window, with the right button
 to resize it, from anywhere inside it. Resizing pulls the corner nearest to where
-you pressed. The buttons and modifiers are yours to change.
+you pressed. The buttons and modifiers are yours to change. A maximized window
+stays put, until you drag it onto another monitor: it goes there, still maximized.
 
 ## One popup, every action
 
@@ -76,6 +77,13 @@ tile per desktop, so *`Ctrl+Space`, `3`* moves the window you are pointing at.
 <!-- Add once recorded:
 ![Moving a window to another desktop](docs/images/y-snap_desktops_01.gif)
 -->
+
+## Several monitors
+
+Send the window to the previous or next monitor, with the pointer following or
+staying put. Snapped windows stay snapped, maximized ones stay maximized and restore
+on the new monitor. On a hotkey, an overlay tile, or a mouse shortcut: `Win` and the
+wheel tilt, or the side buttons, are a good fit.
 
 ## Your mouse, your shortcuts
 

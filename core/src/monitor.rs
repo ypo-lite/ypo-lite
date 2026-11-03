@@ -6,16 +6,16 @@
 //! coordinates are physical pixels: the manifest declares per-monitor v2 DPI
 //! awareness, so Windows does not scale anything on our behalf.
 
-use windows::Win32::Foundation::{POINT, RECT};
+use windows::Win32::Foundation::{LPARAM, POINT, RECT};
 use windows::Win32::Graphics::Gdi::{
-    GetMonitorInfoW, HMONITOR, MONITOR_DEFAULTTONEAREST, MONITOR_DEFAULTTOPRIMARY, MONITORINFO,
-    MonitorFromPoint, MonitorFromWindow,
+    EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITOR_DEFAULTTONEAREST,
+    MONITOR_DEFAULTTOPRIMARY, MONITORINFO, MonitorFromPoint, MonitorFromWindow,
 };
 use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use windows::Win32::UI::WindowsAndMessaging::{
     GetClassNameW, GetCursorPos, GetForegroundWindow, IsWindowVisible,
 };
-use windows::core::Result;
+use windows::core::{BOOL, Result};
 
 /// The reference DPI: 100% scaling.
 pub const DEFAULT_DPI: u32 = 96;
@@ -24,6 +24,9 @@ pub const DEFAULT_DPI: u32 = 96;
 /// and go (docking, remote sessions, a projector); re-query rather than cache.
 #[derive(Clone, Copy, Debug)]
 pub struct Monitor {
+    /// The system's handle for this monitor. Only meaningful while the
+    /// monitor stays connected: compare it, do not store it.
+    pub handle: HMONITOR,
     /// The whole screen, in virtual-desktop coordinates. The primary monitor
     /// starts at (0, 0); others can be negative.
     pub bounds: RECT,
@@ -78,6 +81,40 @@ impl Monitor {
         Self::describe(unsafe { MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY) })
     }
 
+    /// Every connected monitor, in spatial order: by left edge, then top (see
+    /// [`sort_spatially`]). `EnumDisplayMonitors` order is whatever the driver
+    /// happens to report, which a user cannot predict.
+    ///
+    /// Allocates, so keep it off low-level hook procedures.
+    pub fn all() -> Vec<Self> {
+        unsafe extern "system" fn collect(
+            handle: HMONITOR,
+            _: HDC,
+            _: *mut RECT,
+            data: LPARAM,
+        ) -> BOOL {
+            // SAFETY: `data` is the `Vec` passed below, alive for the whole
+            // enumeration, which runs synchronously on this thread.
+            let handles = unsafe { &mut *(data.0 as *mut Vec<HMONITOR>) };
+            handles.push(handle);
+            BOOL(1)
+        }
+
+        let mut handles: Vec<HMONITOR> = Vec::new();
+        let _ = unsafe {
+            EnumDisplayMonitors(
+                None,
+                None,
+                Some(collect),
+                LPARAM(&mut handles as *mut Vec<HMONITOR> as isize),
+            )
+        };
+
+        let mut monitors: Vec<Self> = handles.into_iter().map(Self::describe).collect();
+        sort_spatially(&mut monitors);
+        monitors
+    }
+
     /// Scale factor: `1.0` at 96 DPI, `1.5` at 150%.
     pub fn scale(&self) -> f32 {
         self.dpi as f32 / DEFAULT_DPI as f32
@@ -122,6 +159,7 @@ impl Monitor {
         let _ = unsafe { GetDpiForMonitor(handle, MDT_EFFECTIVE_DPI, &mut dpi.0, &mut dpi.1) };
 
         Self {
+            handle,
             bounds: info.rcMonitor,
             work_area: info.rcWork,
             // Horizontal and vertical DPI differ only on exotic hardware.
@@ -135,4 +173,48 @@ pub fn cursor_position() -> Result<POINT> {
     let mut point = POINT::default();
     unsafe { GetCursorPos(&mut point)? };
     Ok(point)
+}
+
+/// The handle of the monitor nearest to `point`: a bare `MonitorFromPoint`
+/// that allocates nothing and sends no message, so a low-level hook may call
+/// it to notice the pointer changing monitor.
+pub fn handle_at(point: POINT) -> HMONITOR {
+    unsafe { MonitorFromPoint(point, MONITOR_DEFAULTTONEAREST) }
+}
+
+/// Orders monitors by left edge, then top edge — the order a user sees them
+/// in, left to right. Ties beyond that keep their enumeration order.
+pub fn sort_spatially(monitors: &mut [Monitor]) {
+    monitors.sort_by_key(|monitor| (monitor.bounds.left, monitor.bounds.top));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn at(left: i32, top: i32) -> Monitor {
+        let bounds = RECT {
+            left,
+            top,
+            right: left + 1920,
+            bottom: top + 1080,
+        };
+        Monitor {
+            handle: HMONITOR(std::ptr::null_mut()),
+            bounds,
+            work_area: bounds,
+            dpi: DEFAULT_DPI,
+        }
+    }
+
+    #[test]
+    fn monitors_sort_left_to_right_then_top_to_bottom() {
+        let mut monitors = [at(1920, 0), at(0, 1080), at(-1920, 0), at(0, 0)];
+        sort_spatially(&mut monitors);
+        let order: Vec<_> = monitors
+            .iter()
+            .map(|m| (m.bounds.left, m.bounds.top))
+            .collect();
+        assert_eq!(order, [(-1920, 0), (0, 0), (0, 1080), (1920, 0)]);
+    }
 }

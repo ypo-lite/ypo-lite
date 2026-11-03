@@ -15,14 +15,16 @@
 
 use windows::Win32::Foundation::{HANDLE, HWND, LPARAM, POINT, RECT, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GWL_EXSTYLE, GWL_STYLE, GetPropW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
-    HWND_NOTOPMOST, HWND_TOPMOST, IsWindow, IsWindowVisible, LWA_ALPHA, PostMessageW, RemovePropW,
-    SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW, SWP_FRAMECHANGED, SWP_NOACTIVATE,
-    SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetCursorPos, SetForegroundWindow,
-    SetLayeredWindowAttributes, SetPropW, SetWindowPos, ShowWindow, WM_CLOSE, WS_CAPTION,
-    WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_MAXIMIZE, WS_MINIMIZE, WS_THICKFRAME,
+    GWL_EXSTYLE, GWL_STYLE, GetPropW, GetWindowPlacement, GetWindowRect, GetWindowTextLengthW,
+    GetWindowTextW, HWND_NOTOPMOST, HWND_TOPMOST, IsWindow, IsWindowArranged, IsWindowVisible,
+    LWA_ALPHA, PostMessageW, RemovePropW, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, SW_SHOW,
+    SW_SHOWMAXIMIZED, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+    SetCursorPos, SetForegroundWindow, SetLayeredWindowAttributes, SetPropW, SetWindowPlacement,
+    SetWindowPos, ShowWindow, WINDOWPLACEMENT, WM_CLOSE, WS_CAPTION, WS_EX_LAYERED,
+    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_MAXIMIZE, WS_MINIMIZE, WS_THICKFRAME,
 };
 use windows::core::{PCWSTR, w};
+use y_core::monitor::Monitor;
 
 /// How transparent `transparency` makes a window. Enough to see through,
 /// not so much that the window becomes unusable.
@@ -249,12 +251,6 @@ pub fn is_maximized(window: HWND) -> bool {
     style(window, GWL_STYLE) & WS_MAXIMIZE.0 != 0
 }
 
-/// Not read by anything yet — `minimize` has no corresponding "restore"
-/// state the overlay shows differently, unlike every other toggle here.
-#[allow(
-    dead_code,
-    reason = "no tile reads this one; kept for parity with the rest"
-)]
 pub fn is_minimized(window: HWND) -> bool {
     style(window, GWL_STYLE) & WS_MINIMIZE.0 != 0
 }
@@ -277,6 +273,166 @@ pub fn is_shaded(window: HWND) -> bool {
 
 pub fn is_hidden_from_taskbar(window: HWND) -> bool {
     style(window, GWL_EXSTYLE) & WS_EX_TOOLWINDOW.0 != 0
+}
+
+/// Sends the window to `target`, keeping its place relative to the work area.
+///
+/// A minimized window is left alone. A maximized one stays maximized and
+/// un-maximizes on `target` (see [`move_maximized`]).
+pub fn move_to_monitor(window: HWND, target: &Monitor) {
+    if is_minimized(window) {
+        return;
+    }
+    let source = Monitor::from_window(window);
+    if source.handle == target.handle {
+        return;
+    }
+    if is_maximized(window) {
+        return move_maximized(window, &source, target);
+    }
+    let Some(current) = bounds(window) else {
+        return;
+    };
+
+    let arranged = unsafe { IsWindowArranged(window) }.as_bool();
+    let wanted = placed_rect(current, source.work_area, target.work_area, arranged);
+    set_bounds(window, wanted);
+
+    // The window may have settled on another size (a DPI change makes it
+    // resize itself): one more pass keeps what it ended up with inside.
+    if let Some(settled) = bounds(window) {
+        let inside = placed_rect(settled, target.work_area, target.work_area, false);
+        if !same(settled, inside) {
+            set_bounds(window, inside);
+        }
+    }
+}
+
+/// Takes a maximized window to `target` without ever leaving the maximized
+/// state, so there is no restore/maximize animation (candidate D of the
+/// multi-monitor plan's Phase 0; B and C landed right but animated).
+///
+/// Two steps: `SetWindowPos` carries the window, frame overhang and all, to the
+/// same place on the target's work area; then a placement call that asks for
+/// maximized again records where the window restores to, moved onto the target
+/// the way [`placed_rect`] moves any window. Without the second step it would
+/// un-maximize back on the old monitor.
+fn move_maximized(window: HWND, source: &Monitor, target: &Monitor) {
+    let mut placement = WINDOWPLACEMENT {
+        length: size_of::<WINDOWPLACEMENT>() as u32,
+        ..Default::default()
+    };
+    if unsafe { GetWindowPlacement(window, &mut placement) }.is_err() {
+        return;
+    }
+    let Some(rect) = bounds(window) else {
+        return;
+    };
+
+    let (from, to) = (source.work_area, target.work_area);
+    set_bounds(
+        window,
+        RECT {
+            left: to.left + (rect.left - from.left),
+            top: to.top + (rect.top - from.top),
+            right: to.right + (rect.right - from.right),
+            bottom: to.bottom + (rect.bottom - from.bottom),
+        },
+    );
+
+    // `rcNormalPosition` is in workspace coordinates — relative to the
+    // primary monitor's work area, so a taskbar on the top or left shifts the
+    // origin — except for tool windows, which `hide-taskbar` makes: those use
+    // screen coordinates.
+    let (dx, dy) = if is_hidden_from_taskbar(window) {
+        (0, 0)
+    } else {
+        let primary = Monitor::primary();
+        (
+            primary.work_area.left - primary.bounds.left,
+            primary.work_area.top - primary.bounds.top,
+        )
+    };
+    let normal = placement.rcNormalPosition;
+    let screen = RECT {
+        left: normal.left + dx,
+        top: normal.top + dy,
+        right: normal.right + dx,
+        bottom: normal.bottom + dy,
+    };
+    let moved = placed_rect(screen, from, to, false);
+    placement.rcNormalPosition = RECT {
+        left: moved.left - dx,
+        top: moved.top - dy,
+        right: moved.right - dx,
+        bottom: moved.bottom - dy,
+    };
+    placement.showCmd = SW_SHOWMAXIMIZED.0 as u32;
+    let _ = unsafe { SetWindowPlacement(window, &placement) };
+}
+
+/// Where `rect`, placed in the work area `from`, belongs in the work area `to`.
+///
+/// The position scales with the work areas and the size stays, so a window
+/// keeps its place on screen without growing or shrinking. An `arranged`
+/// (snapped) window scales its size as well: a left half stays a left half.
+/// Either way the result is clamped inside `to`, shrinking if it has to.
+fn placed_rect(rect: RECT, from: RECT, to: RECT, arranged: bool) -> RECT {
+    let scale = |value: i64, from_len: i64, to_len: i64| {
+        if from_len <= 0 {
+            value
+        } else {
+            value * to_len / from_len
+        }
+    };
+    let (from_width, from_height) = (width(from) as i64, height(from) as i64);
+    let (to_width, to_height) = (width(to) as i64, height(to) as i64);
+
+    let (mut w, mut h) = (width(rect) as i64, height(rect) as i64);
+    if arranged {
+        w = scale(w, from_width, to_width);
+        h = scale(h, from_height, to_height);
+    }
+    w = w.min(to_width);
+    h = h.min(to_height);
+
+    let left = to.left as i64 + scale((rect.left - from.left) as i64, from_width, to_width);
+    let top = to.top as i64 + scale((rect.top - from.top) as i64, from_height, to_height);
+    let left = left.min(to.right as i64 - w).max(to.left as i64) as i32;
+    let top = top.min(to.bottom as i64 - h).max(to.top as i64) as i32;
+
+    RECT {
+        left,
+        top,
+        right: left + w as i32,
+        bottom: top + h as i32,
+    }
+}
+
+fn width(rect: RECT) -> i32 {
+    rect.right - rect.left
+}
+
+fn height(rect: RECT) -> i32 {
+    rect.bottom - rect.top
+}
+
+fn same(a: RECT, b: RECT) -> bool {
+    (a.left, a.top, a.right, a.bottom) == (b.left, b.top, b.right, b.bottom)
+}
+
+fn set_bounds(window: HWND, rect: RECT) {
+    let _ = unsafe {
+        SetWindowPos(
+            window,
+            None,
+            rect.left,
+            rect.top,
+            width(rect),
+            height(rect),
+            SWP_NOZORDER | SWP_NOACTIVATE,
+        )
+    };
 }
 
 fn bounds(window: HWND) -> Option<RECT> {
@@ -377,4 +533,77 @@ fn take_prop(window: HWND, name: PCWSTR) -> Option<usize> {
 
     let _ = unsafe { RemovePropW(window, name) };
     Some(value.0 as usize)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rect(left: i32, top: i32, right: i32, bottom: i32) -> RECT {
+        RECT {
+            left,
+            top,
+            right,
+            bottom,
+        }
+    }
+
+    fn parts(r: RECT) -> (i32, i32, i32, i32) {
+        (r.left, r.top, r.right, r.bottom)
+    }
+
+    #[test]
+    fn a_window_keeps_its_size_and_relative_position() {
+        let from = rect(0, 0, 1000, 800);
+        let to = rect(1000, 0, 3000, 1600);
+        let placed = placed_rect(rect(100, 80, 500, 480), from, to, false);
+        assert_eq!(parts(placed), (1200, 160, 1600, 560));
+    }
+
+    #[test]
+    fn negative_coordinates_are_relative_to_the_work_area() {
+        let from = rect(-1920, 0, 0, 1080);
+        let to = rect(0, 0, 1920, 1080);
+        let placed = placed_rect(rect(-1820, 100, -1020, 700), from, to, false);
+        assert_eq!(parts(placed), (100, 100, 900, 700));
+    }
+
+    #[test]
+    fn a_smaller_target_shrinks_and_clamps_the_window() {
+        let from = rect(0, 0, 2000, 1200);
+        let to = rect(2000, 0, 3000, 600);
+        let placed = placed_rect(rect(1000, 600, 1900, 1150), from, to, false);
+        assert_eq!(parts(placed), (2100, 50, 3000, 600));
+        let placed = placed_rect(rect(100, 100, 1900, 1100), from, to, false);
+        assert_eq!(parts(placed), (2000, 0, 3000, 600));
+    }
+
+    #[test]
+    fn a_stacked_layout_scales_vertically() {
+        let from = rect(0, 0, 1000, 1000);
+        let to = rect(0, -500, 1000, 0);
+        let placed = placed_rect(rect(0, 500, 400, 700), from, to, false);
+        assert_eq!(parts(placed), (0, -250, 400, -50));
+    }
+
+    #[test]
+    fn a_snapped_half_stays_a_half() {
+        let from = rect(0, 0, 1000, 800);
+        let to = rect(1000, 0, 3000, 1600);
+        let left_half = placed_rect(rect(0, 0, 500, 800), from, to, true);
+        assert_eq!(parts(left_half), (1000, 0, 2000, 1600));
+        let right_half = placed_rect(rect(500, 0, 1000, 800), from, to, true);
+        assert_eq!(parts(right_half), (2000, 0, 3000, 1600));
+    }
+
+    #[test]
+    fn a_degenerate_source_does_not_divide_by_zero() {
+        let placed = placed_rect(
+            rect(0, 0, 100, 100),
+            rect(0, 0, 0, 0),
+            rect(0, 0, 500, 500),
+            true,
+        );
+        assert_eq!(parts(placed), (0, 0, 100, 100));
+    }
 }

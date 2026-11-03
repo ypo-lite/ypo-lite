@@ -4,7 +4,9 @@
 //! an action means adding a name in [`crate::action`] and an arm here — and
 //! neither the hotkey path nor the overlay path has to learn about it.
 
-use windows::Win32::Foundation::HWND;
+use windows::Win32::Foundation::{HWND, POINT, RECT};
+use windows::Win32::UI::WindowsAndMessaging::SetCursorPos;
+use y_core::monitor::{self, Monitor};
 use y_core::virtual_desktop::{self, Direction};
 
 use crate::action::Action;
@@ -74,6 +76,12 @@ pub fn dispatch(action: Action, target: Option<HWND>, desktop: u32) -> Status {
             let _ = virtual_desktop::toggle_window_pinned(window);
         }
 
+        // `move` takes the pointer along, `send` leaves it.
+        (Action::MonitorMoveNext, Some(window)) => to_monitor(window, true, true),
+        (Action::MonitorMovePrev, Some(window)) => to_monitor(window, false, true),
+        (Action::MonitorSendNext, Some(window)) => to_monitor(window, true, false),
+        (Action::MonitorSendPrev, Some(window)) => to_monitor(window, false, false),
+
         // Handled by the application before it gets here, so that nothing
         // reaching this arm is silently ignored: the rest of what the
         // configuration can name is still to come.
@@ -120,6 +128,60 @@ fn relocate(window: HWND, place: Place, follow: bool) {
     }
 }
 
+/// Sends `window` to the next or previous monitor, and when `follow` takes the
+/// pointer along to the same relative spot of that monitor's work area
+/// (`monitor-move`); otherwise (`monitor-send`) the pointer stays put, so with
+/// `target="pointed"` it is now over whatever lies beneath the old place.
+/// The monitors are counted left to right, wrapping at the ends. With one
+/// monitor, or a minimized window, nothing happens.
+fn to_monitor(window: HWND, next: bool, follow: bool) {
+    if window::is_minimized(window) {
+        return;
+    }
+    // Read fresh each time: monitors come and go.
+    let monitors = Monitor::all();
+    let here = Monitor::from_window(window).handle;
+    let Some(index) = monitors.iter().position(|m| m.handle == here) else {
+        return;
+    };
+    let Some(destination) =
+        wrapped_neighbour(index as u32, monitors.len() as u32, next).map(|i| i as usize)
+    else {
+        return;
+    };
+
+    let pointer = follow.then(|| monitor::cursor_position().ok()).flatten();
+    window::move_to_monitor(window, &monitors[destination]);
+
+    if let Some(pointer) = pointer {
+        let spot = scaled_point(
+            pointer,
+            monitors[index].work_area,
+            monitors[destination].work_area,
+        );
+        let _ = unsafe { SetCursorPos(spot.x, spot.y) };
+    }
+}
+
+/// Where `point`, placed in the work area `from`, falls in the work area `to`:
+/// the same fraction of the way across and down, kept inside `to`.
+fn scaled_point(point: POINT, from: RECT, to: RECT) -> POINT {
+    let scale = |value: i32, from_start: i32, from_end: i32, to_start: i32, to_end: i32| {
+        let from_len = (from_end - from_start) as i64;
+        let to_len = (to_end - to_start) as i64;
+        let offset = if from_len <= 0 {
+            to_len / 2
+        } else {
+            (value - from_start) as i64 * to_len / from_len
+        };
+        to_start + offset.clamp(0, (to_len - 1).max(0)) as i32
+    };
+    POINT {
+        x: scale(point.x, from.left, from.right, to.left, to.right),
+        y: scale(point.y, from.top, from.bottom, to.top, to.bottom),
+    }
+}
+
 /// The 0-based desktop after or before `current` out of `count`, circling
 /// round at the ends. `None` when there is nowhere else to go.
 fn wrapped_neighbour(current: u32, count: u32, next: bool) -> Option<u32> {
@@ -160,6 +222,10 @@ pub fn is_implemented(action: Action) -> bool {
             | Action::DesktopSendNext
             | Action::DesktopSendPrev
             | Action::PinToggle
+            | Action::MonitorMoveNext
+            | Action::MonitorMovePrev
+            | Action::MonitorSendNext
+            | Action::MonitorSendPrev
             | Action::Iconize
             | Action::Traynize
             | Action::Uniconize
@@ -185,7 +251,36 @@ pub fn toggle_state(action: Action, window: HWND) -> Option<bool> {
 
 #[cfg(test)]
 mod tests {
-    use super::wrapped_neighbour;
+    use super::{scaled_point, wrapped_neighbour};
+    use windows::Win32::Foundation::{POINT, RECT};
+
+    fn rect(left: i32, top: i32, right: i32, bottom: i32) -> RECT {
+        RECT {
+            left,
+            top,
+            right,
+            bottom,
+        }
+    }
+
+    #[test]
+    fn the_pointer_keeps_its_fraction_of_the_work_area() {
+        let from = rect(0, 0, 1000, 800);
+        let to = rect(1000, 0, 3000, 1600);
+        let spot = scaled_point(POINT { x: 250, y: 400 }, from, to);
+        assert_eq!((spot.x, spot.y), (1500, 800));
+    }
+
+    #[test]
+    fn the_pointer_stays_inside_the_target() {
+        let from = rect(0, 0, 1000, 800);
+        let to = rect(-500, 0, 0, 400);
+        // Off the source monitor altogether, and at its far corner.
+        let outside = scaled_point(POINT { x: 5000, y: -50 }, from, to);
+        assert_eq!((outside.x, outside.y), (-1, 0));
+        let corner = scaled_point(POINT { x: 1000, y: 800 }, from, to);
+        assert_eq!((corner.x, corner.y), (-1, 399));
+    }
 
     #[test]
     fn moving_next_and_prev_circles_round() {
