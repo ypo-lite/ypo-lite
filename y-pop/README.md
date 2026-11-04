@@ -92,7 +92,7 @@ complete `y-pop.xml`:
 </y-pop>
 ```
 
-![y-pop-config](../y-pop-config/docs/images/y-pop-cfg_01_hotkeys.png)
+![y-pop-config](../y-pop-config/docs/images/y-pop-cfg_01_general.png)
 
 An unknown attribute or a bad key combination costs you that one setting: y-pop
 warns about it and loads the rest. A reload that fails keeps what is already
