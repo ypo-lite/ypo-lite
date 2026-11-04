@@ -379,6 +379,17 @@ pub enum Fallback {
     /// the system sees it. Use it for combinations the shell reserved and the
     /// user explicitly asked to reclaim.
     LowLevelHook,
+    /// Skip `RegisterHotKey` and capture the combination with the hook from
+    /// the start.
+    ///
+    /// For keys `RegisterHotKey` cannot be trusted with: a media key such as
+    /// `VolumeUp` is not delivered as `WM_HOTKEY` on every keyboard and
+    /// driver, and when it is, the shell has already shown its own flyout by
+    /// the time the message arrives. Going straight to the hook gives one
+    /// route whose behaviour does not depend on the machine, and the key is
+    /// swallowed before the shell sees it. Costs what any override costs, see
+    /// the module documentation.
+    HookOnly,
 }
 
 /// Which route a successful [`HotkeyManager::register`] ended up taking.
@@ -423,22 +434,24 @@ impl HotkeyManager {
         hotkey: Hotkey,
         fallback: Fallback,
     ) -> Result<Registration> {
-        let attempt = unsafe {
-            RegisterHotKey(
-                Some(self.owner),
-                id as i32,
-                hotkey.modifiers,
-                hotkey.key.0 as u32,
-            )
-        };
+        if fallback != Fallback::HookOnly {
+            let attempt = unsafe {
+                RegisterHotKey(
+                    Some(self.owner),
+                    id as i32,
+                    hotkey.modifiers,
+                    hotkey.key.0 as u32,
+                )
+            };
 
-        match attempt {
-            Ok(()) => {
-                self.system.push(id);
-                return Ok(Registration::System);
+            match attempt {
+                Ok(()) => {
+                    self.system.push(id);
+                    return Ok(Registration::System);
+                }
+                Err(error) if fallback == Fallback::None => return Err(error),
+                Err(_) => {}
             }
-            Err(error) if fallback == Fallback::None => return Err(error),
-            Err(_) => {}
         }
 
         self.install_hook()?;
@@ -595,67 +608,144 @@ impl HookState {
         let down = message == WM_KEYDOWN || message == WM_SYSKEYDOWN;
         let up = message == WM_KEYUP || message == WM_SYSKEYUP;
 
-        let index = self
-            .overrides
-            .iter()
-            .position(|entry| entry.hotkey.key == key)?;
+        // The keyboard state is only read for a press: a release is matched
+        // on what we remember, not on what is held now.
+        let held = if down { Held::read() } else { Held::default() };
 
+        match self.decide(down, up, key, held) {
+            Outcome::Pass => None,
+            Outcome::Swallow => Some(()),
+            Outcome::Fire {
+                id,
+                modifiers,
+                absorb_tap,
+            } => {
+                // Same message the system would have posted, so the
+                // application's WM_HOTKEY handler cannot tell the two routes
+                // apart.
+                let _ = unsafe {
+                    PostMessageW(
+                        Some(self.owner),
+                        WM_HOTKEY,
+                        WPARAM(id as usize),
+                        LPARAM(((key.0 as isize) << 16) | modifiers as isize),
+                    )
+                };
+                if absorb_tap {
+                    absorb_modifier_tap();
+                }
+                Some(())
+            }
+        }
+    }
+
+    /// What to do with one keystroke, given which modifiers are held. Pure
+    /// but for the `pressed` marks it keeps, so it runs in tests.
+    ///
+    /// A press is matched on the key **and** the held modifiers, so `VolumeUp`
+    /// and `Ctrl+VolumeUp` can both be registered and each fires on its own
+    /// combination. A release is matched on the entries marked `pressed` for
+    /// that key, whatever is held now: the user may let go of `Ctrl` first,
+    /// and the key-up we owe a swallow to is still the one of the entry that
+    /// fired.
+    fn decide(&mut self, down: bool, up: bool, key: VIRTUAL_KEY, held: Held) -> Outcome {
         if up {
             // Swallow the release of a key whose press we swallowed, so no
             // application sees half a keystroke. A release we did not cause
-            // travels on.
-            let entry = &mut self.overrides[index];
-            if !entry.pressed {
-                return None;
+            // travels on. Every entry of the key is cleared, not the first:
+            // releasing `Ctrl` while holding the key and letting auto-repeat
+            // fire the bare entry marks two, and one left marked would
+            // swallow the next real press as auto-repeat.
+            let mut owed = false;
+            for entry in &mut self.overrides {
+                if entry.hotkey.key == key && entry.pressed {
+                    entry.pressed = false;
+                    owed = true;
+                }
             }
-            entry.pressed = false;
-            return Some(());
+            return if owed {
+                Outcome::Swallow
+            } else {
+                Outcome::Pass
+            };
         }
 
-        if !down || !modifiers_pressed(self.overrides[index].hotkey.modifiers) {
-            return None;
+        if !down {
+            return Outcome::Pass;
         }
 
-        let entry = &mut self.overrides[index];
+        let Some(entry) = self
+            .overrides
+            .iter_mut()
+            .find(|entry| entry.hotkey.key == key && held.matches(entry.hotkey.modifiers))
+        else {
+            return Outcome::Pass;
+        };
+
         if entry.pressed && entry.hotkey.has(MOD_NOREPEAT) {
-            return Some(()); // auto-repeat: swallowed, not reported
+            return Outcome::Swallow; // auto-repeat: swallowed, not reported
         }
         entry.pressed = true;
 
-        // Same message the system would have posted, so the application's
-        // WM_HOTKEY handler cannot tell the two routes apart.
-        let modifiers = entry.hotkey.modifiers.0 & !MOD_NOREPEAT.0;
-        let _ = unsafe {
-            PostMessageW(
-                Some(self.owner),
-                WM_HOTKEY,
-                WPARAM(entry.id as usize),
-                LPARAM(((key.0 as isize) << 16) | modifiers as isize),
-            )
-        };
-
-        if entry.hotkey.has(MOD_WIN) {
-            absorb_modifier_tap();
+        Outcome::Fire {
+            id: entry.id,
+            modifiers: entry.hotkey.modifiers.0 & !MOD_NOREPEAT.0,
+            absorb_tap: entry.hotkey.has(MOD_WIN),
         }
-
-        Some(())
     }
 }
 
-/// True when exactly the requested modifiers are held down.
-///
-/// The match is exact, like `RegisterHotKey`: with `Win+X` registered,
-/// `Win+Ctrl+X` is somebody else's business.
-fn modifiers_pressed(modifiers: HOT_KEY_MODIFIERS) -> bool {
-    let held = |key: VIRTUAL_KEY| unsafe { GetAsyncKeyState(key.0 as i32) } as u16 & 0x8000 != 0;
+/// What the hook does with a keystroke.
+#[derive(Debug, PartialEq, Eq)]
+enum Outcome {
+    /// Not ours: on to the rest of the system.
+    Pass,
+    /// Ours, and nothing to report: auto-repeat, or the release of a press we
+    /// swallowed.
+    Swallow,
+    /// Ours, and a hotkey fired.
+    Fire {
+        id: u32,
+        /// The combination's modifiers, without `MOD_NOREPEAT`.
+        modifiers: u32,
+        /// The combination holds `Win`: cancel the Start menu tap.
+        absorb_tap: bool,
+    },
+}
 
-    let win = held(VK_LWIN) || held(VK_RWIN);
-    let expected = |modifier: HOT_KEY_MODIFIERS| modifiers.0 & modifier.0 != 0;
+/// Which modifiers are held down.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Held {
+    win: bool,
+    ctrl: bool,
+    alt: bool,
+    shift: bool,
+}
 
-    win == expected(MOD_WIN)
-        && held(VK_CONTROL) == expected(MOD_CONTROL)
-        && held(VK_MENU) == expected(MOD_ALT)
-        && held(VK_SHIFT) == expected(MOD_SHIFT)
+impl Held {
+    /// Reads the real hardware state, regardless of what messages arrived.
+    fn read() -> Self {
+        let held =
+            |key: VIRTUAL_KEY| unsafe { GetAsyncKeyState(key.0 as i32) } as u16 & 0x8000 != 0;
+        Self {
+            win: held(VK_LWIN) || held(VK_RWIN),
+            ctrl: held(VK_CONTROL),
+            alt: held(VK_MENU),
+            shift: held(VK_SHIFT),
+        }
+    }
+
+    /// True when exactly the requested modifiers are held down.
+    ///
+    /// The match is exact, like `RegisterHotKey`: with `Win+X` registered,
+    /// `Win+Ctrl+X` is somebody else's business.
+    fn matches(self, modifiers: HOT_KEY_MODIFIERS) -> bool {
+        let expected = |modifier: HOT_KEY_MODIFIERS| modifiers.0 & modifier.0 != 0;
+        self.win == expected(MOD_WIN)
+            && self.ctrl == expected(MOD_CONTROL)
+            && self.alt == expected(MOD_ALT)
+            && self.shift == expected(MOD_SHIFT)
+    }
 }
 
 /// Cancels the system gesture that fires when Alt or Win is pressed and
@@ -906,6 +996,175 @@ mod tests {
             Hotkey::parse("launch-mail").map(|h| h.key),
             Some(VK_LAUNCH_MAIL)
         );
+    }
+
+    /// A hook state with the given registrations, ids in order from 1.
+    fn state_with(hotkeys: &[&str]) -> HookState {
+        let mut state = HookState {
+            owner: HWND(std::ptr::null_mut()),
+            overrides: Vec::new(),
+        };
+        for (index, text) in hotkeys.iter().enumerate() {
+            let hotkey = Hotkey::parse(text).expect("valid");
+            state.add(state.owner, index as u32 + 1, hotkey);
+        }
+        state
+    }
+
+    const NONE: Held = Held {
+        win: false,
+        ctrl: false,
+        alt: false,
+        shift: false,
+    };
+    const CTRL: Held = Held { ctrl: true, ..NONE };
+
+    fn fired(id: u32, modifiers: u32, absorb_tap: bool) -> Outcome {
+        Outcome::Fire {
+            id,
+            modifiers,
+            absorb_tap,
+        }
+    }
+
+    #[test]
+    fn a_bare_key_and_the_same_key_with_a_modifier_each_fire_on_their_own() {
+        let mut state = state_with(&["VolumeUp", "Ctrl+VolumeUp"]);
+        let key = VK_VOLUME_UP;
+
+        assert_eq!(state.decide(true, false, key, NONE), fired(1, 0, false));
+        assert_eq!(state.decide(false, true, key, NONE), Outcome::Swallow);
+
+        // The bug this guards against: the first entry for the key was taken,
+        // its modifiers did not match, and the second was never looked at.
+        assert_eq!(
+            state.decide(true, false, key, CTRL),
+            fired(2, MOD_CONTROL.0, false)
+        );
+        assert_eq!(state.decide(false, true, key, CTRL), Outcome::Swallow);
+    }
+
+    #[test]
+    fn the_order_of_registration_does_not_matter() {
+        let mut state = state_with(&["Ctrl+VolumeUp", "VolumeUp"]);
+        assert_eq!(
+            state.decide(true, false, VK_VOLUME_UP, NONE),
+            fired(2, 0, false)
+        );
+        state.decide(false, true, VK_VOLUME_UP, NONE);
+        assert_eq!(
+            state.decide(true, false, VK_VOLUME_UP, CTRL),
+            fired(1, MOD_CONTROL.0, false)
+        );
+    }
+
+    #[test]
+    fn a_combination_nobody_registered_passes() {
+        let mut state = state_with(&["Ctrl+VolumeUp"]);
+        let shift = Held {
+            shift: true,
+            ..NONE
+        };
+        let both = Held {
+            shift: true,
+            ..CTRL
+        };
+        assert_eq!(state.decide(true, false, VK_VOLUME_UP, NONE), Outcome::Pass);
+        assert_eq!(
+            state.decide(true, false, VK_VOLUME_UP, shift),
+            Outcome::Pass
+        );
+        assert_eq!(state.decide(true, false, VK_VOLUME_UP, both), Outcome::Pass);
+        assert_eq!(
+            state.decide(true, false, VK_VOLUME_DOWN, CTRL),
+            Outcome::Pass
+        );
+    }
+
+    #[test]
+    fn the_release_is_swallowed_even_if_the_modifier_was_let_go_first() {
+        let mut state = state_with(&["Ctrl+VolumeUp"]);
+        assert!(matches!(
+            state.decide(true, false, VK_VOLUME_UP, CTRL),
+            Outcome::Fire { .. }
+        ));
+        // Ctrl is released before the key: the release is still ours.
+        assert_eq!(
+            state.decide(false, true, VK_VOLUME_UP, NONE),
+            Outcome::Swallow
+        );
+        // And a release we did not cause travels on.
+        assert_eq!(state.decide(false, true, VK_VOLUME_UP, NONE), Outcome::Pass);
+    }
+
+    #[test]
+    fn letting_go_of_the_modifier_mid_repeat_leaves_nothing_stuck() {
+        // Hold Ctrl+VolumeUp, release Ctrl, keep holding: auto-repeat now
+        // matches the bare entry too, so two entries are marked. One release
+        // has to clear both, or the next press would be eaten as a repeat.
+        let mut state = state_with(&["VolumeUp", "Ctrl+VolumeUp"]);
+        state.decide(true, false, VK_VOLUME_UP, CTRL);
+        assert!(matches!(
+            state.decide(true, false, VK_VOLUME_UP, NONE),
+            Outcome::Fire { id: 1, .. }
+        ));
+        assert_eq!(
+            state.decide(false, true, VK_VOLUME_UP, NONE),
+            Outcome::Swallow
+        );
+
+        assert!(matches!(
+            state.decide(true, false, VK_VOLUME_UP, NONE),
+            Outcome::Fire { id: 1, .. }
+        ));
+    }
+
+    #[test]
+    fn auto_repeat_is_swallowed_only_when_the_hotkey_asks_for_it() {
+        // `parse` sets MOD_NOREPEAT.
+        let mut state = state_with(&["VolumeMute"]);
+        assert!(matches!(
+            state.decide(true, false, VK_VOLUME_MUTE, NONE),
+            Outcome::Fire { .. }
+        ));
+        assert_eq!(
+            state.decide(true, false, VK_VOLUME_MUTE, NONE),
+            Outcome::Swallow
+        );
+
+        // Without it, every repeat fires.
+        let mut state = HookState {
+            owner: HWND(std::ptr::null_mut()),
+            overrides: Vec::new(),
+        };
+        let bare = Hotkey::new(HOT_KEY_MODIFIERS(0), VK_VOLUME_UP);
+        state.add(state.owner, 1, bare);
+        for _ in 0..2 {
+            assert!(matches!(
+                state.decide(true, false, VK_VOLUME_UP, NONE),
+                Outcome::Fire { .. }
+            ));
+        }
+    }
+
+    #[test]
+    fn only_a_win_combination_asks_for_the_start_menu_tap_to_be_cancelled() {
+        let mut state = state_with(&["Win+X", "Ctrl+X"]);
+        let win = Held { win: true, ..NONE };
+        let x = VIRTUAL_KEY(0x58);
+        assert_eq!(state.decide(true, false, x, win), fired(1, MOD_WIN.0, true));
+        assert_eq!(
+            state.decide(true, false, x, CTRL),
+            fired(2, MOD_CONTROL.0, false)
+        );
+    }
+
+    #[test]
+    fn held_modifiers_match_exactly() {
+        assert!(NONE.matches(MOD_NOREPEAT));
+        assert!(CTRL.matches(HOT_KEY_MODIFIERS(MOD_CONTROL.0 | MOD_NOREPEAT.0)));
+        assert!(!CTRL.matches(HOT_KEY_MODIFIERS(0)));
+        assert!(!NONE.matches(MOD_CONTROL));
     }
 
     #[test]

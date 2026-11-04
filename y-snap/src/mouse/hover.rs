@@ -37,7 +37,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use y_core::monitor::Monitor;
 
-use crate::target;
+use y_core::target;
 
 use super::geometry::{self, point_in, point_in_window};
 use super::{MIN_HOVER_TIMER_ID, WM_MIN_HOVER, WM_MIN_RIGHTCLICK};

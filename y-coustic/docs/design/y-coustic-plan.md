@@ -25,9 +25,11 @@ Beyond the port, six things are new:
 5. **Customizable overlays** in place of VulCan's tray balloon.
 6. A **config schema in XML** like `y-snap.xml`, instead of `vulcan.ini`.
 
-Status: nothing is implemented. `y-coustic/src/main.rs` is still the
-`Hello, world!` placeholder. This document records what VulCan does, what
-we keep, what we drop, and what is still open.
+Status: Phase 0 (the probe) is done; nothing else is implemented, and
+`y-coustic/src/main.rs` is still the `Hello, world!` placeholder. This document
+records what VulCan does, what we keep, what we drop, and what is still open.
+The order of work, task by task, and the progress record are in
+[`implementation-plan.md`](implementation-plan.md).
 
 ## What VulCan does (the prior art)
 
@@ -233,7 +235,10 @@ Known difficulties, to be designed for rather than discovered:
   application first opens a stream.
   If the pointed application has none, the overlay says so ("no audio") and
   the input is **not** swallowed (a wheel that does nothing must still
-  scroll). Falling back to master would be surprising: no fallback.
+  scroll). Falling back to master would be surprising: no fallback. The hook
+  must decide before COM can tell, so for the wheel "not swallowed" means
+  swallowed and then re-injected, tagged so the hook lets it pass
+  (`implementation-plan.md`, decision 4).
 * **Per-session mute vs. volume 0.** `ISimpleAudioVolume` has its own mute
   flag, independent of the level. Mute toggle must use it, so that unmuting
   returns to the previous level (VulCan's `getVolume()` reports 0 while
@@ -471,8 +476,8 @@ by target resolution.
 ### Target resolution
 
 Reuse `y-snap/src/target.rs`'s idea (pointed → focused fallback, refuse
-shell windows). If both crates need it, move the filtering list into
-`y_core` rather than copying it. The `BANISHED` list should not diverge.
+shell windows). It moves to `y_core::target` in Phase 5 and `y-snap` uses it
+from there, so there is one `BANISHED` list.
 
 ## Overlays
 
@@ -736,7 +741,12 @@ y-coustic/
   src/hud.rs                drawing, timing and scoped wheel hook of the HUD
   src/panel.rs              the panel: rows, selection, hit testing, drawing
   docs/design/y-coustic-plan.md    this file
+  docs/design/implementation-plan.md   the order of work and progress
 ```
+
+The implementation plan refines this list: a `lib.rs` (config and model) as in
+`y-snap`, `model.rs` for the pure level rules, and `mouse.rs` for what this
+list calls `input.rs`.
 
 `audio.rs` and `config.rs` are testable without a device or a window: the
 config has the usual `the_default_configuration_is_valid` test, and the
@@ -756,6 +766,12 @@ grouping, which are pure functions over plain data.
   `Win32_UI_Shell_PropertiesSystem` is still to come if the session display name
   is read from the property store. The watchers implement COM interfaces, so
   they also need whatever `#[implement]` takes in this `windows` version.
+  **Checked (Phase 2b, 2026-11-05):** `windows::core::implement` is re-exported,
+  but the code it generates names `::windows_core::` directly, so a **direct
+  `windows-core = "0.62.2"` dependency** is needed (the version `windows` 0.62.2
+  already uses, so nothing new is fetched). It is in the root
+  `[workspace.dependencies]`. `PROPERTYKEY`, which `IMMNotificationClient` uses,
+  is in `Foundation`, already enabled; no `PropertiesSystem` feature needed.
 * `y_core::hotkey`: search overrides by key and modifiers, and a hook-only
   registration (see Changes needed in `y_core::hotkey`).
 * `y_core::overlay`: a global alpha for the fade.
@@ -765,6 +781,9 @@ grouping, which are pure functions over plain data.
   filter if target resolution moves there.
 
 ## Phases
+
+The outline. Tasks, files, decisions and status per phase are in
+[`implementation-plan.md`](implementation-plan.md), which uses the same numbers.
 
 0. **Prove the media key assumption.** A throwaway build with a `WH_KEYBOARD_LL`
    hook that logs and swallows the three volume keys and sets the master
@@ -839,8 +858,6 @@ grouping, which are pure functions over plain data.
 * **Named targets**: the panel gives a minimized player a row, so the mouse and
   keyboard case is solved. `target="app:spotify.exe"` is still useful for a
   dedicated hotkey; decide once the panel is in use.
-* **Sharing target resolution with y-snap**: move to `y_core`, or keep two
-  filters in sync by hand.
 
 ## References
 

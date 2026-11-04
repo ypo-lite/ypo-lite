@@ -14,6 +14,9 @@ license = "GPL-3.0-or-later"
 y-core = { path = "core" }
 ui-kit = { path = "ui-kit" }
 embed-resource = "3.0.11"
+# Direct, only for `#[implement]`: the macro emits `::windows_core::` paths. Same
+# version as the one `windows` re-exports.
+windows-core = "0.62.2"
 windows-reactor = "0.100"
 
 # One feature set for the whole workspace: the `windows` crate is compiled
@@ -35,6 +38,7 @@ features = [
     "Win32_System_Com",
     "Win32_System_Com_StructuredStorage",
     "Win32_System_DataExchange",
+    "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_LibraryLoader",
     "Win32_System_Memory",
     "Win32_System_Ole",

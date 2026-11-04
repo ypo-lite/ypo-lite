@@ -21,7 +21,7 @@ cargo test -p y-snap config::tests::the_default_configuration_is_valid  # one te
 | `config.rs` | reading `y-snap.xml` |
 | `ipc.rs` | what another process can ask of a running y-snap |
 | `actions.rs` | action → Win32 call, in one place |
-| `target.rs` | choosing the window, and refusing the shell's |
+| `y_core::target` | choosing the window, and refusing the shell's (moved to `y-core`, shared with y-coustic) |
 | `window.rs` | what gets done to a window, and how to undo it |
 | `mouse/` | the low-level mouse hook: drag, resize (`gesture`), minimize-button hover (`hover`), mouse shortcuts (`shortcut`, a pure state machine) |
 | `min_overlay.rs` | the minimize-button popup, and turning a click into an action |
@@ -65,7 +65,7 @@ uses a looser rectangle, and one bounded check against the real window confirms
 it before the popup shows.
 
 **Choosing the window.** There is no Win32 flag meaning "not a real application
-window", so `target.rs` refuses the shell's windows by class name. Extend its
+window", so `y_core::target` (`core/src/target.rs`) refuses the shell's windows by class name. Extend its
 `BANISHED` list by observation, erring toward refusing.
 
 **Virtual desktops.** Windows has no public interface for moving a window between

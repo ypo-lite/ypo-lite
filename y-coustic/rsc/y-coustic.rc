@@ -1,0 +1,65 @@
+// Resource script: compiled by build.rs through `y_core::build::embed_resources`.
+//
+// Identifiers must stay in sync with `y_core::resources`.
+// Paths are relative to this file.
+//
+// The version numbers below are checked against Cargo.toml at build time,
+// so bumping the crate version without touching this file fails the build.
+
+/////////////////////////////////////////////////////////////////////////////
+// Icon
+//
+// None yet: until `y-coustic.ico` is supplied the application falls back to
+// the generic system icon (`app_icon_or_stock`). When it arrives, add
+//     #define IDI_APP_ICON 101
+//     IDI_APP_ICON ICON "y-coustic.ico"
+// here, before anything else, so Explorer picks it up.
+//
+// The tray icon shown while the microphone is muted is resource 102; without
+// it a stock icon stands in:
+//     #define IDI_MIC_MUTED 102
+//     IDI_MIC_MUTED ICON "y-coustic-mic-muted.ico"
+
+/////////////////////////////////////////////////////////////////////////////
+// Application manifest
+//
+// 1  = CREATEPROCESS_MANIFEST_RESOURCE_ID
+// 24 = RT_MANIFEST
+
+#define IDI_APP_ICON 101
+
+IDI_APP_ICON ICON "y-coustic.ico"
+
+1 24 "y-coustic.exe.manifest"
+
+/////////////////////////////////////////////////////////////////////////////
+// Version information (Explorer's "Details" tab)
+
+1 VERSIONINFO
+ FILEVERSION    0,2,0,0
+ PRODUCTVERSION 0,2,0,0
+ FILEFLAGSMASK  0x3fL
+ FILEFLAGS      0x0L
+ FILEOS         0x40004L   // VOS_NT_WINDOWS32
+ FILETYPE       0x1L       // VFT_APP
+ FILESUBTYPE    0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"   // US English, Unicode
+        BEGIN
+            VALUE "CompanyName",      "ypo-lite"
+            VALUE "FileDescription",  "y-coustic"
+            VALUE "FileVersion",      "0.2.0.0"
+            VALUE "InternalName",     "y-coustic"
+            VALUE "LegalCopyright",   "Copyright (C) 2026"
+            VALUE "OriginalFilename", "y-coustic.exe"
+            VALUE "ProductName",      "y-coustic"
+            VALUE "ProductVersion",   "0.2.0.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

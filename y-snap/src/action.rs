@@ -206,40 +206,7 @@ impl fmt::Display for Action {
     }
 }
 
-/// Which window an action applies to.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
-pub enum Target {
-    /// The window with the keyboard focus.
-    #[default]
-    Focused,
-    /// The window under the mouse pointer, falling back to the focused one.
-    /// What HulK's hotkeys mostly used: the hand is already on the mouse.
-    Pointed,
-}
-
-impl Target {
-    pub fn from_name(name: &str) -> Option<Self> {
-        match name.trim() {
-            "focused" => Some(Self::Focused),
-            "pointed" => Some(Self::Pointed),
-            _ => None,
-        }
-    }
-
-    /// The name [`Target::from_name`] reads back.
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Focused => "focused",
-            Self::Pointed => "pointed",
-        }
-    }
-}
-
-impl fmt::Display for Target {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.name())
-    }
-}
+pub use y_core::target::Target;
 
 #[cfg(test)]
 mod tests {

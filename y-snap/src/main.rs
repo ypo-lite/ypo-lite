@@ -17,7 +17,6 @@ mod hidden;
 mod min_overlay;
 mod mouse;
 mod overlay;
-mod target;
 mod window;
 
 // `action` and `config` live in this package's library target (`src/lib.rs`)
@@ -298,7 +297,7 @@ impl YSnap {
         let window = binding
             .action
             .needs_window()
-            .then(|| target::resolve(binding.target))
+            .then(|| y_core::target::resolve(binding.target))
             .flatten();
 
         self.fire(hwnd, binding.action, window, binding.desktop, false);

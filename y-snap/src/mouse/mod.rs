@@ -72,12 +72,11 @@ use y_core::monitor::Monitor;
 
 use crate::action::Target;
 use crate::config::{Button, Mouse, MouseShortcut, MouseTrigger};
-use crate::target;
+use y_core::target;
 
 mod geometry;
 mod gesture;
 mod hover;
-mod modifier_guard;
 mod shortcut;
 
 pub use geometry::visual_window_rect;
@@ -409,7 +408,7 @@ impl HookState {
 
         // Armed before anything can pass the click on: a lone `Win` or `Alt`
         // release left behind would open Start or the system menu.
-        modifier_guard::arm(modifiers);
+        y_core::modifier_guard::arm(modifiers);
 
         let mut window = HWND::default();
         if binding.action.needs_window() {

@@ -15,7 +15,7 @@
 //! (`SetForegroundWindow`/`SetFocus` on its popup, right after showing it):
 //! a real, focusable window gets `WM_KEYDOWN` delivered to it directly, so
 //! there is no need for a scoped `WH_KEYBOARD_LL` hook the way
-//! [`crate::mouse::modifier_guard`]'s does — [`ClickHandler`] just matches
+//! [`y_core::modifier_guard`]'s does — [`ClickHandler`] just matches
 //! `VK_ESCAPE` and each tile's bound key inline, the same handler that
 //! already turns a click into a posted message. It also gets "click outside
 //! closes it" for free: losing focus (`WM_KILLFOCUS`) *is* the signal that
