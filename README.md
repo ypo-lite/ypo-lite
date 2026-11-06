@@ -19,7 +19,7 @@ and nothing injected into your other programs.**
 
 ## Why Ypo-Lite
 
-- **Light.** Y-Snap is about 300 KB on disk and Y-Pop about 650 KB. Each is one
+- **Light.** Y-Snap is about 400 KB on disk and Y-Pop about 750 KB. Each is one
   `.exe` that sits in the notification area and does its job, and uses about
   1.4 MB and 1.7 MB of memory while running ([measured](#memory)).
 - **Nothing to carry around.** No installer is required: drop the executable and
