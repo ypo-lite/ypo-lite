@@ -1,0 +1,4 @@
+# Link the C runtime statically (the Rust equivalent of C++ /MT) so the exes
+# don't depend on the VC++ Redistributable (vcruntime140.dll, api-ms-win-crt-*).
+[target.'cfg(all(windows, target_env = "msvc"))']
+rustflags = ["-C", "target-feature=+crt-static"]
