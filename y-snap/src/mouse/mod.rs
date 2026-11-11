@@ -81,7 +81,7 @@ mod modifier_guard;
 mod shortcut;
 
 pub use geometry::visual_window_rect;
-pub use hover::{confirm_min_button, min_button_rect};
+pub use hover::{confirm_min_button, min_button_rect, min_popup_top};
 
 /// Posted to the owner window when the window whose minimize button the
 /// pointer is over changes — never carries anything worth reading in

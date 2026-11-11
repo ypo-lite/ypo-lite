@@ -129,7 +129,7 @@ impl MinOverlay {
         let position = Monitor::from_window(window).keep_inside(
             POINT {
                 x: button.left + (button.right - button.left) / 2 - size.0 / 2,
-                y: button.bottom + GAP,
+                y: mouse::min_popup_top(window).unwrap_or(button.bottom) + GAP,
             },
             size,
         );

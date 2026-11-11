@@ -267,8 +267,22 @@ fn candidate_rect(window: HWND) -> Option<RECT> {
         left: rect.right - button * 4,
         right: rect.right,
         top: rect.top,
-        bottom: rect.top + caption * 3 / 2,
+        bottom: rect.top + caption * CANDIDATE_HEIGHT_FACTOR,
     })
+}
+
+/// Height of [`candidate_rect`], in multiples of `SM_CYCAPTION`. The real
+/// caption buttons are taller than that metric says (Win11 draws ~31 px for a
+/// 23 px metric, and Chrome's tall title bar more still), so the popup is
+/// anchored at this region's bottom edge, not the estimated button's: below
+/// the whole button, where it cannot cover its lower part. The region still
+/// touches the popup, so the pointer travelling down never leaves the hover.
+const CANDIDATE_HEIGHT_FACTOR: i32 = 2;
+
+/// Screen y just under the caption-button area of `window` — where the
+/// minimize popup's top edge goes. See [`CANDIDATE_HEIGHT_FACTOR`].
+pub fn min_popup_top(window: HWND) -> Option<i32> {
+    candidate_rect(window).map(|rect| rect.bottom)
 }
 
 /// The window whose minimize button `pt` is over, if any.
