@@ -394,9 +394,11 @@ a side effect of installing the app.
 
 ### Layers
 
-A modifier chooses what a set of keys controls. One `<keys>` group plus one
-`<layer>` list expands at load into plain bindings, so the same layers work on
-media keys and on any other three keys.
+A modifier chooses what a set of keys controls. A `<keys>` group is aimed by
+a `target` or by `<layer>`s of its own (see
+[`keys-and-layers-plan.md`](keys-and-layers-plan.md), which replaced the first
+design where every group shared every layer) and expands at load into plain
+bindings, so the same layers work on media keys and on any other three keys.
 
 | Held | Target |
 | --- | --- |
@@ -662,15 +664,15 @@ A first sketch; names are not final:
 	<!-- What to do on a change from outside: off, tray or hud. -->
 	<watch master="off" microphone="hud"/>
 
-	<!-- Each <keys> group combines with every <layer>. -->
+	<!-- A <keys> group has its own layers, or one target. -->
 	<controls>
-		<keys up="VolumeUp" down="VolumeDown" mute="VolumeMute" plain="windows"/>
-		<keys up="Win+NumAdd" down="Win+NumSub" mute="Win+Numpad0"/>
-
-		<layer mod="none"       target="master"/>
-		<layer mod="Ctrl"       target="focused"/>
-		<layer mod="Shift"      target="mic"/>
-		<layer mod="Ctrl+Shift" target="pointed"/>
+		<keys up="VolumeUp" down="VolumeDown" mute="VolumeMute" plain="windows">
+			<layer mod="none"       target="master"/>
+			<layer mod="Ctrl"       target="focused"/>
+			<layer mod="Shift"      target="mic"/>
+			<layer mod="Ctrl+Shift" target="pointed"/>
+		</keys>
+		<keys mute="Win+Alt+M" target="mic"/>
 	</controls>
 
 	<!-- Single bindings, for whatever the layers do not cover. -->

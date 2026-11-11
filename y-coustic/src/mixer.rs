@@ -14,7 +14,7 @@ use y_coustic::model::{Change, Kind, State, Target};
 use crate::audio::grouping::{self, AppKey, Application, WindowProcess};
 use crate::audio::sessions::Sessions;
 use crate::audio::{Endpoint, Flow, Microphones, Role};
-use crate::look::AppRef;
+use y_coustic::look::AppRef;
 
 /// Which line of the mixer.
 #[derive(Debug, Clone, PartialEq, Eq)]

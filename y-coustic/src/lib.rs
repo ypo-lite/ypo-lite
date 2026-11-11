@@ -5,5 +5,10 @@
 pub mod appearance;
 pub mod config;
 pub mod controls;
+pub mod edit;
 pub mod input;
+pub mod ipc;
+pub mod kept;
+pub mod look;
 pub mod model;
+pub mod paint;

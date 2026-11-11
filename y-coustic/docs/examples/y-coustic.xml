@@ -36,9 +36,16 @@
 	<watch master="off" microphone="hud"/>
 
 	<!--
-		Keys and layers. Each <keys> group is combined with every <layer>: the
-		layer's modifiers are added to the group's keys, and its target says what
-		they then control. Two groups and two layers give twelve bindings.
+		Keys and layers. A <keys> group says what it controls itself, one of two
+		ways:
+
+		  target="mic"   the keys control that, with no modifier held: a set of keys
+		                 that does one thing
+		  <layer> inside the group, each with a modifier held, so the modifier
+		                 says what the keys control
+
+		Nothing is shared between groups: a microphone mute is a group of its own
+		with target="mic", and has none of the layers of the media keys.
 
 		<keys> takes up, down and mute, each optional, at least one. A modifier
 		already in a key stays: Win+NumAdd under the Shift layer is
@@ -55,17 +62,20 @@
 		Alt from focusing the menu bar of the window in front.
 	-->
 	<controls>
-		<!-- The keyboard's own volume keys. -->
-		<keys up="VolumeUp" down="VolumeDown" mute="VolumeMute" plain="windows"/>
+		<!-- The keyboard's own volume keys, aimed by the modifier held. -->
+		<keys up="VolumeUp" down="VolumeDown" mute="VolumeMute" plain="windows">
+			<layer mod="none"  target="master"/>
+			<layer mod="Shift" target="mic"/>
+		</keys>
 
 		<!-- For a keyboard with a numpad: a group that does not need a media key. -->
-		<keys up="Win+NumAdd" down="Win+NumSub" mute="Win+Numpad0"/>
+		<keys up="Win+NumAdd" down="Win+NumSub" mute="Win+Numpad0">
+			<layer mod="none"  target="master"/>
+			<layer mod="Shift" target="mic"/>
+		</keys>
 
-		<!-- A group with only some keys is fine. -->
-		<keys up="Win+Alt+PageUp" down="Win+Alt+PageDown"/>
-
-		<layer mod="none"  target="master"/>
-		<layer mod="Shift" target="mic"/>
+		<!-- A group with only some keys is fine, and one target is enough. -->
+		<keys up="Win+Alt+PageUp" down="Win+Alt+PageDown" target="focused"/>
 	</controls>
 
 	<!--

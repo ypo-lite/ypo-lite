@@ -504,6 +504,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "y-coustic-config"
+version = "0.2.0"
+dependencies = [
+ "ui-kit",
+ "windows",
+ "windows-reactor",
+ "y-core",
+ "y-coustic",
+]
+
+[[package]]
 name = "y-pop"
 version = "0.3.0"
 dependencies = [

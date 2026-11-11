@@ -1,0 +1,45 @@
+// Resource script: compiled by build.rs through `y_core::build::embed_resources`.
+//
+// Identifiers must stay in sync with `y_core::resources`.
+// Paths are relative to this file.
+//
+// The version numbers below are checked against Cargo.toml at build time,
+// so bumping the crate version without touching this file fails the build.
+
+/////////////////////////////////////////////////////////////////////////////
+// Icon
+//
+// None, deliberately: the config apps ship without an `.ico` (the title bar has
+// no icon either). Explorer shows the generic one.
+
+/////////////////////////////////////////////////////////////////////////////
+// Version information (Explorer's "Details" tab)
+
+1 VERSIONINFO
+ FILEVERSION    0,2,0,0
+ PRODUCTVERSION 0,2,0,0
+ FILEFLAGSMASK  0x3fL
+ FILEFLAGS      0x0L
+ FILEOS         0x40004L   // VOS_NT_WINDOWS32
+ FILETYPE       0x1L       // VFT_APP
+ FILESUBTYPE    0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"   // US English, Unicode
+        BEGIN
+            VALUE "CompanyName",      "ypo-lite"
+            VALUE "FileDescription",  "y-coustic-config"
+            VALUE "FileVersion",      "0.2.0.0"
+            VALUE "InternalName",     "y-coustic-config"
+            VALUE "LegalCopyright",   "Copyright (C) 2026"
+            VALUE "OriginalFilename", "y-coustic-config.exe"
+            VALUE "ProductName",      "y-coustic-config"
+            VALUE "ProductVersion",   "0.2.0.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

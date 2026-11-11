@@ -7,22 +7,22 @@
 use windows::Win32::Foundation::{POINT, RECT};
 
 use y_core::monitor::Monitor;
-use y_coustic::config::{Position, Style};
+use crate::config::{Position, Style};
 
 // Design sizes, at 100% scaling.
-pub(super) const PADDING: i32 = 16;
-pub(super) const GLYPH: i32 = 28;
-pub(super) const GAP: i32 = 12;
-pub(super) const TEXT_WIDTH: i32 = 56;
-pub(super) const BAR_HEIGHT: i32 = 6;
-pub(super) const FONT_HEIGHT: i32 = 16;
+pub const PADDING: i32 = 16;
+pub const GLYPH: i32 = 28;
+pub const GAP: i32 = 12;
+pub const TEXT_WIDTH: i32 = 56;
+pub const BAR_HEIGHT: i32 = 6;
+pub const FONT_HEIGHT: i32 = 16;
 /// Distance from the work area's edge.
-pub(super) const MARGIN: i32 = 64;
+pub const MARGIN: i32 = 64;
 /// How far the HUD sits from the pointer it follows.
 const CURSOR_OFFSET: i32 = 20;
 
 /// The size of the window of `style` at 100%.
-pub(super) fn design_size(style: Style) -> (i32, i32) {
+pub fn design_size(style: Style) -> (i32, i32) {
     match style {
         Style::Bar => (272, 56),
         Style::Compact => (176, 36),
@@ -33,7 +33,7 @@ pub(super) fn design_size(style: Style) -> (i32, i32) {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct Geometry {
+pub struct Geometry {
     pub style: Style,
     pub width: i32,
     pub height: i32,
@@ -59,7 +59,7 @@ pub(super) struct Geometry {
 
 /// What a point on the HUD is on.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) enum Hit {
+pub enum Hit {
     /// The icon or glyph: mutes.
     Glyph,
     /// The bar, with the level the point stands for, 0.0 to 1.0.
@@ -80,7 +80,7 @@ fn square(left: i32, top: i32, side: i32) -> RECT {
 impl Geometry {
     /// `named` is an application's reading, which the `bar` style names above
     /// its bar.
-    pub(super) fn new(
+    pub fn new(
         style: Style,
         width: i32,
         height: i32,
@@ -219,17 +219,17 @@ impl Geometry {
         }
     }
 
-    pub(super) fn vertical(&self) -> bool {
+    pub fn vertical(&self) -> bool {
         self.style == Style::VBar
     }
 
-    pub(super) fn ring(&self) -> bool {
+    pub fn ring(&self) -> bool {
         self.style == Style::Ring
     }
 
     /// What is at (`x`, `y`) of the window. The bar counts for the whole height
     /// of its row: a 6-pixel line is not a target.
-    pub(super) fn hit(&self, x: i32, y: i32) -> Hit {
+    pub fn hit(&self, x: i32, y: i32) -> Hit {
         let zone = self.glyph_zone;
         if (zone.left..zone.right).contains(&x) && (zone.top..zone.bottom).contains(&y) {
             return Hit::Glyph;
@@ -257,7 +257,7 @@ impl Geometry {
     /// The level a pointer at (`x`, `y`) stands for, within 0 to 1 whether or
     /// not it is still over the bar (a drag may leave it). A ring reads the
     /// angle from the top, clockwise.
-    pub(super) fn level_at(&self, x: i32, y: i32) -> f32 {
+    pub fn level_at(&self, x: i32, y: i32) -> f32 {
         let Some(track) = self.track else {
             return 0.0;
         };
@@ -281,7 +281,7 @@ impl Geometry {
 /// Where the top left of a `size` HUD goes against `icon`: centred on it, above
 /// when the icon is in the lower half of the monitor (a bottom taskbar), below
 /// otherwise, a small gap between. Kept inside the work area.
-pub(super) fn against(icon: RECT, size: (i32, i32), monitor: &Monitor) -> POINT {
+pub fn against(icon: RECT, size: (i32, i32), monitor: &Monitor) -> POINT {
     let gap = monitor.scaled(GAP / 2);
     let area = monitor.work_area;
     let x = (icon.left + icon.right) / 2 - size.0 / 2;
@@ -297,7 +297,7 @@ pub(super) fn against(icon: RECT, size: (i32, i32), monitor: &Monitor) -> POINT 
 /// Where the top left of a `size` HUD goes in `area`. `follow-cursor` is
 /// [`follow`]'s business; here it stands for the bottom centre, which is also
 /// where an `anchor="hud"` panel goes then.
-pub(crate) fn place(area: RECT, size: (i32, i32), position: Position, monitor: &Monitor) -> POINT {
+pub fn place(area: RECT, size: (i32, i32), position: Position, monitor: &Monitor) -> POINT {
     let margin = monitor.scaled(MARGIN);
     let x = match position {
         Position::TopLeft | Position::CenterLeft | Position::BottomLeft => area.left + margin,
@@ -318,7 +318,7 @@ pub(crate) fn place(area: RECT, size: (i32, i32), position: Position, monitor: &
 
 /// Where a `size` HUD goes beside the pointer at `pointer`: below and to the
 /// right of it, or on the other side where that would leave the screen.
-pub(super) fn follow(pointer: POINT, size: (i32, i32), monitor: &Monitor) -> POINT {
+pub fn follow(pointer: POINT, size: (i32, i32), monitor: &Monitor) -> POINT {
     let offset = monitor.scaled(CURSOR_OFFSET);
     let area = monitor.work_area;
     let x = if pointer.x + offset + size.0 <= area.right {

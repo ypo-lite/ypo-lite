@@ -6,17 +6,18 @@
 //! in [`Settings::warnings`] and the rest of the file still loads.
 
 use std::fmt;
-use std::fmt::Write as _;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use y_core::hotkey::Hotkey;
 use y_core::overlay::Color;
-use y_core::xml::{self, Document, Element};
+use y_core::xml::{self, Document, Element, Writer};
 
 use crate::appearance;
-use crate::controls::{self, Controls, KeysGroup, Layer, Plain};
+use crate::controls::{self, Controls, KeysGroup, Layer, Plain, Scope};
 use crate::input::{Input, MouseBinding};
+use crate::kept::{self, Kept, Note, Part};
 use crate::model::{Action, Target};
 
 /// The file y-coustic looks for.
@@ -36,6 +37,9 @@ pub const DEFAULT_TIMEOUT: u32 = 1200;
 /// How long the HUD takes to fade in and out, in milliseconds; `0` is no fade.
 pub const FADE_RANGE: std::ops::RangeInclusive<u32> = 0..=1000;
 
+/// Whether this process has already kept the original file as a backup.
+static BACKED_UP: AtomicBool = AtomicBool::new(false);
+
 /// Everything the configuration file says.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Settings {
@@ -54,6 +58,9 @@ pub struct Settings {
     pub mixer: MixerConfig,
     pub tray: TrayConfig,
     pub hud: HudConfig,
+    /// What a save gives back besides the values: comments, attributes and
+    /// elements y-coustic cannot use. See [`crate::kept`].
+    pub kept: Kept,
     /// Problems that did not stop the file from loading, one line each.
     pub warnings: Vec<String>,
 }
@@ -474,6 +481,7 @@ impl Settings {
             mixer: MixerConfig::default(),
             tray: TrayConfig::default(),
             hud: HudConfig::default(),
+            kept: Kept::default(),
             warnings: Vec::new(),
         }
     }
@@ -502,6 +510,7 @@ impl Settings {
         let mut reader = Reader::default();
         let root = document.root();
         reader.sections(root);
+        reader.keep(&document);
 
         let step = reader.step(root);
         let hotkeys = reader.hotkeys(root);
@@ -528,6 +537,7 @@ impl Settings {
             mixer,
             tray,
             hud,
+            kept: reader.kept,
             warnings: reader.warnings,
         })
     }
@@ -568,100 +578,193 @@ impl Settings {
     }
 
     /// Renders this configuration as `y-coustic.xml`, in the shape
-    /// [`Settings::parse`] reads back.
-    ///
-    /// Comments and layout of a hand-edited file are not preserved: this is a
-    /// generator, not an editor of the text (as `y-snap`'s). Noted here
-    /// rather than silently.
+    /// [`Settings::parse`] reads back, with the comments, unknown attributes
+    /// and unusable elements the file had ([`crate::kept`]). Sections come in a
+    /// fixed order, each with its attributes in a fixed order; the empty lines
+    /// of the original are kept where they were, the others are the writer's.
+    /// Writing what was read gives the same bytes again.
     pub fn to_xml(&self) -> String {
-        let mut out = String::new();
-        out.push_str("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<y-coustic>\n");
+        let mut writer = Writer::new();
+        writer.declaration();
+        kept::write_notes(&mut writer, &self.kept.prolog);
+        writer.open("y-coustic");
+        for name in kept::SECTIONS {
+            self.write_section(&mut writer, name);
+        }
+        kept::write_notes(&mut writer, &self.kept.root_tail);
+        writer.close();
+        // Comments after the root element go on lines of their own.
+        kept::write_notes(&mut writer, &self.kept.epilog);
+        writer.finish()
+    }
 
-        let _ = writeln!(out, "\t<volume step=\"{}\"/>\n", self.step);
-
-        let _ = writeln!(
-            out,
-            "\t<watch master=\"{}\" microphone=\"{}\"/>\n",
-            self.watch.master.name(),
-            self.watch.microphone.name()
-        );
-
-        if !self.controls.is_empty() {
-            self.controls.write_xml(&mut out);
+    /// One section, preceded by its comments and an empty line. A section
+    /// that is empty by default is left out unless the file had it.
+    fn write_section(&self, w: &mut Writer, name: &str) {
+        let kept_section = self.kept.section(name);
+        let present = kept_section.is_some();
+        let wanted = match name {
+            "controls" => !self.controls.is_empty(),
+            "mouse" => !self.mouse.is_empty(),
+            "colors" => self.hud.colors != Colors::default(),
+            _ => true,
+        };
+        if !wanted && !present {
+            return;
         }
 
-        out.push_str("\t<hotkeys>\n");
-        for binding in &self.hotkeys {
-            let _ = write!(
-                out,
-                "\t\t<hotkey key=\"{}\" action=\"{}\"",
-                binding.hotkey,
-                binding.action.name()
-            );
+        let part = kept_section.map(|section| &section.part);
+        w.blank_line();
+        if let Some(part) = part {
+            kept::write_notes(w, &part.lead);
+            if part.blank_before {
+                w.blank_line();
+            }
+        }
+        w.open(name);
+        match name {
+            "volume" => w.attr("step", &self.step.to_string()),
+            "watch" => {
+                w.attr("master", self.watch.master.name());
+                w.attr("microphone", self.watch.microphone.name());
+            }
+            "tray" => self.write_tray_attributes(w),
+            "mixer" => {
+                w.attr("anchor", self.mixer.anchor.name());
+                w.attr("max-rows", &self.mixer.max_rows.to_string());
+                w.attr("system-sounds", &self.mixer.system_sounds.to_string());
+            }
+            "hud" => self.write_hud_attributes(w),
+            "colors" => write_tint(w, &self.hud.colors.all),
+            _ => {}
+        }
+        kept::write_extra(w, part);
+
+        match name {
+            "controls" => self.write_controls(w),
+            "hotkeys" => self.write_hotkeys(w),
+            "mouse" => self.write_mouse(w),
+            "colors" => write_kind_colors(w, &self.hud.colors),
+            _ => {}
+        }
+        if let Some(section) = kept_section {
+            kept::write_notes(w, &section.tail);
+        }
+        w.close();
+    }
+
+    fn write_tray_attributes(&self, w: &mut Writer) {
+        w.attr("hover-delay", &self.tray.hover_delay.to_string());
+        w.attr("click", self.tray.click.name());
+        w.attr("double-click", self.tray.double_click.name());
+        w.attr("middle-click", self.tray.middle_click.name());
+        w.attr("wheel", &self.tray.wheel.to_string());
+        w.attr("icon", self.tray.icon.name());
+    }
+
+    fn write_hud_attributes(&self, w: &mut Writer) {
+        let hud = &self.hud;
+        w.attr("style", hud.style.name());
+        w.attr("position", hud.position.name());
+        w.attr("timeout", &hud.timeout.to_string());
+        w.attr("interactive", &hud.interactive.to_string());
+        w.attr("scale", &hud.scale.to_string());
+        w.attr("radius", &hud.radius.to_string());
+        w.attr("border", &hud.border.to_string());
+        w.attr("opacity", &hud.opacity.to_string());
+        w.attr("font", &hud.font);
+        w.attr("fade", &hud.fade.to_string());
+    }
+
+    fn write_controls(&self, w: &mut Writer) {
+        for (index, group) in self.controls.keys.iter().enumerate() {
+            let kept = self.kept.keys.get(index);
+            let part = kept.map(|group| &group.part);
+            // A group with children of its own is a block: set it apart.
+            if index > 0 && matches!(&group.scope, Scope::Layers(layers) if !layers.is_empty()) {
+                w.blank_line();
+            }
+            kept::open_entry(w, "keys", part);
+            for (name, key) in [("up", group.up), ("down", group.down), ("mute", group.mute)] {
+                if let Some(key) = key {
+                    w.attr(name, &key.to_string());
+                }
+            }
+            if group.has_media_keys() {
+                w.attr("plain", group.plain.name());
+            }
+            if let Scope::Target(target) = &group.scope {
+                w.attr("target", target.name());
+            }
+            kept::write_extra(w, part);
+            if let Scope::Layers(layers) = &group.scope {
+                for (at, layer) in layers.iter().enumerate() {
+                    let layer_part = kept.and_then(|group| group.layers.get(at));
+                    kept::open_entry(w, "layer", layer_part);
+                    w.attr("mod", &controls::format_modifiers(layer.modifiers));
+                    w.attr("target", layer.target.name());
+                    kept::write_extra(w, layer_part);
+                    w.close();
+                }
+            }
+            if let Some(kept) = kept {
+                kept::write_notes(w, &kept.tail);
+            }
+            w.close();
+        }
+    }
+
+    fn write_hotkeys(&self, w: &mut Writer) {
+        for (index, binding) in self.hotkeys.iter().enumerate() {
+            kept::open_entry(w, "hotkey", self.kept.hotkeys.get(index));
+            w.attr("key", &binding.hotkey.to_string());
+            w.attr("action", binding.action.name());
             if binding.target != Target::Master {
-                let _ = write!(out, " target=\"{}\"", binding.target.name());
+                w.attr("target", binding.target.name());
             }
             if let Action::SetVolume(percent) = binding.action {
-                let _ = write!(out, " value=\"{percent}\"");
+                w.attr("value", &percent.to_string());
             }
-            out.push_str("/>\n");
+            kept::write_extra(w, self.kept.hotkeys.get(index));
+            w.close();
         }
-        out.push_str("\t</hotkeys>\n\n");
+    }
 
-        if !self.mouse.is_empty() {
-            out.push_str("\t<mouse>\n");
-            for binding in &self.mouse {
-                write_mouse_binding(&mut out, binding);
+    fn write_mouse(&self, w: &mut Writer) {
+        for (index, binding) in self.mouse.iter().enumerate() {
+            let part = self.kept.mouse.get(index);
+            let modifiers = controls::format_modifiers(binding.modifiers);
+            match (binding.input, binding.action) {
+                (Input::Wheel | Input::WheelTilt, _) => {
+                    kept::open_entry(w, "wheel", part);
+                    w.attr("mod", &modifiers);
+                    if binding.input == Input::WheelTilt {
+                        w.attr("axis", "horizontal");
+                    }
+                    if binding.target != Target::Master {
+                        w.attr("target", binding.target.name());
+                    }
+                    if binding.invert {
+                        w.attr("invert", "true");
+                    }
+                }
+                (input, action) => {
+                    kept::open_entry(w, "button", part);
+                    w.attr("button", input.button_name().unwrap_or("left"));
+                    w.attr("mod", &modifiers);
+                    let action = action.unwrap_or(Action::Mute);
+                    w.attr("action", action.name());
+                    if let Action::SetVolume(percent) = action {
+                        w.attr("value", &percent.to_string());
+                    }
+                    if binding.target != Target::Master && action != Action::Mixer {
+                        w.attr("target", binding.target.name());
+                    }
+                }
             }
-            out.push_str("\t</mouse>\n\n");
+            kept::write_extra(w, part);
+            w.close();
         }
-
-        let _ = writeln!(
-            out,
-            "\t<tray hover-delay=\"{}\" click=\"{}\" double-click=\"{}\" \
-             middle-click=\"{}\" wheel=\"{}\" icon=\"{}\"/>\n",
-            self.tray.hover_delay,
-            self.tray.click.name(),
-            self.tray.double_click.name(),
-            self.tray.middle_click.name(),
-            self.tray.wheel,
-            self.tray.icon.name()
-        );
-
-        let _ = writeln!(
-            out,
-            "\t<mixer anchor=\"{}\" max-rows=\"{}\" system-sounds=\"{}\"/>\n",
-            self.mixer.anchor.name(),
-            self.mixer.max_rows,
-            self.mixer.system_sounds
-        );
-
-        let _ = writeln!(
-            out,
-            "\t<hud style=\"{}\" position=\"{}\" timeout=\"{}\" interactive=\"{}\" \
-             scale=\"{}\" radius=\"{}\" border=\"{}\" opacity=\"{}\" font=\"{}\" fade=\"{}\"/>",
-            self.hud.style.name(),
-            self.hud.position.name(),
-            self.hud.timeout,
-            self.hud.interactive,
-            self.hud.scale,
-            self.hud.radius,
-            self.hud.border,
-            self.hud.opacity,
-            self.hud
-                .font
-                .replace('&', "&amp;")
-                .replace('"', "&quot;")
-                .replace('<', "&lt;"),
-            self.hud.fade
-        );
-
-        if self.hud.colors != Colors::default() {
-            write_colors(&mut out, &self.hud.colors);
-        }
-
-        out.push_str("</y-coustic>\n");
-        out
     }
 
     /// Writes [`Settings::to_xml`] to [`Settings::path`].
@@ -671,47 +774,34 @@ impl Settings {
 
     /// Writes [`Settings::to_xml`] to `path`, creating the folder: on a new
     /// machine `%APPDATA%\Ypo-Lite` does not exist yet.
+    ///
+    /// The text goes to a temporary file beside `path` and is renamed over it, so
+    /// a crash or a full disk never leaves half a file where the user's was. The
+    /// first save of a process also keeps what was there as `y-coustic.xml.bak`.
     pub fn save_to(&self, path: &Path) -> io::Result<()> {
         if let Some(directory) = path.parent() {
             std::fs::create_dir_all(directory)?;
         }
-        std::fs::write(path, self.to_xml())
+        let backup = path.is_file() && !BACKED_UP.swap(true, Ordering::Relaxed);
+        self.write_safely(path, backup)
     }
-}
 
-/// One `<wheel>` or `<button>` line, in the shape the reader takes.
-fn write_mouse_binding(out: &mut String, binding: &MouseBinding) {
-    let modifiers = controls::format_modifiers(binding.modifiers);
-    match (binding.input, binding.action) {
-        (Input::Wheel | Input::WheelTilt, _) => {
-            let _ = write!(out, "\t\t<wheel mod=\"{modifiers}\"");
-            if binding.input == Input::WheelTilt {
-                out.push_str(" axis=\"horizontal\"");
-            }
-            if binding.target != Target::Master {
-                let _ = write!(out, " target=\"{}\"", binding.target.name());
-            }
-            if binding.invert {
-                out.push_str(" invert=\"true\"");
-            }
+    /// [`Settings::save_to`] with the backup decided by the caller.
+    fn write_safely(&self, path: &Path, backup: bool) -> io::Result<()> {
+        if backup {
+            let mut backup = path.as_os_str().to_owned();
+            backup.push(".bak");
+            std::fs::copy(path, backup)?;
         }
-        (input, action) => {
-            let _ = write!(
-                out,
-                "\t\t<button button=\"{}\" mod=\"{modifiers}\"",
-                input.button_name().unwrap_or("left")
-            );
-            let action = action.unwrap_or(Action::Mute);
-            let _ = write!(out, " action=\"{}\"", action.name());
-            if let Action::SetVolume(percent) = action {
-                let _ = write!(out, " value=\"{percent}\"");
-            }
-            if binding.target != Target::Master && action != Action::Mixer {
-                let _ = write!(out, " target=\"{}\"", binding.target.name());
-            }
-        }
+
+        let mut temporary = path.as_os_str().to_owned();
+        temporary.push(".tmp");
+        let temporary = PathBuf::from(temporary);
+        std::fs::write(&temporary, self.to_xml())?;
+        std::fs::rename(&temporary, path).inspect_err(|_| {
+            let _ = std::fs::remove_file(&temporary);
+        })
     }
-    out.push_str("/>\n");
 }
 
 /// Where the configuration file lives, in the order the places are tried:
@@ -779,16 +869,146 @@ fn expand(text: &str) -> String {
     expanded
 }
 
+/// The attributes each element reads: what `check` accepts, and what a save
+/// does not need to keep as an extra.
+const VOLUME_ATTRS: &[&str] = &["step"];
+const WATCH_ATTRS: &[&str] = &["master", "microphone"];
+const HOTKEY_ATTRS: &[&str] = &["key", "action", "target", "value"];
+const KEYS_ATTRS: &[&str] = &["up", "down", "mute", "plain", "target"];
+const LAYER_ATTRS: &[&str] = &["mod", "target"];
+const WHEEL_ATTRS: &[&str] = &["mod", "target", "invert", "axis"];
+const BUTTON_ATTRS: &[&str] = &["button", "mod", "action", "target", "value"];
+const TRAY_ATTRS: &[&str] = &[
+    "hover-delay",
+    "click",
+    "double-click",
+    "middle-click",
+    "wheel",
+    "icon",
+];
+const MIXER_ATTRS: &[&str] = &["anchor", "max-rows", "system-sounds"];
+const HUD_ATTRS: &[&str] = &[
+    "style",
+    "position",
+    "timeout",
+    "interactive",
+    "scale",
+    "radius",
+    "border",
+    "opacity",
+    "font",
+    "fade",
+];
+const COLOR_ATTRS: &[&str] = &["panel", "text", "track", "accent", "muted"];
+
+/// The attributes the section element `name` reads. The three lists read none
+/// of their own.
+fn section_attrs(name: &str) -> &'static [&'static str] {
+    match name {
+        "volume" => VOLUME_ATTRS,
+        "watch" => WATCH_ATTRS,
+        "tray" => TRAY_ATTRS,
+        "mixer" => MIXER_ATTRS,
+        "hud" => HUD_ATTRS,
+        "colors" => COLOR_ATTRS,
+        _ => &[],
+    }
+}
+
+fn notes_of<'a>(comments: impl Iterator<Item = xml::Comment<'a>>) -> Vec<Note> {
+    comments
+        .map(|comment| Note::new(comment.text(), comment.blank_before()))
+        .collect()
+}
+
 /// Walks the document, collecting warnings as it goes.
 #[derive(Default)]
 struct Reader {
     warnings: Vec<String>,
+    kept: Kept,
 }
 
 impl Reader {
     fn warn(&mut self, element: Element<'_>, message: impl fmt::Display) {
         self.warnings
             .push(format!("line {}: {message}", element.line()));
+    }
+
+    /// Collects what a save must give back besides the values (see
+    /// [`crate::kept`]): the comments at every level, the attributes no one
+    /// reads, and the elements no one can use, which become comments. Run
+    /// before the sections are read, which add their lists' parts and tails.
+    fn keep(&mut self, document: &Document) {
+        let root = document.root();
+        self.kept.prolog = notes_of(document.prolog_comments());
+        self.kept.epilog = notes_of(document.epilog_comments());
+
+        let mut pending: Vec<Note> = Vec::new();
+        for node in root.children_with_comments() {
+            let element = match node {
+                xml::Node::Comment(comment) => {
+                    pending.push(Note::new(comment.text(), comment.blank_before()));
+                    continue;
+                }
+                xml::Node::Element(element) => element,
+            };
+            let name = element.name();
+            if !kept::SECTIONS.contains(&name) || self.kept.section(name).is_some() {
+                // Unknown, or a second copy: the first is the one read.
+                pending.push(Note::new(kept::element_xml(element), element.blank_before()));
+                continue;
+            }
+            let part = Part {
+                lead: std::mem::take(&mut pending),
+                blank_before: element.blank_before(),
+                extra: kept::unknown_attributes(element, section_attrs(name)),
+            };
+            let tail = if kept::LISTS.contains(&name) {
+                Vec::new()
+            } else {
+                // A section with no entries: whatever comments it holds.
+                notes_of(element.children_with_comments().filter_map(|node| match node {
+                    xml::Node::Comment(comment) => Some(comment),
+                    xml::Node::Element(_) => None,
+                }))
+            };
+            *self.kept.section_mut(name) = kept::Section { part, tail };
+        }
+        self.kept.root_tail = pending;
+    }
+
+    /// The entries of a list section, each with what goes with it. `read`
+    /// gives the value and the attributes it reads, or `None` after a
+    /// warning: the element is then kept as a comment, ahead of the next
+    /// entry. The second value is the comments after the last entry.
+    fn walk<T>(
+        &mut self,
+        section: Element<'_>,
+        mut read: impl FnMut(&mut Self, Element<'_>) -> Option<(T, &'static [&'static str])>,
+    ) -> (Vec<(T, Part)>, Vec<Note>) {
+        let mut items = Vec::new();
+        let mut pending: Vec<Note> = Vec::new();
+        for node in section.children_with_comments() {
+            match node {
+                xml::Node::Comment(comment) => {
+                    pending.push(Note::new(comment.text(), comment.blank_before()));
+                }
+                xml::Node::Element(element) => match read(self, element) {
+                    Some((value, known)) => {
+                        let part = Part {
+                            lead: std::mem::take(&mut pending),
+                            blank_before: element.blank_before(),
+                            extra: kept::unknown_attributes(element, known),
+                        };
+                        items.push((value, part));
+                    }
+                    None => {
+                        pending.push(Note::new(kept::element_xml(element), element.blank_before()))
+                    }
+                },
+            }
+        }
+        (items, pending)
     }
 
     /// Classifies the root's children: the sections read, and the unknown. A second
@@ -882,7 +1102,7 @@ impl Reader {
         let Some(element) = root.child("volume") else {
             return DEFAULT_STEP;
         };
-        self.check(element, &["step"]);
+        self.check(element, VOLUME_ATTRS);
         self.number(element, "step", &STEP_RANGE, DEFAULT_STEP)
     }
 
@@ -891,18 +1111,18 @@ impl Reader {
             return Vec::new();
         };
 
-        let mut bindings = Vec::new();
-        for element in section.children() {
+        let (items, tail) = self.walk(section, |this, element| {
             if element.name() != "hotkey" {
                 let name = element.name();
-                self.warn(element, format!("<{name}> is not a <hotkey>"));
-                continue;
+                this.warn(element, format!("<{name}> is not a <hotkey>"));
+                return None;
             }
-            self.check(element, &["key", "action", "target", "value"]);
-            if let Some(binding) = self.binding(element) {
-                bindings.push(binding);
-            }
-        }
+            this.check(element, HOTKEY_ATTRS);
+            this.binding(element).map(|binding| (binding, HOTKEY_ATTRS))
+        });
+        self.kept.section_mut("hotkeys").tail = tail;
+        let (bindings, parts) = items.into_iter().unzip();
+        self.kept.hotkeys = parts;
         bindings
     }
 
@@ -992,29 +1212,42 @@ impl Reader {
             return Controls::default();
         };
 
-        let mut controls = Controls::default();
-        for element in section.children() {
-            match element.name() {
-                "keys" => {
-                    if let Some(group) = self.keys_group(element) {
-                        controls.keys.push(group);
-                    }
-                }
-                "layer" => {
-                    if let Some(layer) = self.layer(element) {
-                        controls.layers.push(layer);
-                    }
-                }
-                name => {
-                    self.warn(element, format!("<{name}> is not a <keys> or a <layer>"));
-                }
+        let (items, tail) = self.walk(section, |this, element| match element.name() {
+            "keys" => this
+                .keys_group(element)
+                .map(|group| (group, KEYS_ATTRS)),
+            "layer" => {
+                this.warn(
+                    element,
+                    "a <layer> belongs inside a <keys>: it is ignored here, move it into the group it is for",
+                );
+                None
             }
+            name => {
+                this.warn(element, format!("<{name}> is not a <keys>"));
+                None
+            }
+        });
+        self.kept.section_mut("controls").tail = tail;
+
+        let mut controls = Controls::default();
+        self.kept.keys.clear();
+        for ((group, layers, group_tail), part) in items {
+            controls.keys.push(group);
+            self.kept.keys.push(kept::GroupPart {
+                part,
+                layers,
+                tail: group_tail,
+            });
         }
         controls
     }
 
-    fn keys_group(&mut self, element: Element<'_>) -> Option<KeysGroup> {
-        self.check(element, &["up", "down", "mute", "plain"]);
+    /// One `<keys>`: its keys, and what they control (a `target`, or `<layer>`
+    /// children of its own). The `Part`s of the layers and the comments after
+    /// them come with it, for what a save gives back.
+    fn keys_group(&mut self, element: Element<'_>) -> Option<(KeysGroup, Vec<Part>, Vec<Note>)> {
+        self.check(element, KEYS_ATTRS);
 
         let key = |this: &mut Self, name: &str| -> Option<Hotkey> {
             let text = element.attr(name)?;
@@ -1039,16 +1272,52 @@ impl Reader {
                 Plain::Windows
             }),
         };
-        Some(KeysGroup {
-            up,
-            down,
-            mute,
-            plain,
-        })
+
+        let (items, tail) = self.walk(element, |this, child| {
+            if child.name() != "layer" {
+                let name = child.name();
+                this.warn(child, format!("<{name}> is not a <layer>"));
+                return None;
+            }
+            this.layer(child).map(|layer| (layer, LAYER_ATTRS))
+        });
+        let (layers, parts): (Vec<Layer>, Vec<Part>) = items.into_iter().unzip();
+
+        let target = match element.attr("target") {
+            None => None,
+            Some(name) => Target::from_name(name).or_else(|| {
+                self.warn(element, format!("unknown target {name:?}"));
+                None
+            }),
+        };
+        let scope = match (layers.is_empty(), target) {
+            (false, Some(_)) => {
+                self.warn(
+                    element,
+                    "a <keys> with <layer>s of its own ignores its target: the layers say what it controls",
+                );
+                Scope::Layers(layers)
+            }
+            (false, None) => Scope::Layers(layers),
+            (true, Some(target)) => Scope::Target(target),
+            // Controls nothing: `expand` says so, once, with the group's keys.
+            (true, None) => Scope::Layers(Vec::new()),
+        };
+        Some((
+            KeysGroup {
+                up,
+                down,
+                mute,
+                plain,
+                scope,
+            },
+            parts,
+            tail,
+        ))
     }
 
     fn layer(&mut self, element: Element<'_>) -> Option<Layer> {
-        self.check(element, &["mod", "target"]);
+        self.check(element, LAYER_ATTRS);
 
         let modifiers = match element.attr("mod") {
             None => 0,
@@ -1078,32 +1347,32 @@ impl Reader {
             return Vec::new();
         };
 
-        let mut bindings: Vec<MouseBinding> = Vec::new();
-        for element in section.children() {
-            let binding = match element.name() {
-                "wheel" => self.wheel(element),
-                "button" => self.button(element),
+        let mut seen: Vec<(Input, u32)> = Vec::new();
+        let (items, tail) = self.walk(section, |this, element| {
+            let (binding, known) = match element.name() {
+                "wheel" => (this.wheel(element)?, WHEEL_ATTRS),
+                "button" => (this.button(element)?, BUTTON_ATTRS),
                 name => {
-                    self.warn(element, format!("<{name}> is not a <wheel> or a <button>"));
-                    None
+                    this.warn(element, format!("<{name}> is not a <wheel> or a <button>"));
+                    return None;
                 }
             };
-            let Some(binding) = binding else { continue };
 
             // The first one wins at run time; say so rather than keep a
             // binding that can never fire.
-            if bindings
-                .iter()
-                .any(|b| b.input == binding.input && b.modifiers == binding.modifiers)
-            {
-                self.warn(
+            if seen.contains(&(binding.input, binding.modifiers)) {
+                this.warn(
                     element,
                     "an earlier binding already uses this input with these modifiers, ignoring it",
                 );
-                continue;
+                return None;
             }
-            bindings.push(binding);
-        }
+            seen.push((binding.input, binding.modifiers));
+            Some((binding, known))
+        });
+        self.kept.section_mut("mouse").tail = tail;
+        let (bindings, parts) = items.into_iter().unzip();
+        self.kept.mouse = parts;
         bindings
     }
 
@@ -1148,7 +1417,7 @@ impl Reader {
     }
 
     fn wheel(&mut self, element: Element<'_>) -> Option<MouseBinding> {
-        self.check(element, &["mod", "target", "invert", "axis"]);
+        self.check(element, WHEEL_ATTRS);
 
         let input = match element.attr("axis").map(|a| a.trim().to_ascii_lowercase()) {
             None => Input::Wheel,
@@ -1184,7 +1453,7 @@ impl Reader {
     }
 
     fn button(&mut self, element: Element<'_>) -> Option<MouseBinding> {
-        self.check(element, &["button", "mod", "action", "target", "value"]);
+        self.check(element, BUTTON_ATTRS);
 
         let Some(name) = element.attr("button") else {
             self.warn(element, "a <button> needs a button attribute");
@@ -1223,7 +1492,7 @@ impl Reader {
         let Some(element) = root.child("watch") else {
             return defaults;
         };
-        self.check(element, &["master", "microphone"]);
+        self.check(element, WATCH_ATTRS);
 
         let mode = |this: &mut Self, name: &str, default: WatchMode| match element.attr(name) {
             None => default,
@@ -1243,10 +1512,7 @@ impl Reader {
         let Some(element) = root.child("tray") else {
             return defaults;
         };
-        self.check(
-            element,
-            &["hover-delay", "click", "double-click", "middle-click", "wheel", "icon"],
-        );
+        self.check(element, TRAY_ATTRS);
         let action = |this: &mut Self, name: &str, default: TrayAction| match element.attr(name) {
             None => default,
             Some(text) => TrayAction::from_name(text).unwrap_or_else(|| {
@@ -1286,7 +1552,7 @@ impl Reader {
         let Some(element) = root.child("mixer") else {
             return defaults;
         };
-        self.check(element, &["anchor", "max-rows", "system-sounds"]);
+        self.check(element, MIXER_ATTRS);
 
         let anchor = match element.attr("anchor") {
             None => defaults.anchor,
@@ -1323,8 +1589,7 @@ impl Reader {
         let Some(element) = root.child("colors") else {
             return Colors::default();
         };
-        const ATTRIBUTES: &[&str] = &["panel", "text", "track", "accent", "muted"];
-        self.check(element, ATTRIBUTES);
+        self.check(element, COLOR_ATTRS);
         let mut colors = Colors {
             all: self.tint(element),
             ..Colors::default()
@@ -1339,7 +1604,7 @@ impl Reader {
                     continue;
                 }
             };
-            self.check(child, ATTRIBUTES);
+            self.check(child, COLOR_ATTRS);
             *slot = self.tint(child);
         }
         colors
@@ -1368,21 +1633,7 @@ impl Reader {
         let Some(element) = root.child("hud") else {
             return defaults;
         };
-        self.check(
-            element,
-            &[
-                "style",
-                "position",
-                "timeout",
-                "interactive",
-                "scale",
-                "radius",
-                "border",
-                "opacity",
-                "font",
-                "fade",
-            ],
-        );
+        self.check(element, HUD_ATTRS);
 
         let position = match element.attr("position") {
             None => defaults.position,
@@ -1418,17 +1669,21 @@ impl Reader {
     }
 }
 
-/// `#RRGGBB`, `#RRGGBBAA` when not opaque: what [`Color::parse`] reads back.
+/// `#RRGGBB`, or `#RRGGBBAA` when not fully opaque: what [`Color::parse`]
+/// reads back.
 fn color_hex(color: Color) -> String {
     if color.a == 255 {
         format!("#{:02X}{:02X}{:02X}", color.r, color.g, color.b)
     } else {
-        format!("#{:02X}{:02X}{:02X}{:02X}", color.r, color.g, color.b, color.a)
+        format!(
+            "#{:02X}{:02X}{:02X}{:02X}",
+            color.r, color.g, color.b, color.a
+        )
     }
 }
 
-fn tint_attributes(tint: &Tint) -> String {
-    let mut out = String::new();
+/// The colours a tint sets, as attributes.
+fn write_tint(w: &mut Writer, tint: &Tint) {
     for (name, color) in [
         ("panel", tint.panel),
         ("text", tint.text),
@@ -1437,30 +1692,25 @@ fn tint_attributes(tint: &Tint) -> String {
         ("muted", tint.muted),
     ] {
         if let Some(color) = color {
-            let _ = write!(out, " {name}=\"{}\"", color_hex(color));
+            w.attr(name, &color_hex(color));
         }
     }
-    out
 }
 
-fn write_colors(out: &mut String, colors: &Colors) {
-    let kinds = [
+/// The `<master>`, `<microphone>` and `<application>` children that set
+/// anything.
+fn write_kind_colors(w: &mut Writer, colors: &Colors) {
+    for (name, tint) in [
         ("master", &colors.master),
         ("microphone", &colors.microphone),
         ("application", &colors.application),
-    ];
-    let attributes = tint_attributes(&colors.all);
-    if kinds.iter().all(|(_, tint)| **tint == Tint::default()) {
-        let _ = writeln!(out, "\t<colors{attributes}/>\n");
-        return;
-    }
-    let _ = writeln!(out, "\t<colors{attributes}>");
-    for (name, tint) in kinds {
+    ] {
         if *tint != Tint::default() {
-            let _ = writeln!(out, "\t\t<{name}{}/>", tint_attributes(tint));
+            w.open(name);
+            write_tint(w, tint);
+            w.close();
         }
     }
-    out.push_str("\t</colors>\n\n");
 }
 
 #[cfg(test)]
@@ -1512,16 +1762,18 @@ mod tests {
         assert_eq!(settings.watch, Watch::default());
         assert_eq!(settings.hud, HudConfig::default());
         assert_eq!(settings.controls.keys.len(), 3);
-        assert_eq!(settings.controls.layers.len(), 2);
+        assert_eq!(settings.controls.keys[0].scope.layers().len(), 2);
+        assert_eq!(settings.controls.keys[2].scope, Scope::Target(Target::Focused));
         assert_eq!(settings.hotkeys.len(), 5);
         assert_eq!(settings.mouse.len(), 5);
         assert_eq!(settings.mixer, MixerConfig::default());
         assert_eq!(settings.tray, TrayConfig::default());
 
         // 3 volume keys on the Shift layer only (plain="windows"), plus
-        // 3 numpad keys x 2 layers, plus 2 keys x 2 layers, plus the 5 singles.
+        // 3 numpad keys x 2 layers, plus the 2 keys aimed at the focused
+        // application, plus the 5 singles.
         let bindings = settings.bindings();
-        assert_eq!(bindings.len(), 3 + 6 + 4 + 5);
+        assert_eq!(bindings.len(), 3 + 6 + 2 + 5);
 
         // Every action, both targets and the media route show up.
         for action in [
@@ -1900,17 +2152,19 @@ mod tests {
     #[test]
     fn reads_controls_and_expands_them() {
         let settings = load(&doc(r#"<controls>
-                <keys up="VolumeUp" down="VolumeDown" mute="VolumeMute" plain="replace"/>
-                <keys up="F11" mute="F10"/>
-                <layer mod="none" target="master"/>
-                <layer mod="Shift" target="mic"/>
+                <keys up="VolumeUp" down="VolumeDown" mute="VolumeMute" plain="replace">
+                    <layer mod="none" target="master"/>
+                    <layer mod="Shift" target="mic"/>
+                </keys>
+                <keys up="F11" mute="F10" target="mic"/>
             </controls>"#));
         assert!(settings.warnings.is_empty(), "{:?}", settings.warnings);
         assert_eq!(settings.controls.keys.len(), 2);
-        assert_eq!(settings.controls.layers.len(), 2);
+        assert_eq!(settings.controls.keys[0].scope.layers().len(), 2);
+        assert_eq!(settings.controls.keys[1].scope, Scope::Target(Target::Mic));
         assert!(settings.hotkeys.is_empty(), "the singles stay as written");
-        // 3 media keys x 2 layers, 2 keys x 2 layers.
-        assert_eq!(settings.bindings().len(), 10);
+        // 3 media keys x 2 layers, 2 keys x the one target.
+        assert_eq!(settings.bindings().len(), 8);
         assert!(settings.replaces_windows_volume());
     }
 
@@ -1919,25 +2173,86 @@ mod tests {
         let settings = load(&doc(r#"<controls>
                 <keys up="Win+Nonsense" down="F12"/>
                 <keys/>
-                <keys up="F1" plain="both"/>
-                <keys up="F2" colour="red"/>
-                <layer mod="Hyper"/>
-                <layer mod="Ctrl" target="speakers"/>
+                <keys up="F1" plain="both" target="mic"/>
+                <keys up="F2" colour="red" target="mic"/>
+                <keys up="F3">
+                    <layer mod="Hyper"/>
+                    <layer mod="Ctrl" target="speakers"/>
+                    <layer mod="Ctrl"/>
+                    <frobnicate/>
+                </keys>
                 <layer mod="Ctrl"/>
                 <frobnicate/>
             </controls>"#));
-        // Bad key, empty group, bad plain, unknown attribute, bad mod, bad
-        // target, unknown child.
-        assert_eq!(settings.warnings.len(), 7, "{:?}", settings.warnings);
-        assert_eq!(settings.controls.keys.len(), 3);
-        assert_eq!(settings.controls.layers.len(), 1);
+        // Bad key, a group that controls nothing, empty group, bad plain,
+        // unknown attribute, bad mod, bad target, unknown child of a group, a
+        // layer outside a group, unknown child of <controls>.
+        assert_eq!(settings.warnings.len(), 10, "{:?}", settings.warnings);
+        assert_eq!(settings.controls.keys.len(), 4);
+        assert_eq!(settings.controls.keys[3].scope.layers().len(), 1);
+    }
+
+    #[test]
+    fn a_layer_outside_a_group_is_warned_about_and_kept_as_a_comment() {
+        let original = load(&doc(r#"<controls>
+                <keys up="F1" target="master"/>
+                <layer mod="Shift" target="mic"/>
+            </controls>"#));
+        assert_eq!(original.warnings.len(), 1, "{:?}", original.warnings);
+        assert!(original.warnings[0].contains("belongs inside a <keys>"));
+        // The group is not crossed with it.
+        assert_eq!(original.bindings().len(), 1);
+
+        let text = original.to_xml();
+        assert!(text.contains(r#"<!-- <layer mod="Shift" target="mic"/> -->"#), "{text}");
+        let again = load(&text);
+        assert!(again.warnings.is_empty(), "{:?}", again.warnings);
+    }
+
+    #[test]
+    fn a_group_with_layers_and_a_target_follows_its_layers() {
+        let settings = load(&doc(r#"<controls>
+                <keys up="F1" target="mic"><layer mod="Ctrl" target="focused"/></keys>
+            </controls>"#));
+        assert_eq!(settings.warnings.len(), 1, "{:?}", settings.warnings);
+        let bindings = settings.bindings();
+        assert_eq!(bindings.len(), 1);
+        assert_eq!(bindings[0].target, Target::Focused);
+        // Written back as what it means: its layers.
+        let text = settings.to_xml();
+        assert!(!text.contains(r#"target="mic""#), "{text}");
+    }
+
+    #[test]
+    fn each_group_keeps_its_own_layers_through_a_save() {
+        let original = load(&doc(r#"<controls>
+                <keys up="VolumeUp" plain="replace">
+                    <!-- master -->
+                    <layer mod="none" target="master"/>
+                    <layer mod="Shift" target="mic"/>
+                    <!-- after the layers -->
+                </keys>
+
+                <!-- a mute of its own -->
+                <keys mute="Win+Alt+M" target="mic"/>
+            </controls>"#));
+        assert!(original.warnings.is_empty(), "{:?}", original.warnings);
+        assert_eq!(original.kept.keys[0].layers[0].lead[0].text, "master");
+        assert_eq!(original.kept.keys[0].tail[0].text, "after the layers");
+        assert_eq!(original.kept.keys[1].part.lead[0].text, "a mute of its own");
+
+        let text = original.to_xml();
+        let again = load(&text);
+        assert!(again.warnings.is_empty(), "{:?}", again.warnings);
+        assert_eq!(values(&again), values(&original));
+        assert_eq!(again.kept.comment_count(), original.kept.comment_count());
+        assert_eq!(again.to_xml(), text);
     }
 
     #[test]
     fn a_layer_on_an_application_expands_like_any_other() {
         let settings = load(&doc(r#"<controls>
-                <keys up="F1"/>
-                <layer mod="Ctrl" target="focused"/>
+                <keys up="F1"><layer mod="Ctrl" target="focused"/></keys>
             </controls>"#));
         assert!(settings.warnings.is_empty(), "{:?}", settings.warnings);
         let bindings = settings.bindings();
@@ -1948,8 +2263,7 @@ mod tests {
     #[test]
     fn a_collision_between_a_layer_and_a_hotkey_is_reported_at_load() {
         let settings = load(&doc(r#"<controls>
-                <keys up="F1"/>
-                <layer mod="Shift" target="mic"/>
+                <keys up="F1"><layer mod="Shift" target="mic"/></keys>
             </controls>
             <hotkeys><hotkey key="Shift+F1" action="mute"/></hotkeys>"#));
         assert_eq!(settings.warnings.len(), 1, "{:?}", settings.warnings);
@@ -2101,6 +2415,136 @@ mod tests {
         }
     }
 
+
+    /// The settings without what is only about the file's text: what two
+    /// loads of the same meaning must share.
+    fn values(settings: &Settings) -> Settings {
+        let mut values = settings.clone();
+        values.kept = Kept::default();
+        values.warnings.clear();
+        values
+    }
+
+    #[test]
+    fn the_shipped_file_survives_a_load_and_a_save_with_its_comments() {
+        let shipped = include_str!("../rsc/y-coustic.xml");
+        let original = Settings::parse(PathBuf::from("test.xml"), shipped).expect("loads");
+        assert!(original.warnings.is_empty(), "{:?}", original.warnings);
+        assert!(original.kept.comment_count() > 5);
+
+        let text = original.to_xml();
+        let again = Settings::parse(PathBuf::from("test.xml"), &text).expect("loads");
+        assert!(again.warnings.is_empty(), "{:?}\n{text}", again.warnings);
+        assert_eq!(values(&again), values(&original));
+        assert_eq!(again.kept.comment_count(), original.kept.comment_count());
+        let comment = |text: &str| text.matches("<!--").count();
+        assert_eq!(comment(&text), comment(shipped));
+    }
+
+    #[test]
+    fn saving_over_a_file_keeps_a_backup_and_leaves_no_temporary() {
+        let directory = std::env::temp_dir().join(format!("y-coustic-save-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("y-coustic.xml");
+        std::fs::write(&path, "<y-coustic><volume step=\"3\"/></y-coustic>").unwrap();
+
+        let settings = load(&doc(r#"<volume step="9"/>"#));
+        settings.write_safely(&path, true).unwrap();
+
+        let saved = Settings::load_from(path.clone()).unwrap();
+        assert_eq!(saved.step, 9);
+        let backup = std::fs::read_to_string(directory.join("y-coustic.xml.bak")).unwrap();
+        assert!(backup.contains("step=\"3\""));
+        assert!(!directory.join("y-coustic.xml.tmp").exists());
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn saving_twice_gives_the_same_bytes() {
+        let shipped = include_str!("../rsc/y-coustic.xml");
+        let first = Settings::parse(PathBuf::from("test.xml"), shipped)
+            .expect("loads")
+            .to_xml();
+        let second = Settings::parse(PathBuf::from("test.xml"), &first)
+            .expect("loads")
+            .to_xml();
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn unknown_attributes_and_unusable_elements_survive_a_save() {
+        let original = load(&doc(
+            r#"<hotkeys>
+                <hotkey key="Win+F1" action="mute" colour="red"/>
+                <hotkey key="Win+F2" action="frobnicate"/>
+                <hotkey key="Win+F3" action="mute"/>
+            </hotkeys>
+            <frob size="3"/>"#,
+        ));
+        assert_eq!(original.hotkeys.len(), 2);
+        assert_eq!(original.warnings.len(), 3, "{:?}", original.warnings);
+
+        let text = original.to_xml();
+        assert!(text.contains(r#"colour="red""#), "{text}");
+        assert!(
+            text.contains(r#"<!-- <hotkey key="Win+F2" action="frobnicate"/> -->"#),
+            "{text}"
+        );
+        assert!(text.contains(r#"<!-- <frob size="3"/> -->"#), "{text}");
+
+        // The rejected elements are comments now, nothing more to lose or to
+        // warn about; the unknown attribute is kept, and still warned.
+        let again = load(&text);
+        assert_eq!(again.warnings.len(), 1, "{:?}", again.warnings);
+        assert_eq!(values(&again), values(&original));
+        assert_eq!(again.to_xml(), text);
+    }
+
+    #[test]
+    fn comments_in_each_list_stay_with_their_entry_and_the_blank_lines_stay() {
+        let original = load(&doc(
+            r#"<controls>
+                <!-- the keys -->
+                <keys up="Win+NumAdd" target="master"/>
+
+                <!-- the second group -->
+                <keys up="Win+NumSub" target="mic"/>
+                <!-- after the last group -->
+            </controls>
+            <hotkeys>
+                <!-- one -->
+                <hotkey key="Win+F1" action="mute"/>
+
+                <hotkey key="Win+F2" action="mute"/>
+            </hotkeys>
+            <mouse>
+                <!-- the wheel -->
+                <wheel mod="Alt"/>
+            </mouse>"#,
+        ));
+        assert!(original.warnings.is_empty(), "{:?}", original.warnings);
+        assert_eq!(original.kept.keys[0].part.lead[0].text, "the keys");
+        assert_eq!(original.kept.keys[1].part.lead[0].text, "the second group");
+        assert!(original.kept.keys[1].part.lead[0].blank_before);
+        assert_eq!(original.kept.hotkeys[0].lead[0].text, "one");
+        assert!(original.kept.hotkeys[1].blank_before);
+        assert_eq!(original.kept.mouse[0].lead[0].text, "the wheel");
+        assert_eq!(
+            original.kept.section("controls").unwrap().tail[0].text,
+            "after the last group"
+        );
+
+        let text = original.to_xml();
+        let again = load(&text);
+        assert_eq!(again.kept.comment_count(), original.kept.comment_count());
+        assert_eq!(again.to_xml(), text);
+        let one = text.find("<!-- one -->").unwrap();
+        let first = text.find(r#"key="Win+F1""#).unwrap();
+        assert!(one < first);
+    }
+
+
     #[test]
     fn round_trips_through_to_xml() {
         let original = load(&doc(r#"<volume step="8"/>
@@ -2117,7 +2561,7 @@ mod tests {
         let text = original.to_xml();
         let again = load(&text);
         assert!(again.warnings.is_empty(), "{:?}\n{text}", again.warnings);
-        assert_eq!(again, original);
+        assert_eq!(values(&again), values(&original));
     }
 
     #[test]

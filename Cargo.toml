@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["core", "ui-kit", "y-coustic", "y-pop", "y-pop-config", "y-snap", "y-snap-config", "y-term"]
+members = ["core", "ui-kit", "y-coustic", "y-coustic-config", "y-pop", "y-pop-config", "y-snap", "y-snap-config", "y-term"]
 # The skeleton is a self-contained reference copy, not a workspace member:
 # it must keep building on its own when copied out of the repository.
 exclude = ["skeleton"]

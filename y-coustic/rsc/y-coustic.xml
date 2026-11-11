@@ -22,10 +22,13 @@
 	<watch master="off" microphone="hud"/>
 
 	<!--
-		Keys and layers. Each <keys> group is combined with every <layer>: the
-		modifier of the layer is added to the group's keys, and the target says
-		what they then control. Targets: master, mic, focused (the application
-		of the window in front) and pointed (the one under the mouse pointer).
+		Keys and layers. A <keys> group says what it controls itself, one of two
+		ways: target="mic" (the keys control that, with no modifier held), or
+		<layer>s inside the group, each a modifier held and what the keys then
+		control. Nothing is shared between groups, so a set of keys that only does
+		one thing is a group of its own. Targets: master, mic, focused (the
+		application of the window in front) and pointed (the one under the mouse
+		pointer).
 
 		The first group is the keyboard's volume keys. plain="windows" leaves
 		the bare keys to Windows (its volume, its flyout) and takes only the
@@ -35,19 +38,28 @@
 
 		The second group is for a keyboard with a numpad. Avoid an Alt layer:
 		letting go of Alt alone afterwards focuses the window's menu bar.
+
+		A group that does one thing needs no layers, for instance a microphone mute:
+		<keys mute="Win+Alt+M" target="mic"/>
 	-->
 	<controls>
-		<keys up="VolumeUp" down="VolumeDown" mute="VolumeMute" plain="windows"/>
-		<keys up="Win+NumAdd" down="Win+NumSub" mute="Win+Numpad0"/>
+		<keys up="VolumeUp" down="VolumeDown" mute="VolumeMute" plain="windows">
+			<layer mod="none"       target="master"/>
+			<layer mod="Shift"      target="mic"/>
+			<layer mod="Ctrl"       target="focused"/>
+			<layer mod="Ctrl+Shift" target="pointed"/>
+		</keys>
 
-		<layer mod="none"  target="master"/>
-		<layer mod="Shift" target="mic"/>
-		<layer mod="Ctrl" target="focused"/>
-		<layer mod="Ctrl+Shift" target="pointed"/>
+		<keys up="Win+NumAdd" down="Win+NumSub" mute="Win+Numpad0">
+			<layer mod="none"       target="master"/>
+			<layer mod="Shift"      target="mic"/>
+			<layer mod="Ctrl"       target="focused"/>
+			<layer mod="Ctrl+Shift" target="pointed"/>
+		</keys>
 	</controls>
 
 	<!--
-		Single bindings, for whatever the layers do not cover. Actions: mixer (opens
+		Single bindings, for whatever the groups do not cover (a level, the mixer). Actions: mixer (opens
 		or closes the mixer window), volume-up,
 		volume-down, mute, set-volume (with value="0".."100"). The target is the
 		master volume; target="mic", "focused" or "pointed" for another.
@@ -115,6 +127,17 @@
 	-->
 	<hud style="bar" position="bottom-center" timeout="1200" interactive="true"
 	     scale="100" radius="10" border="0" opacity="100" font="Segoe UI" fade="0"/>
-<!--		Colours, as #RRGGBB, shared by the HUD and the mixer; none is set here, so the		Windows theme decides. panel, text, track, accent (the bar while sound is on),		muted. A <master>, <microphone> or <application> child sets the same for one		kind. The microphone stays red while live unless <microphone accent> is set.		<colors accent="#3FB950">			<microphone accent="#D9534F"/>			<application accent="#E8A33D"/>		</colors>	-->
+
+	<!--
+		Colours, as #RRGGBB, shared by the HUD and the mixer; none is set here, so the
+		Windows theme decides. panel, text, track, accent (the bar while sound is on),
+		muted. A <master>, <microphone> or <application> child sets the same for one
+		kind. The microphone stays red while live unless <microphone accent> is set.
+		
+		<colors accent="#3FB950">
+			<microphone accent="#D9534F"/>
+			<application accent="#E8A33D"/>
+		</colors>
+	-->
 
 </y-coustic>

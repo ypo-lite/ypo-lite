@@ -63,9 +63,16 @@ The volume keys are caught by a keyboard hook, which exists only if the file has
 volume keys. Buttons that never reach a keyboard hook, such as a Bluetooth
 headset's, stay Windows' and show its flyout.
 
-Layers are written as `<controls>` in the [configuration](configuration.md#controls).
+A group of keys can also do just one thing, for instance a mute of the microphone on
+keys of its own, with no layers: `<keys mute="Win+Alt+M" target="mic"/>`. Each group
+has its own layers or its own target. See `<controls>` in the
+[configuration](configuration.md#controls).
 
 ## Applications
+
+<!-- Add once taken, see screenshots.md:
+![An application on the HUD](images/y-coustic_hud_app_01.png)
+-->
 
 The `Ctrl` layer and the `Ctrl` + `Shift` layer (and their mouse bindings) change
 **one application** instead of the whole machine, the same volume you see in the
@@ -107,6 +114,9 @@ Add, remove or change them in the [configuration](configuration.md#mouse).
 
 ## The microphone
 
+![The microphone, live and muted](images/y-coustic_hud_mic_01.png)
+
+
 Give a hotkey `target="mic"` and it acts on the default microphone instead (see
 the [configuration](configuration.md#hotkeys)). Three things set it apart:
 
@@ -142,6 +152,14 @@ headset is not a volume change.
 
 ## The HUD
 
+![Light and dark](images/y-coustic_themes_01.png)
+
+<!-- Add once taken, see screenshots.md:
+![Using the HUD with the pointer](images/y-coustic_hud_use_01.gif)
+![The fade](images/y-coustic_fade_01.gif)
+![Following the pointer](images/y-coustic_follow_01.png)
+-->
+
 After each change the HUD, a small window, appears on the monitor the pointer is on,
 near the bottom by default: a speaker (with waves that follow the level, and a cross
 when muted), or a microphone (slashed when muted, with a red bar while live), a bar
@@ -176,6 +194,10 @@ is off too.
 An application's name is only written in the `bar` style; the other styles show its icon.
 
 ## The mixer
+
+<!-- Add once taken, see screenshots.md:
+![The mixer](images/y-coustic_mixer_01.gif)
+-->
 
 `Win` + `Alt` + `V`, or a left click on the tray icon, opens the mixer: the master,
 the microphone and every application that has audio, each with its level. Open it
@@ -220,6 +242,10 @@ under the pointer, else the master).
 
 ## The tray icon
 
+<!-- Add once taken, see screenshots.md:
+![Click, double-click and middle-click](images/y-coustic_clicks_01.gif)
+-->
+
 | Click | Does |
 | --- | --- |
 | Left | opens or closes the [mixer](#the-mixer) (`<tray click>`) |
@@ -232,6 +258,7 @@ The menu:
 
 | Menu item | Does |
 | --- | --- |
+| *Settings…* | opens `y-coustic-config.exe` from next to `y-coustic.exe` (one window at a time); without it, opens the file and says so |
 | *Reload configuration* | reads `y-coustic.xml` again and re-registers the hotkeys |
 | *Open configuration* | opens the file; creates it from the defaults first if it does not exist |
 | *Replace the Windows volume indicator* | shown when the file has volume keys: gives the bare volume keys to y-coustic or back to Windows, saves the file and reloads |
@@ -241,6 +268,11 @@ The menu:
 
 ### Resting on the icon
 
+<!-- Add once taken, see screenshots.md:
+![The HUD above the tray icon](images/y-coustic_hover_01.png)
+![The wheel on the tray icon](images/y-coustic_tray_wheel_01.gif)
+-->
+
 Leave the pointer on the icon for a moment and the HUD appears next to it,
 showing the master level: the icon's tooltip, with more to say. It stays while the
 pointer is on the icon, however you move it there, and goes by itself
@@ -249,6 +281,37 @@ a moment after you move away. Windows' own tooltip is off while this is on.
 `<tray hover-delay>` sets the moment, and `0` turns the HUD off and gives the
 Windows tooltip back. If the icon is in the overflow flyout, drag it onto the
 taskbar: Windows does not report the pointer on an icon there.
+
+## The settings app
+
+`y-coustic-config.exe`, next to `y-coustic.exe` and opened by **Settings…** in the
+tray menu, edits `y-coustic.xml` without touching the text. One window at a time:
+a second click brings the open one forward.
+
+| Screen | What it edits |
+| --- | --- |
+| General | the volume step, what to do when something else changes the volume, the file |
+| Keys | groups of volume keys, each aimed by one target or by layers of its own; single hotkeys; *Replace the Windows volume indicator* |
+| Mouse | the wheel and button bindings |
+| Tray icon | resting on the icon, its clicks, the wheel over it, what the icon itself shows |
+| Mixer | where it opens, how many rows, system sounds |
+| HUD | style, place, size, look, how long it stays, the fade, with a preview drawn by y-coustic itself |
+| Colours | the colours of the HUD and the mixer, for everything and for each kind, with a preview |
+
+**Save** writes the file and asks a running y-coustic to reload it, so the change
+applies at once; **Reload from disk** reads it again, after asking if there is
+something unsaved. Deleting a group, a layer, a hotkey or a mouse binding offers
+**Undo** in the bar.
+
+**Nothing in your file is lost.** Comments, attributes it does not know and
+entries it cannot use are kept (the last as comments, with a warning that says
+why), and the first save of a run keeps the old file as `y-coustic.xml.bak`. A
+banner above every screen lists what y-coustic would warn about. Warning glyphs
+beside a key or a layer say when a combination is used twice, a layer uses `Alt`
+or a group controls nothing; they never stop you.
+
+**Starting from nothing.** With no `y-coustic.xml` the app starts from the
+shipped default, and the first Save writes it, explanations included.
 
 ## When something is wrong
 

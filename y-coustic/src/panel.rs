@@ -66,8 +66,8 @@ use y_core::window::WindowHandler;
 use y_coustic::config::{Anchor, Colors, HudConfig, MixerConfig, Position};
 use y_coustic::model::{self, Action, Change, Kind, State};
 
-use crate::hud::{self, Palette};
-use crate::look::{AppRef, Look};
+use y_coustic::look::{AppRef, Look};
+use y_coustic::paint::{self as hud, Palette};
 use crate::mixer::{Row, RowId};
 
 pub mod layout;
@@ -434,7 +434,7 @@ fn place(
             }
         }
         (Anchor::Hud, _) => (
-            hud::place(area, size, hud_position, monitor),
+            hud::layout::place(area, size, hud_position, monitor),
             hud_position.is_bottom(),
         ),
         // The pointer's place: the corner nearest the middle of the screen

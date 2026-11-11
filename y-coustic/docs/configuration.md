@@ -62,10 +62,34 @@ A complete example, with every element and attribute and a comment on each, is
 
 ### `<controls>`
 
-A modifier chooses what a set of keys controls. Each `<keys>` group is combined
-with every `<layer>`: the layer's modifiers are **added** to the group's keys, and
-the layer's target says what they then control. Two groups and two layers give
-twelve bindings, written in eight lines.
+Groups of keys, each saying what it controls. A `<keys>` group is up to three
+keys, and is aimed one of two ways, written on the group itself:
+
+| Aimed by | Written | Meaning |
+| --- | --- | --- |
+| a **target** | `target="mic"` | the keys control that, with no modifier held: a set of keys that does one thing |
+| **layers** | `<layer>` children | the group is crossed with its own layers: the modifier held says what the keys control, and the layer's modifiers are **added** to the group's keys |
+
+Nothing is shared between groups. A set of keys that only handles the microphone
+is a group of its own with `target="mic"`; it has none of the layers of the
+volume keys.
+
+```xml
+<controls>
+  <!-- the keyboard's volume keys: the modifier says what they control -->
+  <keys up="VolumeUp" down="VolumeDown" mute="VolumeMute" plain="windows">
+    <layer mod="none"  target="master"/>
+    <layer mod="Shift" target="mic"/>
+    <layer mod="Ctrl"  target="focused"/>
+  </keys>
+
+  <!-- a mute of the microphone, and nothing else -->
+  <keys mute="Win+Alt+M" target="mic"/>
+
+  <!-- the focused application, on keys of their own -->
+  <keys up="Win+Alt+PageUp" down="Win+Alt+PageDown" target="focused"/>
+</controls>
+```
 
 `<keys>`: up to three keys, each optional, but at least one.
 
@@ -73,13 +97,20 @@ twelve bindings, written in eight lines.
 | --- | --- |
 | `up`, `down`, `mute` | a key combination, as in `<hotkey key>`. A modifier already in it stays: `Win+NumAdd` under a `Shift` layer is `Win+Shift+NumAdd` |
 | `plain` | `windows` (default) or `replace`, for groups with a media key, see below |
+| `target` | `master`, `mic`, `focused` or `pointed`: what the keys control, with no layer |
 
-`<layer>`:
+`<layer>`, inside a `<keys>`:
 
 | Attribute | Default | Meaning |
 | --- | --- | --- |
 | `mod` | `none` | the modifiers held: `none`, or `Win`, `Ctrl`, `Alt`, `Shift` joined by `+` |
 | `target` | `master` | `master`, `mic`, `focused` or `pointed` |
+
+A group with layers of its own ignores its `target` (a warning says so). A group
+with neither controls nothing, and says so. A `<layer>` directly under
+`<controls>`, as an older file had it, is **not read**: it is warned about and
+kept in the file as a comment. To bring such a file up to date, move its layers
+inside each group that used them.
 
 **Media keys.** `VolumeUp`, `VolumeDown` and `VolumeMute` are caught by the
 keyboard hook rather than by a hotkey registration, whatever modifiers they carry
@@ -101,9 +132,10 @@ the key before Windows shows its flyout). Two things follow:
 
 **Warnings** the expansion gives, each once:
 
-- a **collision**: the same combination used twice, by two layers, a layer and a
-  `<hotkey>`, or two groups. The first use wins and the second is ignored. Single
+- a **collision**: the same combination used twice, by two layers of a group, a
+  group and a `<hotkey>`, or two groups; the message names the group. The first use wins and the second is ignored. Single
   `<hotkey>`s come first.
+- a group that **controls nothing**: no `target` and no layer.
 - an **`Alt` layer**: it works, but letting go of `Alt` alone afterwards focuses
   the menu bar of the window in front.
 
@@ -113,7 +145,9 @@ reloads (see *Saving from a program* below).
 
 ### `<hotkeys>`
 
-One `<hotkey>` per binding, for whatever the layers do not cover. A `<hotkey>`
+One `<hotkey>` per binding, for whatever the groups do not cover: a fixed level
+(`set-volume`), the mixer, or a single key you would rather read in one line. A
+set of up, down and mute keys for one thing is a `<keys target>` group instead. A `<hotkey>`
 on a media key goes through the keyboard hook too.
 
 | Attribute | Meaning |
@@ -337,7 +371,12 @@ answer `Alt+Shift`.
 ## Saving from a program
 
 A program that writes the file (the tray's *Replace the Windows volume
-indicator*, and later the settings app) regenerates it: comments and layout of a
-hand-edited file are not kept, and a section of a later release is not written
-back. The `<controls>` are written as groups and layers, not as the bindings they
-expand to. Keep notes for yourself outside the file.
+indicator*, and the settings app) writes it back with what it found: the
+comments, the attributes it does not read, and the elements it cannot use (kept
+as comments holding their own XML, and reported once). Sections come in a fixed
+order and the attributes of each in a fixed order; the empty lines of the file
+are kept where they were. A comment belongs to the entry that follows it and
+moves with it, and a comment after the last entry of a list stays at the end of
+it. The `<controls>` are written as groups and layers, not as the bindings they
+expand to. The file is written to a temporary file and renamed over the
+original, and the first save of a run keeps what was there as `y-coustic.xml.bak`.

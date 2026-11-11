@@ -18,8 +18,11 @@ cargo test -p y-coustic -- --ignored         # also the test that needs an outpu
 | --- | --- |
 | `src/main.rs` | the tray app: message handling, load and reload, dispatch of a hotkey, the menu |
 | `src/audio.rs` | the only COM: an endpoint's level and mute, and the pair of microphones |
-| `src/hud.rs` | the HUD: one overlay, its drawing, its timer, an application's icon and name |
-| `src/look.rs` | an application's name and icon, resolved from its executable (HUD and mixer) |
+| `src/hud.rs` | the HUD window: one overlay, its timer, its fade, the pointer's use of it |
+| `src/paint.rs` | **library**: what the HUD looks like, drawn: `Skin`, `Palette`, `draw`, the glyph and bar shapes, and `render` / `render_png`, which draw a HUD into a canvas of its own (the settings app's preview) |
+| `src/paint/layout.rs` | **library**: where the parts of each style are, for drawing and for the pointer's hit test; pure |
+| `src/look.rs` | **library**: an application's name and icon, resolved from its executable (HUD, mixer, previews) |
+| `examples/hud_pictures.rs` | draws the README's and the manual's HUD pictures with `paint` into `docs/images/` (no window); `cargo run -p y-coustic --example hud_pictures` |
 | `src/mixer.rs` | (the audio side) what a change does to the audio, and the rows of the mixer: the bridge between the pure rules and COM |
 | `src/panel.rs` | the mixer window: input, drawing, the requests it sends the owner |
 | `src/panel/layout.rs` | where the mixer's rows are and what a point on it is: pure |
@@ -29,7 +32,7 @@ cargo test -p y-coustic -- --ignored         # also the test that needs an outpu
 | `src/input.rs` | mouse inputs, bindings and the hook's decision machine: pure |
 | `src/lib.rs` | the library the settings app will share |
 | `src/model.rs` | actions, targets, and the level arithmetic: pure |
-| `src/controls.rs` | `<controls>`: key groups, layers, and their expansion into bindings: pure |
+| `src/controls.rs` | `<controls>`: key groups (each with a `Scope`: a target or its own layers), and their expansion into bindings: pure |
 | `src/config.rs` | reading and writing `y-coustic.xml`: pure but for the file |
 | `rsc/` | the shipped default `y-coustic.xml`, the manifest and the version resource |
 
@@ -76,15 +79,27 @@ load and holds nothing for a flow set to `off`, not even the device client.
 the root `Cargo.toml`. The messages are in the application range, from
 `WM_APP_FIRST`.
 
-**Keys and layers.** `controls::expand` crosses every `<keys>` group with every
-`<layer>` into `Binding`s, after the single `<hotkey>`s, and reports collisions,
-`Alt` layers and layers on targets not supported yet. `Settings` keeps the groups
-and layers as written (`controls`) and the singles as written (`hotkeys`);
+**Keys and layers.** `controls::expand` crosses every `<keys>` group with the
+layers *of that group* (`KeysGroup::scope`: a `Target` is the one layer with no
+modifier, `Layers` its own list) into `Binding`s, after the single `<hotkey>`s,
+and reports collisions (naming the group), `Alt` layers and groups that control
+nothing. Nothing is shared between groups. `Settings` keeps the groups, with
+their layers, as written (`controls`) and the singles as written (`hotkeys`);
 `Settings::bindings()` is the expansion, so `to_xml` writes back what the user
 wrote and a layer stays one layer. A hotkey id is an index into the expanded list
 (`YCoustic::bindings`) plus `IDH_FIRST`. A binding on a media key has `hook_only`
 and registers with `Fallback::HookOnly`; with `plain="windows"` the expansion
 leaves the bare media keys out, so they stay Windows'.
+
+**The round trip.** `Settings` keeps the typed values the application reads and,
+beside them, a `kept::Kept`: the comments of the file, the attributes no one
+reads and the elements no one can use, which `to_xml` (on `y_core::xml::Writer`)
+writes back. `Kept`'s lists are parallel to the typed ones, so every change to a
+list goes through `edit.rs` (`insert_*`, `remove_entry`, `move_entry_up/down`,
+`duplicate_entry`), which changes both; a short `Kept` reads as empty. Tests load
+the shipped `rsc/y-coustic.xml`, save it, load it again and compare values and
+comment count, and check that saving twice gives the same bytes. What the
+settings app adds on top is in `y-coustic-config/docs/design/plan.md`.
 
 **The hook lookup.** `y_core::hotkey`'s hook state matches a press on the key
 **and** the held modifiers, and a release on the entries marked `pressed` for the
@@ -222,3 +237,12 @@ shipped `rsc/y-coustic.xml`, embedded) is used.
 There is no `y-coustic.ico` yet, and the application uses the generic system icon.
 When one is supplied, add it to `rsc/y-coustic.rc` (the comment there says how).
 The speaker and microphone glyphs of the bar are drawn, not loaded.
+
+## Pictures
+
+The README and the manual have slots for screenshots and GIFs that are taken by
+hand: [screenshots.md](screenshots.md) lists them, with the setup of each.
+
+<!-- Add once taken, see screenshots.md:
+![The HUD and the mixer at 200%](images/y-coustic_dpi_01.png)
+-->

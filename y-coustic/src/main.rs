@@ -1,4 +1,4 @@
-//! Y-Coustic — volume control by hotkey, mouse and overlay.
+//! Y-Coustic - volume control by hotkey, mouse and overlay.
 //!
 //! Phase 1: hotkeys step and mute the master volume. The HUD (1.6) and the
 //! rest of the tray menu (1.7) follow, see `docs/design/implementation-plan.md`.
@@ -7,7 +7,6 @@
 
 mod audio;
 mod hud;
-mod look;
 mod mixer;
 mod mouse;
 mod panel;
@@ -36,6 +35,7 @@ use y_core::window;
 use y_coustic::appearance::{self, Appearance, Inputs};
 use y_coustic::config::{self, Binding, LoadError, Settings, TrayAction, WatchMode};
 use y_coustic::input;
+use y_coustic::ipc;
 use y_coustic::model::{Action, Change, Kind, Target};
 
 use crate::audio::watch::{WM_DEFAULT_DEVICE_CHANGED, WM_ENDPOINT_CHANGED, Watchers};
@@ -45,7 +45,7 @@ use crate::mixer::RowId;
 use crate::panel::{OpenWith, Panel, Request};
 use crate::mouse::{MouseHook, WM_MOUSE_ACTION, WM_MOUSE_WHEEL};
 
-const APP: AppInfo = AppInfo::new("Y-Coustic", "YpoLite.YCoustic").single_instance();
+const APP: AppInfo = AppInfo::new("Y-Coustic", ipc::CLASS).single_instance();
 
 const IDM_RELOAD: u32 = IDM_FIRST;
 const IDM_OPEN_CONFIG: u32 = IDM_FIRST + 1;
@@ -53,9 +53,10 @@ const IDM_STARTUP: u32 = IDM_FIRST + 2;
 const IDM_ABOUT: u32 = IDM_FIRST + 3;
 const IDM_EXIT: u32 = IDM_FIRST + 4;
 const IDM_REPLACE_VOLUME: u32 = IDM_FIRST + 5;
+const IDM_SETTINGS: u32 = IDM_FIRST + 6;
 
 /// The `Run` value name of "Start with Windows".
-const STARTUP_NAME: &str = "Y-Coustic";
+const STARTUP_NAME: &str = ipc::STARTUP_NAME;
 
 /// The resource id of the tray icon shown while the microphone is muted.
 const IDI_MIC_MUTED: u16 = 102;
@@ -110,6 +111,9 @@ struct YCoustic {
     panel: Option<Panel>,
     /// What the tray icon currently shows.
     appearance: Appearance,
+    /// [`ipc::reload_message`]'s id, looked up once: the settings app sends it
+    /// after a save.
+    reload_message: u32,
 }
 
 
@@ -130,6 +134,7 @@ impl YCoustic {
             click_closed_mixer: false,
             last_double_click: None,
             appearance: Appearance::Normal,
+            reload_message: ipc::reload_message(),
         }
     }
 
@@ -434,6 +439,7 @@ impl YCoustic {
         let _ = menu.add_disabled_item(APP.name);
         let _ = menu.add_disabled_item(&format!("{} hotkeys", self.bindings.len()));
         let _ = menu.add_separator();
+        let _ = menu.add_item(IDM_SETTINGS, "Settings…");
         let _ = menu.add_item(IDM_RELOAD, "Reload configuration");
         let _ = menu.add_item(IDM_OPEN_CONFIG, "Open configuration");
         let _ = menu.add_separator();
@@ -457,6 +463,7 @@ impl YCoustic {
 
         match menu.track(hwnd, position) {
             Some(IDM_RELOAD) => self.load(hwnd),
+            Some(IDM_SETTINGS) => self.open_settings(),
             Some(IDM_OPEN_CONFIG) => self.open_config(),
             Some(IDM_REPLACE_VOLUME) => self.toggle_replace_volume(hwnd),
             Some(IDM_STARTUP) => self.toggle_startup(),
@@ -489,6 +496,31 @@ impl YCoustic {
     /// Opens the configuration file, creating it from the shipped default
     /// first when there is none: the file a user wants to edit is the one
     /// that already says what the app is doing.
+    /// `y-coustic-config.exe`, expected next to this executable: the two ship
+    /// together. `None` when it is not there.
+    fn settings_app(&self) -> Option<std::path::PathBuf> {
+        std::env::current_exe()
+            .ok()
+            .map(|exe| exe.with_file_name(ipc::CONFIG_EXE))
+            .filter(|app| app.is_file())
+    }
+
+    /// Opens the settings app, which is single-instance: a second click brings the
+    /// open window forward. Without it, falls back to the file itself and says
+    /// why, so *Settings…* never silently does nothing.
+    fn open_settings(&mut self) {
+        let Some(app) = self.settings_app() else {
+            let message = format!(
+                "{} is not next to y-coustic: opening the file instead.",
+                ipc::CONFIG_EXE
+            );
+            self.notify("Settings", &message, Notify::Info);
+            self.open_config();
+            return;
+        };
+        shell::open(&app);
+    }
+
     fn open_config(&mut self) {
         let path = self
             .settings
@@ -936,6 +968,12 @@ impl TrayApp for YCoustic {
                 if let Some(flow) = Flow::from_wparam(wparam.0) {
                     self.on_default_device_changed(flow);
                 }
+                Some(LRESULT(0))
+            }
+            // Registered at run time, so a guard rather than a constant pattern; 0
+            // means registration failed, and 0 is also `WM_NULL`.
+            msg if msg != 0 && msg == self.reload_message => {
+                self.load(hwnd);
                 Some(LRESULT(0))
             }
             WM_TRAY_WHEEL => {

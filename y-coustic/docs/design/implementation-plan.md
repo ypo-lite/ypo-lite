@@ -31,7 +31,7 @@ runs it and reports; sessions don't drive the desktop themselves)
 | 6 Panel | ✅ built, live-checked (2026-11-06); tray click debounced, scrollbar added |
 | 7 Interactive HUD and tray hover | 👁 built (7.1–7.5), live checks pending |
 | 8 Overlay customization | ⬜ |
-| 9 `y-coustic-config` | ⬜ (gets its own plan) |
+| 9 `y-coustic-config` | ⬜ planned: [`y-coustic-config/docs/design/plan.md`](../../../y-coustic-config/docs/design/plan.md) (its own phases 1 to 10; start at its Phase 1) |
 
 **Resume here:** the look of 8.3 and the fade of 8.4 (`<colors>`, and the mixer sharing font and radius), the live checks of 7b.2 and 7b.3 (the wheel over the icon; `<tray click double-click middle-click>`, with and without a `double-click`), of Phase 7 (hover on the tray icon with the icon on the taskbar; wheel, click, drag and glyph on the bar; a click elsewhere on it opens the panel; `interactive="false"`), then Phase 8, Phase 7b tasks 7b.2 to 7b.4 (tray clicks, wheel on the icon), then 8.3 (8.1 done, 8.2 built: its live check is the five styles, the positions and follow-cursor).
 
@@ -277,7 +277,7 @@ carry the new words; `mixer.rs` is the audio side.
 | 8.2 | Styles `bar`, `vbar`, `ring`, `text`, `compact`; positions and `follow-cursor`; size, radius, border, opacity, font. Done, 👁: `hud/layout.rs` (pure `Geometry` per style, `place` for nine positions, `follow`, 11 tests); `config::Overlay` gains `style`, `scale`, `radius`, `border`, `opacity`, `font` and 10 positions; the window is rebuilt for a new style, scale, font or `interactive`, the rest is only drawn; border uses `palette.track` until 8.3. | 👁 |
 | 8.3 | Per-kind `<master>`, `<microphone>`, `<application>` with colours and accent; the panel shares colours, font, radius. | 👁 `<colors>` (panel, text, track, accent, muted; `<master>`, `<microphone>`, `<application>` children) in `HudConfig.colors`; `Palette::current(kind, muted, &Colors)`; the mixer takes colours, font and radius from the HUD's settings (`OpenWith::look`); a general accent spares the microphone's red |
 | 8.4 | Fade in/out as a short `SetTimer` series. | 👁 `<hud fade>` (0 to 1000 ms, default 0 = off); `Fade` and the pure `fade_alpha` in `hud.rs`, a 16 ms `FADE_TIMER_ID` alive only during a fade, `Overlay::set_opacity` per step; a change during a fade out resumes from the current opacity, the pointer on the HUD cancels a fade out |
-| 8.5 | Docs, with screenshots. | ⬜ |
+| 8.5 | Docs, with screenshots. | 👁 README rewritten to the current state; `docs/screenshots.md` lists the 12 stills and 6 GIFs to take (name, place, setup); their slots are HTML comments in the README, the manual and the development notes, `docs/images/` is ready. Left: take them, then uncomment the slots |
 
 ## Phase 9 — `y-coustic-config`
 
