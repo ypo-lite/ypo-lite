@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["core", "ui-kit", "y-coustic", "y-pop", "y-pop-config", "y-snap", "y-snap-config", "y-term"]
+members = ["core", "ui-kit", "y-coustic", "y-coustic-config", "y-pop", "y-pop-config", "y-snap", "y-snap-config", "y-term"]
 # The skeleton is a self-contained reference copy, not a workspace member:
 # it must keep building on its own when copied out of the repository.
 exclude = ["skeleton"]
@@ -14,6 +14,9 @@ license = "GPL-3.0-or-later"
 y-core = { path = "core" }
 ui-kit = { path = "ui-kit" }
 embed-resource = "3.0.11"
+# Direct, only for `#[implement]`: the macro emits `::windows_core::` paths. Same
+# version as the one `windows` re-exports.
+windows-core = "0.62.2"
 windows-reactor = "0.100"
 
 # One feature set for the whole workspace: the `windows` crate is compiled
@@ -28,16 +31,21 @@ features = [
     "Win32_Graphics_Dwm",
     "Win32_Graphics_Dxgi_Common",
     "Win32_Graphics_Gdi",
+    "Win32_Media_Audio",
+    "Win32_Media_Audio_Endpoints",
     "Win32_Security",
     "Win32_Storage_FileSystem",
     "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
     "Win32_System_DataExchange",
+    "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_LibraryLoader",
     "Win32_System_Memory",
     "Win32_System_Ole",
     "Win32_System_ProcessStatus",
     "Win32_System_Registry",
     "Win32_System_Threading",
+    "Win32_System_Variant",
     "Win32_UI_Accessibility",
     "Win32_UI_Controls",
     "Win32_UI_HiDpi",

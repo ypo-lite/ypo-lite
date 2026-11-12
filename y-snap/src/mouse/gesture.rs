@@ -15,7 +15,7 @@
 //! followed by a release with nothing in between — the exact gesture that
 //! opens the window's system menu or the Start menu.
 //!
-//! [`super::modifier_guard`] breaks that pair. Activation here only arms
+//! [`y_core::modifier_guard`] breaks that pair. Activation here only arms
 //! it — see [`Gesture::on_button_down`] — the correction itself fires later,
 //! from that module's own keyboard hook, synchronously at the modifier's
 //! real key-up, which is the part that actually matters; see that module's
@@ -49,10 +49,10 @@ use windows::Win32::Graphics::Gdi::HMONITOR;
 use y_core::monitor;
 
 use crate::config::{Button, Gesture as GestureConfig, Mouse};
-use crate::target;
+use y_core::target;
 
 use super::geometry::window_rect;
-use super::modifier_guard;
+use y_core::modifier_guard;
 use super::modifiers_held;
 
 /// A window resized down to nothing is not a feature.

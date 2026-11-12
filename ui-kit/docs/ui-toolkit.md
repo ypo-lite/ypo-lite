@@ -94,6 +94,7 @@ such as page padding. A component that knows its own minimum width should use
 | Let a list be reordered | `reorder::list_footer` + `reorder::row_actions` (app side), built on `reorder_toggle` + `move_buttons` (toolkit) | Size the actions column `TWO_ICON_BUTTONS` so ↑/↓ fits where the row actions were. |
 | Labelled field | `field("Label", control)` | Caption above the control. |
 | One setting: text left, control right | `setting(title, description, control, viewport)` | A card; the control goes under the text below `SETTING_SIDE_BY_SIDE_MIN`. Pass the width the *card* gets. |
+| One setting whose control needs room (a slider) | `setting_wide(title, description, control)` | A card; the control is always under the text, at full width. |
 | A few exclusive options | `segmented(&[Choice::new("A"), Choice::disabled("B", "why")], selected, on_select)` | The chosen one is Accent. Re-selecting reports its index again: ignore an unchanged value. |
 | A multi-line text field | `text_area(text, placeholder, on_change)` | Wraps; Enter inserts a line. |
 | A full-width row in a table | `Row::spanning(key, view)` | A comment, a section label. In card layout it is the view alone. |

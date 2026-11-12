@@ -2,12 +2,17 @@
 //!
 //! Two ways to point at a window: the keyboard focus, or the mouse. Neither
 //! is right on its own — a hotkey pressed while the pointer sits over the
-//! desktop should still act on what the user is working in — so `Pointed`
-//! falls back to `Focused`.
+//! desktop should still act on what the user is working in — so
+//! [`Target::Pointed`] falls back to [`Target::Focused`].
 //!
 //! The hard part is not finding a window but refusing the wrong ones. Under
 //! the pointer there is always *something*: the taskbar, a tooltip, the task
 //! switcher, the desktop itself. Minimizing the shell is not a feature.
+//!
+//! Shared by `y-snap` (which moves and closes the window) and `y-coustic`
+//! (which finds the application to change the volume of).
+
+use std::fmt;
 
 use windows::Win32::Foundation::{HWND, POINT};
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -16,7 +21,40 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WindowFromPoint,
 };
 
-use crate::action::Target;
+/// Which window an action applies to.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Target {
+    /// The window with the keyboard focus.
+    #[default]
+    Focused,
+    /// The window under the mouse pointer, falling back to the focused one.
+    /// What HulK's hotkeys mostly used: the hand is already on the mouse.
+    Pointed,
+}
+
+impl Target {
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name.trim() {
+            "focused" => Some(Self::Focused),
+            "pointed" => Some(Self::Pointed),
+            _ => None,
+        }
+    }
+
+    /// The name [`Target::from_name`] reads back.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Focused => "focused",
+            Self::Pointed => "pointed",
+        }
+    }
+}
+
+impl fmt::Display for Target {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.name())
+    }
+}
 
 /// The window this action should act on, or `None` if there is nothing worth
 /// acting on.
@@ -40,7 +78,7 @@ pub fn pointed() -> Option<HWND> {
 }
 
 /// The top-level window under `point`, in screen coordinates — what
-/// [`crate::mouse`] uses to resolve drag, resize and the minimize-button
+/// `y-snap` uses to resolve drag, resize and the minimize-button
 /// hover from the position a low-level hook hands it, rather than from
 /// [`GetCursorPos`], which would just be racing the hook for the same value.
 pub fn at(point: POINT) -> Option<HWND> {
@@ -98,11 +136,6 @@ fn is_banished(window: HWND) -> bool {
         "MultitaskingViewFrame",
         "TaskListThumbnailWnd",
         "XamlExplorerHostIslandWindow",
-        // y-snap's own popups: a mouse shortcut clicked over the open
-        // overlay must not act on the overlay itself.
-        "YpoLite.YSnap.Overlay",
-        "YpoLite.YSnap.OverlayBorder",
-        "YpoLite.YSnap.MinButton",
         // Transient UI that is nobody's window.
         "tooltips_class32",
         "#32768", // a menu
@@ -130,5 +163,7 @@ fn is_banished(window: HWND) -> bool {
         return ex_style & WS_EX_TOOLWINDOW.0 != 0;
     }
 
-    BANISHED.contains(&class.as_str())
+    // Every Ypo-Lite popup (an overlay, a HUD, a minimize button) is ours: a
+    // click or a wheel over one must not act on the popup itself.
+    class.starts_with("YpoLite.") || BANISHED.contains(&class.as_str())
 }

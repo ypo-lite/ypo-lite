@@ -46,7 +46,9 @@
 //! | [`known_folders`] | Win32 "known folder" paths, resolved lazily and cached |
 //! | [`log`] | a tiny file logger, for a `windows_subsystem = "windows"` app with no console to print to |
 //! | [`overlay`] | layered, click-through windows drawn from a pixel buffer |
+//! | [`target`] | the window an action applies to: the focused one, or the one under the pointer, shell excluded |
 //! | [`process`] | the process behind a window: its name, and whether UIPI lets us drive it |
+//! | [`modifier_guard`] | keeps an Alt/Win-modified mouse gesture from opening the Start or window menu on release |
 //! | [`monitor`] | monitor geometry, work areas, per-monitor DPI |
 //! | [`config`] | portable `.ini` settings next to the executable |
 //! | [`xml`] | a small XML reader and writer (comments kept), for settings files that are not `.ini` |
@@ -97,6 +99,8 @@ pub mod memory;
 #[cfg(feature = "win")]
 pub mod menu;
 #[cfg(feature = "win")]
+pub mod modifier_guard;
+#[cfg(feature = "win")]
 pub mod monitor;
 #[cfg(feature = "win")]
 pub mod open_windows;
@@ -117,6 +121,8 @@ pub mod shell;
 pub mod single_instance;
 #[cfg(feature = "win")]
 pub mod startup;
+#[cfg(feature = "win")]
+pub mod target;
 #[cfg(feature = "win")]
 pub mod theme;
 #[cfg(feature = "win")]

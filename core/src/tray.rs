@@ -14,7 +14,7 @@ use windows::Win32::UI::Shell::{
     NOTIFYICONDATAW, NOTIFYICONIDENTIFIER, Shell_NotifyIconGetRect, Shell_NotifyIconW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    HICON, WM_CONTEXTMENU, WM_LBUTTONDBLCLK, WM_LBUTTONUP, WM_RBUTTONUP,
+    HICON, WM_CONTEXTMENU, WM_LBUTTONDBLCLK, WM_LBUTTONUP, WM_MBUTTONUP, WM_RBUTTONUP,
 };
 use windows::core::Result;
 
@@ -30,6 +30,11 @@ const NIN_BALLOONSHOW: u32 = NIN_SELECT + 2;
 const NIN_BALLOONHIDE: u32 = NIN_SELECT + 3;
 const NIN_BALLOONTIMEOUT: u32 = NIN_SELECT + 4;
 const NIN_BALLOONUSERCLICK: u32 = NIN_SELECT + 5;
+
+// The pop-up pair: the pointer entering and leaving an icon registered
+// without `NIF_SHOWTIP` (see [`TrayIcon::set_standard_tooltip`]).
+const NIN_POPUPOPEN: u32 = NIN_SELECT + 6;
+const NIN_POPUPCLOSE: u32 = NIN_SELECT + 7;
 
 use crate::resources::{copy_to_buffer, copy_to_buffer_ellipsis};
 
@@ -100,6 +105,23 @@ impl TrayIcon {
             ..Default::default()
         };
         unsafe { Shell_NotifyIconGetRect(&identifier) }.ok()
+    }
+
+    /// Chooses who shows a tooltip when the pointer rests on the icon.
+    ///
+    /// With `show` (the default) the shell does, from [`TrayIcon::set_tooltip`],
+    /// and the callback gets only `WM_MOUSEMOVE`s, with no message for leaving.
+    /// Without it the shell shows nothing and reports the pointer entering and
+    /// leaving as [`TrayEvent::PopupOpen`] and [`TrayEvent::PopupClose`], which is
+    /// how an application shows a tooltip of its own, or something more than one.
+    /// Re-registration after an Explorer restart keeps the choice.
+    pub fn set_standard_tooltip(&mut self, show: bool) -> Result<()> {
+        if show {
+            self.data.uFlags |= NIF_SHOWTIP;
+        } else {
+            self.data.uFlags &= !NIF_SHOWTIP;
+        }
+        unsafe { Shell_NotifyIconW(NIM_MODIFY, &self.data) }.ok()
     }
 
     /// Updates the tooltip shown when hovering the icon.
@@ -257,6 +279,8 @@ pub enum TrayEvent {
     /// matched too as a defensive fallback for a shell that ignored the
     /// version negotiation, not because it is expected to arrive.
     Select,
+    /// A middle click.
+    MiddleClick,
     /// The user clicked the body of a balloon shown by [`TrayIcon::notify`].
     /// An app that acts on it remembers what its last balloon was about:
     /// only one is live per icon at a time.
@@ -266,6 +290,15 @@ pub enum TrayEvent {
     BalloonShown,
     /// A balloon went away unclicked — it timed out, or was dismissed.
     BalloonClosed,
+    /// The pointer entered the icon: the shell's "show your pop-up" (the thing a
+    /// tooltip or a preview is for), sent once per entry. Only to an icon
+    /// without the standard tooltip ([`TrayIcon::set_standard_tooltip`]); one
+    /// with it gets `WM_MOUSEMOVE`s instead, as [`TrayEvent::Other`].
+    PopupOpen,
+    /// The pointer left the icon, into a neighbour too: close what
+    /// [`TrayEvent::PopupOpen`] opened. Its position is not the screen's: place
+    /// things against [`TrayIcon::rect`].
+    PopupClose,
     /// Anything else — hover (`WM_MOUSEMOVE` fires repeatedly while the
     /// cursor sits over the icon) and the rest. Not a
     /// click: code that opens a menu or launches something on a tray
@@ -288,10 +321,13 @@ impl TrayEvent {
             // WM_RBUTTONUP is kept for older shells.
             WM_CONTEXTMENU | WM_RBUTTONUP => TrayEvent::ContextMenu,
             WM_LBUTTONDBLCLK => TrayEvent::DoubleClick,
+            WM_MBUTTONUP => TrayEvent::MiddleClick,
             NIN_SELECT | NIN_KEYSELECT | WM_LBUTTONUP => TrayEvent::Select,
             NIN_BALLOONUSERCLICK => TrayEvent::BalloonClicked,
             NIN_BALLOONSHOW => TrayEvent::BalloonShown,
             NIN_BALLOONHIDE | NIN_BALLOONTIMEOUT => TrayEvent::BalloonClosed,
+            NIN_POPUPOPEN => TrayEvent::PopupOpen,
+            NIN_POPUPCLOSE => TrayEvent::PopupClose,
             other => TrayEvent::Other(other),
         };
 
@@ -330,6 +366,8 @@ mod tests {
             (NIN_BALLOONSHOW, TrayEvent::BalloonShown),
             (NIN_BALLOONTIMEOUT, TrayEvent::BalloonClosed),
             (NIN_BALLOONHIDE, TrayEvent::BalloonClosed),
+            (NIN_POPUPOPEN, TrayEvent::PopupOpen),
+            (NIN_POPUPCLOSE, TrayEvent::PopupClose),
         ] {
             let (event, _) = TrayEvent::decode(WPARAM(0), lparam(message, 1));
             assert_eq!(event, expected);

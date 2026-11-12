@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+	y-coustic — volume control by hotkey, mouse and HUD.
+
+	Copy this file next to y-coustic.exe to keep it portable, or to
+	%APPDATA%\Ypo-Lite\y-coustic.xml. Either place is read on start-up and
+	whenever "Reload configuration" is chosen from the tray menu.
+
+	See docs/configuration.md for every attribute; this file is the default.
+-->
+<y-coustic>
+
+	<!-- Percent of the full range one step moves, 1 to 30. -->
+	<volume step="5"/>
+
+	<!--
+		What to do when the volume or mute changes from outside y-coustic (the
+		Sound panel, a laptop's mic key): off, tray (keep the tray icon true) or
+		hud (the same, and show the HUD). Windows shows its own flyout for the
+		master, hence off; it shows nothing for the microphone, hence hud.
+	-->
+	<watch master="off" microphone="hud"/>
+
+	<!--
+		Keys and layers. A <keys> group says what it controls itself, one of two
+		ways: target="mic" (the keys control that, with no modifier held), or
+		<layer>s inside the group, each a modifier held and what the keys then
+		control. Nothing is shared between groups, so a set of keys that only does
+		one thing is a group of its own. Targets: master, mic, focused (the
+		application of the window in front) and pointed (the one under the mouse
+		pointer).
+
+		The first group is the keyboard's volume keys. plain="windows" leaves
+		the bare keys to Windows (its volume, its flyout) and takes only the
+		layers with a modifier, so Shift+VolumeUp steps the microphone.
+		plain="replace" takes the bare keys too: y-coustic's HUD instead of the
+		Windows flyout (the tray menu has a switch for it).
+
+		The second group is for a keyboard with a numpad. Avoid an Alt layer:
+		letting go of Alt alone afterwards focuses the window's menu bar.
+
+		A group that does one thing needs no layers, for instance a microphone mute:
+		<keys mute="Win+Alt+M" target="mic"/>
+	-->
+	<controls>
+		<keys up="VolumeUp" down="VolumeDown" mute="VolumeMute" plain="windows">
+			<layer mod="none"       target="master"/>
+			<layer mod="Shift"      target="mic"/>
+			<layer mod="Ctrl"       target="focused"/>
+			<layer mod="Ctrl+Shift" target="pointed"/>
+		</keys>
+
+		<keys up="Win+NumAdd" down="Win+NumSub" mute="Win+Numpad0">
+			<layer mod="none"       target="master"/>
+			<layer mod="Shift"      target="mic"/>
+			<layer mod="Ctrl"       target="focused"/>
+			<layer mod="Ctrl+Shift" target="pointed"/>
+		</keys>
+	</controls>
+
+	<!--
+		Single bindings, for whatever the groups do not cover (a level, the mixer). Actions: mixer (opens
+		or closes the mixer window), volume-up,
+		volume-down, mute, set-volume (with value="0".."100"). The target is the
+		master volume; target="mic", "focused" or "pointed" for another.
+
+		<hotkey key="Win+Alt+F9" action="set-volume" value="30"/>
+		<hotkey key="Win+Alt+M"  action="mute" target="mic"/>
+	-->
+	<hotkeys>
+		<hotkey key="Win+Alt+V" action="mixer"/>
+	</hotkeys>
+
+	<!--
+		The mouse. A <wheel> raises the volume going up and lowers it going down
+		(invert="true" flips that; axis="horizontal" uses the sideways tilt). A
+		<button> runs an action when released. The modifiers must match exactly.
+		A bare wheel, left, right or middle button is refused: it would take over
+		every scroll and click. Actions as for <hotkey>; targets: master, mic,
+		focused, pointed. Over an application with no audio, the wheel scrolls as usual.
+
+		Alt is fine here: y-coustic keeps the release of Alt from focusing the
+		window's menu bar.
+	-->
+	<mouse>
+		<wheel mod="Alt" target="master"/>
+		<wheel mod="Alt+Shift" target="mic"/>
+		<button button="middle" mod="Alt" action="mute"/>
+		<button button="middle" mod="Alt+Shift" action="mute" target="mic"/>
+		<wheel mod="Ctrl+Shift" target="pointed"/>
+		<button button="middle" mod="Ctrl+Shift" action="mute" target="pointed"/>
+	</mouse>
+
+	<!--
+		The tray icon. hover-delay: milliseconds the pointer rests on it before the
+		HUD shows next to it, 0 to 5000. 0 turns that off and keeps Windows' own
+		tooltip; otherwise the HUD is the tooltip (Windows shows none).
+		click, double-click, middle-click: mixer, hud, mute, mute-mic, volume-up,
+		volume-down or none. With a double-click set, the single click waits the
+		system double-click time.
+		wheel: true lets the wheel over the icon step the master volume (needs the hover).
+		icon: fixed (the icon never changes) or mic-muted (the muted variant while the
+		microphone is muted).
+	-->
+	<tray hover-delay="600" click="mixer" double-click="none" middle-click="none" wheel="true" icon="fixed"/>
+
+	<!--
+		The mixer, the window listing every volume (the mixer action, a click on the tray
+		icon). anchor: tray (next to the icon), cursor or hud. max-rows: rows shown
+		before it scrolls, 3 to 20. system-sounds: a last row for Windows' own sounds.
+		In the mixer: Up and Down select, Left and Right step (with Shift, by 1 %),
+		M or Space mutes, 0 to 9 set 0 to 90 %, Esc closes. The wheel steps a row,
+		a click or a drag on a bar sets it, a middle click or the icon mutes.
+	-->
+	<mixer anchor="tray" max-rows="8" system-sounds="true"/>
+
+	<!--
+		The HUD. style: bar, compact, text, vbar or ring. position: top-left, top-center,
+		top-right, center-left, center, center-right, bottom-left, bottom-center,
+		bottom-right or follow-cursor. scale: size in percent (50-300); radius, border
+		(0-8), opacity (10-100) and font are the window and the text.
+		timeout: milliseconds it stays after the last change. interactive: false keeps
+		it click-through; true lets the pointer use it (the wheel over it, a click or
+		a drag on its bar, a click on its icon mutes, any other click opens the mixer).
+		false also turns off the hover on the tray icon.
+		fade: milliseconds to fade in and out (0 to 1000, 0 is none).
+	-->
+	<hud style="bar" position="bottom-center" timeout="1200" interactive="true"
+	     scale="100" radius="10" border="0" opacity="100" font="Segoe UI" fade="0"/>
+
+	<!--
+		Colours, as #RRGGBB, shared by the HUD and the mixer; none is set here, so the
+		Windows theme decides. panel, text, track, accent (the bar while sound is on),
+		muted. A <master>, <microphone> or <application> child sets the same for one
+		kind. The microphone stays red while live unless <microphone accent> is set.
+		
+		<colors accent="#3FB950">
+			<microphone accent="#D9534F"/>
+			<application accent="#E8A33D"/>
+		</colors>
+	-->
+
+</y-coustic>

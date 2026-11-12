@@ -1,16 +1,15 @@
 //! A `WH_KEYBOARD_LL` hook, installed only while at least one Alt/Win
 //! -modified drag or resize is in progress, whose only job is to catch the
 //! modifier's *real* key-up and fire
-//! [`y_core::hotkey::absorb_modifier_tap`] synchronously, immediately before
+//! [`crate::hotkey::absorb_modifier_tap`] synchronously, immediately before
 //! letting that key-up continue down the chain.
 //!
-//! # Why a second hook, separate from [`super`]'s mouse hook
+//! # Why a second hook, separate from the mouse hook
 //!
-//! The mouse hook only ever sees `WM_LBUTTONDOWN`/`WM_LBUTTONUP` and their
-//! siblings — it has nothing to catch the modifier coming back up with,
-//! because the user is free to let go of Alt or Win seconds after releasing
-//! the mouse button, long after [`super::gesture::Gesture`] has forgotten
-//! the gesture ever happened. A keyboard hook is the only thing that can see
+//! The mouse hook only ever sees the mouse messages — it has nothing to
+//! catch the modifier coming back up with, because the user is free to let
+//! go of Alt or Win seconds after releasing the mouse button, long after the
+//! gesture has forgotten it ever happened. A keyboard hook is the only thing that can see
 //! a key-up at all, and it has to keep running for as long as that key-up
 //! might still be pending — which is why this one is armed at gesture start
 //! ([`arm`], called from
@@ -44,11 +43,11 @@
 //!
 //! `WH_KEYBOARD_LL` can lose a key-up outright — not delayed, gone — when
 //! focus switches to an elevated window while the key is still down; see
-//! [`y_core::hotkey`]'s own doc comment. Without a way to notice that, this
+//! [`crate::hotkey`]'s own doc comment. Without a way to notice that, this
 //! module's hook (and the state that keeps it installed) would be stuck
 //! armed forever after that happens, waiting for a key-up that already
 //! occurred. [`arm`] registers [`reconcile`] with
-//! [`y_core::hotkey::watch_foreground`] to cover exactly that: every
+//! [`crate::hotkey::watch_foreground`] to cover exactly that: every
 //! foreground switch, it checks the armed bits against
 //! [`GetAsyncKeyState`] and force-clears (and, if nothing is left armed,
 //! uninstalls) whatever the hook missed.
@@ -65,7 +64,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, SetWindowsHookExW, UnhookWindowsHookEx,
     WH_KEYBOARD_LL, WM_KEYUP, WM_SYSKEYUP,
 };
-use y_core::hotkey::{absorb_modifier_tap, unwatch_foreground, watch_foreground};
+use crate::hotkey::{absorb_modifier_tap, unwatch_foreground, watch_foreground};
 
 thread_local! {
     /// The Alt/Win bits (from [`MOD_ALT`] / [`MOD_WIN`]) at least one
@@ -80,7 +79,7 @@ thread_local! {
 /// installing the hook first if it is not already up. A no-op for a gesture
 /// that uses neither modifier. Safe to call on every gesture activation,
 /// including a second one that starts before the first's modifier has come
-/// back up — see [`super::gesture::Gesture::on_button_down`], its only
+/// back up — see y-snap's `Gesture::on_button_down`, its first
 /// caller.
 pub fn arm(modifiers: HOT_KEY_MODIFIERS) {
     let bits = modifiers.0 & (MOD_ALT.0 | MOD_WIN.0);
@@ -132,7 +131,7 @@ fn disarm(bits: u32) {
     });
 }
 
-/// Registered with [`y_core::hotkey::watch_foreground`] while armed — see
+/// Registered with [`crate::hotkey::watch_foreground`] while armed — see
 /// this module's doc comment on the elevated-focus gap.
 fn reconcile() {
     let armed = ARMED.with(|cell| cell.get().0);

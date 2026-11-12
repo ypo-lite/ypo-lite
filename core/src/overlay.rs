@@ -31,6 +31,7 @@
 //! Nothing here is on a timer: an overlay that must fade out again is the
 //! application's business (`SetTimer`, then [`Overlay::hide`]).
 
+use std::cell::Cell;
 use std::ffi::c_void;
 
 use windows::Win32::Foundation::{
@@ -241,6 +242,13 @@ impl<'a> OverlaySpec<'a> {
 pub struct Overlay {
     hwnd: HWND,
     canvas: Canvas,
+    /// The global alpha applied on top of the per-pixel one (255 = none).
+    opacity: Cell<u8>,
+}
+
+/// The `0..=255` alpha for an opacity in percent (above 100 counts as 100).
+pub fn alpha_of_percent(percent: u32) -> u8 {
+    ((percent.min(100) * 255 + 50) / 100) as u8
 }
 
 impl Overlay {
@@ -280,7 +288,22 @@ impl Overlay {
             }
         };
 
-        Ok(Self { hwnd, canvas })
+        Ok(Self {
+            hwnd,
+            canvas,
+            opacity: Cell::new(255),
+        })
+    }
+
+    /// Sets a global alpha, `0..=255`, applied to the whole surface by the
+    /// next [`Overlay::show_at`] or refresh: a fade, or a see-through bar,
+    /// without redrawing the pixels. It persists until set again.
+    pub fn set_opacity(&self, alpha: u8) {
+        self.opacity.set(alpha);
+    }
+
+    pub fn opacity(&self) -> u8 {
+        self.opacity.get()
     }
 
     pub fn hwnd(&self) -> HWND {
@@ -398,7 +421,7 @@ impl Overlay {
         let blend = BLENDFUNCTION {
             BlendOp: AC_SRC_OVER as u8,
             BlendFlags: 0,
-            SourceConstantAlpha: 255, // per-pixel alpha, not a global fade
+            SourceConstantAlpha: self.opacity.get(),
             AlphaFormat: AC_SRC_ALPHA as u8,
         };
 
@@ -1166,7 +1189,7 @@ impl WindowHandler for NoHandler {
 
 #[cfg(test)]
 mod tests {
-    use super::{Canvas, Color, Font, TextAlign, over};
+    use super::{Canvas, Color, Font, TextAlign, alpha_of_percent, over};
     use windows::Win32::Foundation::RECT;
 
     #[test]
@@ -1348,6 +1371,14 @@ mod tests {
         assert_eq!(pixel(&mut canvas, 35, 35), interior.premultiplied());
         assert_eq!(pixel(&mut canvas, 39, 0), interior.premultiplied());
         assert_eq!(pixel(&mut canvas, 15, 39), interior.premultiplied());
+    }
+
+    #[test]
+    fn an_opacity_in_percent_maps_onto_the_whole_alpha_range() {
+        assert_eq!(alpha_of_percent(0), 0);
+        assert_eq!(alpha_of_percent(100), 255);
+        assert_eq!(alpha_of_percent(250), 255);
+        assert_eq!(alpha_of_percent(50), 128);
     }
 
     #[test]

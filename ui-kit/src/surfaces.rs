@@ -140,3 +140,18 @@ pub fn setting(
     };
     card().content(body)
 }
+
+/// [`setting`] with the control always under the text, at the card's full
+/// width: for a control that needs room, a slider with its number box.
+pub fn setting_wide(title: &str, description: &str, control: impl Into<View>) -> View {
+    card().content(
+        Stack::vertical(space::M)
+            .child(
+                "words",
+                Stack::vertical(space::XXS)
+                    .child("title", text::body(title))
+                    .child("description", text::caption(description)),
+            )
+            .child("control", control),
+    )
+}
