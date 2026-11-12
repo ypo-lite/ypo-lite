@@ -6,7 +6,7 @@ members = ["core", "ui-kit", "y-coustic", "y-coustic-config", "y-pop", "y-pop-co
 exclude = ["skeleton"]
 
 [workspace.package]
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
 
