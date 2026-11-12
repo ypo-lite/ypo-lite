@@ -36,8 +36,8 @@ IDI_APP_ICON ICON "y-coustic.ico"
 // Version information (Explorer's "Details" tab)
 
 1 VERSIONINFO
- FILEVERSION    0,2,0,0
- PRODUCTVERSION 0,2,0,0
+ FILEVERSION    @VERSION_COMMAS@
+ PRODUCTVERSION @VERSION_COMMAS@
  FILEFLAGSMASK  0x3fL
  FILEFLAGS      0x0L
  FILEOS         0x40004L   // VOS_NT_WINDOWS32
@@ -50,12 +50,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName",      "ypo-lite"
             VALUE "FileDescription",  "y-coustic"
-            VALUE "FileVersion",      "0.2.0.0"
+            VALUE "FileVersion",      "@VERSION@"
             VALUE "InternalName",     "y-coustic"
             VALUE "LegalCopyright",   "Copyright (C) 2026"
             VALUE "OriginalFilename", "y-coustic.exe"
             VALUE "ProductName",      "y-coustic"
-            VALUE "ProductVersion",   "0.2.0.0"
+            VALUE "ProductVersion",   "@VERSION@"
         END
     END
     BLOCK "VarFileInfo"
