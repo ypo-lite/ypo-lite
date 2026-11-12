@@ -286,7 +286,8 @@ taskbar: Windows does not report the pointer on an icon there.
 
 `y-coustic-config.exe`, next to `y-coustic.exe` and opened by **Settings…** in the
 tray menu, edits `y-coustic.xml` without touching the text. One window at a time:
-a second click brings the open one forward.
+a second click brings the open one forward. Its own
+[manual](../../y-coustic-config/docs/user-manual.md) goes screen by screen.
 
 | Screen | What it edits |
 | --- | --- |

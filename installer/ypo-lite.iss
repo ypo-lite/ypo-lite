@@ -48,9 +48,11 @@ Name: "snap"; Description: "Y-Snap (window management)"; Types: full custom
 Name: "snapconfig"; Description: "Y-Snap settings"; Types: full custom
 Name: "pop"; Description: "Y-Pop"; Types: full custom
 Name: "popconfig"; Description: "Y-Pop settings"; Types: full custom
+Name: "coustic"; Description: "Y-Coustic (audio)"; Types: full custom
+Name: "cousticconfig"; Description: "Y-Coustic settings"; Types: full custom
 
 [Tasks]
-; Y-Pop has its own "Start with Windows" menu item; Y-Snap has none.
+; Y-Pop and Y-Coustic have their own "Start with Windows" menu item; Y-Snap has none.
 Name: "snapstartup"; Description: "Start Y-Snap with Windows"; Components: snap; Flags: unchecked
 
 [Files]
@@ -58,26 +60,33 @@ Source: "{#Target}\y-snap.exe"; DestDir: "{app}"; Components: snap; Flags: ignor
 Source: "{#Target}\y-snap-config.exe"; DestDir: "{app}"; Components: snapconfig; Flags: ignoreversion
 Source: "{#Target}\y-pop.exe"; DestDir: "{app}"; Components: pop; Flags: ignoreversion
 Source: "{#Target}\y-pop-config.exe"; DestDir: "{app}"; Components: popconfig; Flags: ignoreversion
+Source: "{#Target}\y-coustic.exe"; DestDir: "{app}"; Components: coustic; Flags: ignoreversion
+Source: "{#Target}\y-coustic-config.exe"; DestDir: "{app}"; Components: cousticconfig; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 ; Y-Snap does nothing without a configuration, and Y-Pop has an empty menu.
 ; An existing file is the user's own: never replace it, never remove it.
 Source: "..\y-snap\rsc\y-snap.xml"; DestDir: "{userappdata}\Ypo-Lite"; Components: snap; Flags: onlyifdoesntexist uninsneveruninstall
 Source: "..\y-pop\rsc\y-pop.xml"; DestDir: "{userappdata}\Ypo-Lite"; Components: pop; Flags: onlyifdoesntexist uninsneveruninstall
+Source: "..\y-coustic\rsc\y-coustic.xml"; DestDir: "{userappdata}\Ypo-Lite"; Components: coustic; Flags: onlyifdoesntexist uninsneveruninstall
 
 [Icons]
 Name: "{group}\Y-Snap"; Filename: "{app}\y-snap.exe"; Components: snap
 Name: "{group}\Y-Snap settings"; Filename: "{app}\y-snap-config.exe"; Components: snapconfig
 Name: "{group}\Y-Pop"; Filename: "{app}\y-pop.exe"; Components: pop
 Name: "{group}\Y-Pop settings"; Filename: "{app}\y-pop-config.exe"; Components: popconfig
+Name: "{group}\Y-Coustic"; Filename: "{app}\y-coustic.exe"; Components: coustic
+Name: "{group}\Y-Coustic settings"; Filename: "{app}\y-coustic-config.exe"; Components: cousticconfig
 
 [Run]
 Filename: "{app}\y-snap.exe"; Description: "Start Y-Snap"; Components: snap; Flags: nowait postinstall skipifsilent
 Filename: "{app}\y-pop.exe"; Description: "Start Y-Pop"; Components: pop; Flags: nowait postinstall skipifsilent unchecked
+Filename: "{app}\y-coustic.exe"; Description: "Start Y-Coustic"; Components: coustic; Flags: nowait postinstall skipifsilent unchecked
 
 [UninstallRun]
 ; Stop the tray apps so their files can be deleted.
 Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM y-snap.exe"; Flags: runhidden; RunOnceId: "KillSnap"
 Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM y-pop.exe"; Flags: runhidden; RunOnceId: "KillPop"
+Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM y-coustic.exe"; Flags: runhidden; RunOnceId: "KillCoustic"
 
 [Registry]
 ; Written by the "Start Y-Snap with Windows" task, in the form y_core::startup uses.
@@ -85,6 +94,7 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 ; Y-Pop's own "Start with Windows" writes this value (ipc::STARTUP_NAME); remove
 ; it on uninstall so the Run key does not keep pointing at a deleted file.
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueName: "Y-Pop"; Flags: dontcreatekey uninsdeletevalue
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueName: "Y-Coustic"; Flags: dontcreatekey uninsdeletevalue
 
 ; Settings in %APPDATA%\Ypo-Lite are deliberately left behind on uninstall.
 
@@ -120,7 +130,8 @@ end;
 
 function RuntimeNeeded: Boolean;
 begin
-  Result := (WizardIsComponentSelected('snapconfig') or WizardIsComponentSelected('popconfig'))
+  Result := (WizardIsComponentSelected('snapconfig') or WizardIsComponentSelected('popconfig')
+    or WizardIsComponentSelected('cousticconfig'))
     and not RuntimeInstalled;
 end;
 

@@ -1,7 +1,7 @@
 # y-coustic-config: development
 
 How the settings app is built. To use it, see the
-[user manual](../../y-coustic/docs/user-manual.md#the-settings-app); the plan, with
+[user manual](user-manual.md); the plan, with
 what was decided and why, is [`design/plan.md`](design/plan.md); what to look at in
 a real window is [`ui-checklist.md`](ui-checklist.md). Read
 [`ui-kit/docs/ui-toolkit.md`](../../ui-kit/docs/ui-toolkit.md) before adding or

@@ -38,7 +38,7 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
-$apps = 'y-snap', 'y-snap-config', 'y-pop', 'y-pop-config'
+$apps = 'y-snap', 'y-snap-config', 'y-pop', 'y-pop-config', 'y-coustic', 'y-coustic-config'
 
 # Workspace version, single source of truth for the installer.
 $version = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' |
@@ -106,7 +106,7 @@ Write-Host '== packing the portable zip'
 $setup = "dist\ypo-lite-setup-$version.exe"
 $zip = "dist\ypo-lite-$version-x64.zip"
 $contents = @($apps | ForEach-Object { "target\release\$_.exe" }) +
-    'y-snap\rsc\y-snap.xml', 'y-pop\rsc\y-pop.xml', 'LICENSE'
+    'y-snap\rsc\y-snap.xml', 'y-pop\rsc\y-pop.xml', 'y-coustic\rsc\y-coustic.xml', 'LICENSE'
 Compress-Archive -Path $contents -DestinationPath $zip -Force
 
 Write-Host '== checksums'

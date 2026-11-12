@@ -19,9 +19,9 @@ and nothing injected into your other programs.**
 
 ## Why Ypo-Lite
 
-- **Light.** Y-Snap is about 400 KB on disk and Y-Pop about 750 KB. Each is one
-  `.exe` that sits in the notification area and does its job, and uses about
-  1.4 MB and 1.7 MB of memory while running ([measured](#memory)).
+- **Light.** Each tool is one `.exe` of a few hundred kilobytes that sits in the
+  notification area and does its job. While running, Y-Snap holds about 0.3 MB
+  of private memory, Y-Pop 1.3 MB and Y-Coustic 0.7 MB ([measured](#memory)).
 - **Nothing to carry around.** No installer is required: drop the executable and
   its one XML file on a USB stick and go. Settings are plain text you can read,
   diff and version.
@@ -40,16 +40,18 @@ leaving out the DLL plugins and the legacy.
 
 ### Memory
 
-What Windows reports for the two tools once they are running and idle, next to
+What Windows reports for the three tools once they are running and idle, next to
 PowerToys' Command Palette, a launcher with a comparable job to Y-Pop's search:
 
 | | |
 | --- | --- |
-| ![Y-Pop 1.7 MB, Y-Snap 1.4 MB](docs/images/ypo-lite_memory.png) | ![PowerToys Command Palette 170.5 MB, its extension host 8.7 MB](docs/images/powertoys-palette_memory.png) |
-| **Ypo-Lite**: Y-Pop 1.7 MB, Y-Snap 1.4 MB | **PowerToys**: Command Palette 170.5 MB, plus 8.7 MB for its extension system |
+| ![Y-Snap, Y-Pop and Y-Coustic in the Task Manager](docs/images/ypo-lite_memory.png) | ![PowerToys Command Palette 170.5 MB, its extension host 8.7 MB](docs/images/powertoys-palette_memory.png) |
+| **Ypo-Lite**, private / shared: Y-Snap 0.27 / 5.97 MB, Y-Pop 1.27 / 2.56 MB, Y-Coustic 0.74 / 1.70 MB | **PowerToys**: Command Palette 170.5 MB, plus 8.7 MB for its extension system |
 
-These are the *Memory* column of the Windows Task Manager on one machine, not a
-benchmark, and the two programs do not do exactly the same things. Command
+These are the private and shared working sets Windows reports on one machine,
+not a benchmark. Private memory is what a tool alone costs; shared memory is
+mostly Windows' own libraries, mapped once for every program that uses them.
+The programs do not do exactly the same things. Command
 Palette is built on a UI framework and an extension system, which Ypo-Lite
 leaves out on purpose.
 
@@ -59,14 +61,16 @@ leaves out on purpose.
 | --- | --- | --- | --- |
 | **[Y-Snap](y-snap/README.md)** | Window management by hotkey, mouse gesture and overlay: move and resize from anywhere inside a window, minimize, maximize, roll up, fade, strip the frame, hide behind a tray icon, pin to every virtual desktop or send to another one or to another monitor | HulK | Usable |
 | **[Y-Pop](y-pop/README.md)** | A tray icon whose menu launches your programs, and a search window that finds them as you type | PortAL | Usable |
-| **Y-Coustic** | Volume manager | VulCan | *Work in progress* |
+| **[Y-Coustic](y-coustic/README.md)** | Volume manager: steps or mutes the master volume, the microphone and any application from hotkeys, the mouse wheel and the tray icon, with a small on-screen bar | VulCan | Usable |
 
-Y-Snap and Y-Pop are each configured through one XML file.
-[`y-snap-config`](y-snap-config/README.md) and
-[`y-pop-config`](y-pop-config/README.md) are the WinUI 3 settings apps that edit
-those files, if you would rather not edit them by hand. Their manuals:
-[y-snap-config](y-snap-config/docs/user-manual.md) and
-[y-pop-config](y-pop-config/docs/user-manual.md).
+Each tool is configured through one XML file.
+[`y-snap-config`](y-snap-config/README.md),
+[`y-pop-config`](y-pop-config/README.md) and
+[`y-coustic-config`](y-coustic-config/README.md) are the WinUI 3 settings apps that
+edit those files, if you would rather not edit them by hand. Their manuals:
+[y-snap-config](y-snap-config/docs/user-manual.md),
+[y-pop-config](y-pop-config/docs/user-manual.md) and
+[y-coustic-config](y-coustic-config/docs/user-manual.md).
 
 ## Install
 
@@ -78,13 +82,13 @@ Ypo-Lite needs Windows 10 or 11 (x64). Download one of these from the
   default configuration, and downloads the Windows App Runtime (about 125 MB)
   if the settings apps need it.
 - **The portable zip**, `ypo-lite-<version>-x64.zip`. Extract it to a folder of
-  your own and run `y-snap.exe` or `y-pop.exe`; each one appears in the
+  your own and run `y-snap.exe`, `y-pop.exe` or `y-coustic.exe`; each one appears in the
   notification area. The configuration files stay next to the executables.
 
 The settings apps need the
 [Windows App Runtime](https://learn.microsoft.com/windows/apps/windows-app-sdk/downloads)
 2.4 or later. If you use the zip and it is missing, they offer to open that
-page. Y-Snap and Y-Pop don't need it.
+page. Y-Snap, Y-Pop and Y-Coustic don't need it.
 
 ### Trust and verification
 
@@ -101,7 +105,7 @@ confirms a file was built by this repository's release workflow.
 Each tool uses the first of these that exists:
 
 1. the path given with `-config <file>` on the command line;
-2. `y-snap.xml` or `y-pop.xml` next to the executable, which keeps a copy
+2. `y-snap.xml`, `y-pop.xml` or `y-coustic.xml` next to the executable, which keeps a copy
    portable;
 3. `%APPDATA%\Ypo-Lite\`.
 
@@ -126,9 +130,9 @@ code, how to build and test, and what a pull request needs to be merged.
 
 | Path | Content |
 | --- | --- |
-| `y-snap`, `y-pop` | the tools |
-| [`y-snap-config`](y-snap-config/README.md), [`y-pop-config`](y-pop-config/README.md) | their WinUI 3 settings apps ([manual](y-snap-config/docs/user-manual.md), [manual](y-pop-config/docs/user-manual.md)) |
-| `y-term`, `y-coustic` | placeholders for the next tools |
+| `y-snap`, `y-pop`, `y-coustic` | the tools |
+| [`y-snap-config`](y-snap-config/README.md), [`y-pop-config`](y-pop-config/README.md), [`y-coustic-config`](y-coustic-config/README.md) | their WinUI 3 settings apps ([manual](y-snap-config/docs/user-manual.md), [manual](y-pop-config/docs/user-manual.md), [manual](y-coustic-config/docs/user-manual.md)) |
+| `y-term` | placeholder for the next tool |
 | [`core`](core/README.md) | shared Win32 plumbing: tray icon, hotkeys, overlays, menus, configuration |
 | [`ui-kit`](ui-kit/README.md) | the WinUI toolkit shared by the settings apps ([guide](ui-kit/docs/ui-toolkit.md)) |
 | [`skeleton`](skeleton/README.md) | a self-contained reference application, with the Win32 rationale behind `core` |
