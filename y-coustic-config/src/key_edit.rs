@@ -12,11 +12,11 @@
 //! what is wanted.
 
 use windows::Win32::UI::Input::KeyboardAndMouse::{HOT_KEY_MODIFIERS, MOD_NOREPEAT, VIRTUAL_KEY};
+use y_core::hotkey::Hotkey;
 use y_coustic::config::{Binding, Settings};
 use y_coustic::controls::{KeysGroup, Plain, Scope, is_media_key};
 use y_coustic::edit::List;
 use y_coustic::model::{Action, Target};
-use y_core::hotkey::Hotkey;
 
 use crate::edit::GroupKey;
 use crate::ui::editor::modal;
@@ -65,7 +65,10 @@ pub enum KeyMsg {
 
 /// What the target holds now, as the dialog's starting point; `None` if the
 /// target is gone.
-fn start(settings: &Settings, target: KeyTarget) -> Option<(HOT_KEY_MODIFIERS, Option<VIRTUAL_KEY>)> {
+fn start(
+    settings: &Settings,
+    target: KeyTarget,
+) -> Option<(HOT_KEY_MODIFIERS, Option<VIRTUAL_KEY>)> {
     let fresh = (HOT_KEY_MODIFIERS(MOD_NOREPEAT.0), None);
     let held = |hotkey: Option<Hotkey>| match hotkey {
         Some(hotkey) => (hotkey.modifiers, Some(hotkey.key)),
@@ -302,7 +305,11 @@ mod tests {
     fn a_target_that_is_gone_does_not_open() {
         let mut settings = settings();
         let mut ui = KeyEditUi::default();
-        assert!(!apply(&mut settings, &mut ui, KeyMsg::Open(KeyTarget::Hotkey(99))));
+        assert!(!apply(
+            &mut settings,
+            &mut ui,
+            KeyMsg::Open(KeyTarget::Hotkey(99))
+        ));
         assert_eq!(ui.open, None);
     }
 
@@ -314,7 +321,11 @@ mod tests {
         open(&mut settings, &mut ui, KeyTarget::Hotkey(0));
         apply(&mut settings, &mut ui, KeyMsg::Key(VK_F5));
         assert_eq!(settings.hotkeys, before.hotkeys);
-        assert!(!apply(&mut settings, &mut ui, KeyMsg::Closed { accepted: false }));
+        assert!(!apply(
+            &mut settings,
+            &mut ui,
+            KeyMsg::Closed { accepted: false }
+        ));
         assert_eq!(settings.hotkeys, before.hotkeys);
         assert_eq!(ui.open, None);
     }
@@ -326,7 +337,11 @@ mod tests {
         open(&mut settings, &mut ui, KeyTarget::Hotkey(0));
         apply(&mut settings, &mut ui, KeyMsg::Key(VK_F5));
         apply(&mut settings, &mut ui, KeyMsg::Modifier(MOD_CONTROL));
-        assert!(apply(&mut settings, &mut ui, KeyMsg::Closed { accepted: true }));
+        assert!(apply(
+            &mut settings,
+            &mut ui,
+            KeyMsg::Closed { accepted: true }
+        ));
         let hotkey = settings.hotkeys[0].hotkey;
         assert_eq!(hotkey.key, VK_F5);
         assert_ne!(hotkey.modifiers.0 & MOD_CONTROL.0, 0);
@@ -338,7 +353,11 @@ mod tests {
         let mut settings = settings();
         let mut ui = KeyEditUi::default();
         open(&mut settings, &mut ui, KeyTarget::Hotkey(0));
-        apply(&mut settings, &mut ui, KeyMsg::Key(y_core::hotkey::key_from_name("VolumeUp").unwrap()));
+        apply(
+            &mut settings,
+            &mut ui,
+            KeyMsg::Key(y_core::hotkey::key_from_name("VolumeUp").unwrap()),
+        );
         apply(&mut settings, &mut ui, KeyMsg::Closed { accepted: true });
         assert!(settings.hotkeys[0].hook_only);
 
@@ -357,18 +376,30 @@ mod tests {
         open(&mut settings, &mut ui, KeyTarget::NewGroup);
         // No key yet: OK is not offered, and closing with OK adds nothing.
         assert!(!verdict(&settings, &ui).accepted);
-        assert!(!apply(&mut settings, &mut ui, KeyMsg::Closed { accepted: true }));
+        assert!(!apply(
+            &mut settings,
+            &mut ui,
+            KeyMsg::Closed { accepted: true }
+        ));
         assert_eq!(settings.controls.keys.len(), groups);
 
         open(&mut settings, &mut ui, KeyTarget::NewGroup);
         apply(&mut settings, &mut ui, KeyMsg::Key(VK_F5));
-        assert!(apply(&mut settings, &mut ui, KeyMsg::Closed { accepted: true }));
+        assert!(apply(
+            &mut settings,
+            &mut ui,
+            KeyMsg::Closed { accepted: true }
+        ));
         assert_eq!(settings.controls.keys.len(), groups + 1);
         assert_eq!(settings.controls.keys[groups].up.unwrap().key, VK_F5);
 
         open(&mut settings, &mut ui, KeyTarget::NewHotkey);
         apply(&mut settings, &mut ui, KeyMsg::Key(VK_F6));
-        assert!(apply(&mut settings, &mut ui, KeyMsg::Closed { accepted: true }));
+        assert!(apply(
+            &mut settings,
+            &mut ui,
+            KeyMsg::Closed { accepted: true }
+        ));
         assert_eq!(settings.hotkeys.len(), hotkeys + 1);
         assert_eq!(settings.hotkeys[hotkeys].action, Action::Mute);
     }

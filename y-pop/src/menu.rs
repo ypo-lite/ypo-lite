@@ -90,6 +90,8 @@ use y_core::icon::{Bitmap, Icon, IconCache, StockIcon};
 use y_core::ids::IDM_FIRST;
 use y_core::menu::{self, MenuDesign, MenuSelect, PopupMenu};
 
+use y_pop::{config, ipc};
+
 use y_pop::model::{
     App, Browse, ConfigTree, Defaults, EventMask, NodeData, NodeId, NodeKind, OpenFolder,
     TrayExtras,
@@ -102,7 +104,11 @@ const DISCOVERED_ID_BASE: u32 = 1_000_000;
 
 /// Command ids of the entries a right click adds ([`build_with`]): just
 /// below the discovered files', far above any node's `IDM_FIRST + index`.
-const EXTRA_SEARCH: u32 = DISCOVERED_ID_BASE - 3;
+const EXTRA_SEARCH: u32 = DISCOVERED_ID_BASE - 7;
+const EXTRA_SETTINGS: u32 = DISCOVERED_ID_BASE - 6;
+const EXTRA_EDIT_CONFIG: u32 = DISCOVERED_ID_BASE - 5;
+const EXTRA_RELOAD: u32 = DISCOVERED_ID_BASE - 4;
+const EXTRA_STARTUP: u32 = DISCOVERED_ID_BASE - 3;
 const EXTRA_ABOUT: u32 = DISCOVERED_ID_BASE - 2;
 const EXTRA_QUIT: u32 = DISCOVERED_ID_BASE - 1;
 
@@ -110,6 +116,14 @@ const EXTRA_QUIT: u32 = DISCOVERED_ID_BASE - 1;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Extra {
     Search,
+    /// In the **Configuration** submenu.
+    Settings,
+    /// In the **Configuration** submenu.
+    EditConfig,
+    /// In the **Configuration** submenu.
+    Reload,
+    /// In the **Configuration** submenu: toggles the `Run` registration.
+    Startup,
     About,
     Quit,
 }
@@ -308,6 +322,10 @@ pub enum Selection {
 pub fn resolve_selection(id: u32, session: &mut Session) -> Option<Selection> {
     match id {
         EXTRA_SEARCH => return Some(Selection::Extra(Extra::Search)),
+        EXTRA_SETTINGS => return Some(Selection::Extra(Extra::Settings)),
+        EXTRA_EDIT_CONFIG => return Some(Selection::Extra(Extra::EditConfig)),
+        EXTRA_RELOAD => return Some(Selection::Extra(Extra::Reload)),
+        EXTRA_STARTUP => return Some(Selection::Extra(Extra::Startup)),
         EXTRA_ABOUT => return Some(Selection::Extra(Extra::About)),
         EXTRA_QUIT => return Some(Selection::Extra(Extra::Quit)),
         _ => {}
@@ -400,18 +418,25 @@ fn append_extras(
     menu: &mut PopupMenu,
     session: &mut Session,
 ) {
-    if !(extras.search || extras.about || extras.quit) {
+    if !(extras.search || extras.configuration || extras.about || extras.quit) {
         return;
     }
     if menu.item_count() > 0 {
         let _ = menu.add_titled_separator("");
     }
 
-    let mut add = |id: u32, label: &str, stock: StockIcon, shortcut: Option<&str>| {
+    fn add(
+        menu: &mut PopupMenu,
+        session: &mut Session,
+        id: u32,
+        label: &str,
+        stock: StockIcon,
+        shortcut: Option<&str>,
+    ) {
         let icon = session.icons.for_stock(stock);
         let _ = menu.add_item_with_shortcut(id, label, shortcut);
         session.attach_icon(icon, |bitmap| menu.set_item_icon(id, bitmap));
-    };
+    }
     if extras.search {
         // The hotkey that opens it, as any other entry shows its own.
         let hotkey = tree
@@ -419,18 +444,49 @@ fn append_extras(
             .filter(|_| tree.defaults.show_shortcuts)
             .map(|(_, binding)| binding.hotkey.to_string());
         add(
+            menu,
+            session,
             EXTRA_SEARCH,
             "Open Search",
             StockIcon::Find,
             hotkey.as_deref(),
         );
     }
+    if extras.configuration {
+        append_configuration(menu, session);
+    }
     if extras.about {
-        add(EXTRA_ABOUT, "About", StockIcon::Info, None);
+        add(menu, session, EXTRA_ABOUT, "About", StockIcon::Info, None);
     }
     if extras.quit {
-        add(EXTRA_QUIT, "Quit", StockIcon::Delete, None);
+        add(menu, session, EXTRA_QUIT, "Quit", StockIcon::Delete, None);
     }
+}
+
+/// The **Configuration** submenu every Ypo-Lite app has in the same place:
+/// *Settings…*, *Edit y-pop.xml*, *Reload configuration*, then *Start with
+/// Windows*, set apart by a rule.
+fn append_configuration(menu: &mut PopupMenu, session: &mut Session) {
+    let Ok(submenu) = PopupMenu::new_maybe_themed(session.design) else {
+        return;
+    };
+    let file = config::path().file_name().map_or_else(
+        || "y-pop.xml".to_owned(),
+        |name| name.to_string_lossy().into_owned(),
+    );
+    let _ = submenu.add_item(EXTRA_SETTINGS, "Settings…");
+    let _ = submenu.add_item(EXTRA_EDIT_CONFIG, &format!("Edit {file}"));
+    let _ = submenu.add_item(EXTRA_RELOAD, "Reload configuration");
+    let _ = submenu.add_separator();
+    let startup = y_core::startup::is_enabled(ipc::STARTUP_NAME);
+    let _ = submenu.add_check_item(EXTRA_STARTUP, "Start with Windows", startup);
+
+    let icon = session.icons.for_stock(StockIcon::Settings);
+    let _ = menu.add_submenu("Configuration", submenu);
+    let position = menu.item_count().saturating_sub(1);
+    session.attach_icon(icon, |bitmap| {
+        menu.set_item_icon_by_position(position, bitmap)
+    });
 }
 
 fn append_children(tree: &ConfigTree, parent: NodeId, menu: &mut PopupMenu, session: &mut Session) {
@@ -642,8 +698,8 @@ mod tests {
     use std::sync::Mutex;
 
     use windows::Win32::UI::WindowsAndMessaging::{
-        GetMenuItemCount, GetMenuItemID, GetMenuItemInfoW, GetMenuStringW, MENUITEMINFOW,
-        MF_BYPOSITION, MFT_MENUBREAK, MIIM_BITMAP, MIIM_FTYPE,
+        GetMenuItemCount, GetMenuItemID, GetMenuItemInfoW, GetMenuStringW, GetSubMenu,
+        MENUITEMINFOW, MF_BYPOSITION, MFT_MENUBREAK, MIIM_BITMAP, MIIM_FTYPE,
     };
 
     use y_pop::config;
@@ -748,7 +804,7 @@ mod tests {
     }
 
     #[test]
-    fn a_right_click_menu_is_the_menu_then_a_rule_then_search_about_and_quit() {
+    fn a_right_click_menu_is_the_menu_then_a_rule_then_search_configuration_about_and_quit() {
         let _guard = serialized();
         let tree = tree_from(
             r#"<y-pop><search/><group name="Work"><app name="A" exe="a.exe"/></group></y-pop>"#,
@@ -758,15 +814,16 @@ mod tests {
 
         let (popup, mut session) = build_with(&tree, Some(root), Some(extras));
         let texts = all_items(popup.handle());
-        assert_eq!(texts.len(), 5, "{texts:?}");
+        assert_eq!(texts.len(), 6, "{texts:?}");
         assert_eq!(texts[0], "A");
         assert_eq!(texts[1], "", "the rule");
         assert_eq!(texts[2], "Open Search");
-        assert_eq!(texts[3], "About");
-        assert_eq!(texts[4], "Quit");
+        assert_eq!(texts[3], "Configuration");
+        assert_eq!(texts[4], "About");
+        assert_eq!(texts[5], "Quit");
 
         // And each one resolves to what it says.
-        for (position, expected) in [(2, Extra::Search), (3, Extra::About), (4, Extra::Quit)] {
+        for (position, expected) in [(2, Extra::Search), (4, Extra::About), (5, Extra::Quit)] {
             let id = unsafe { GetMenuItemID(popup.handle(), position) };
             assert!(
                 matches!(
@@ -789,7 +846,57 @@ mod tests {
         // Its own Quit, then the rule, then About — no second Quit and, with
         // no <search>, no Open Search.
         let texts = all_items(popup.handle());
-        assert_eq!(texts, ["A", "Quit", "", "About"], "{texts:?}");
+        assert_eq!(
+            texts,
+            ["A", "Quit", "", "Configuration", "About"],
+            "{texts:?}"
+        );
+    }
+
+    #[test]
+    fn the_configuration_submenu_holds_settings_edit_reload_and_startup() {
+        let _guard = serialized();
+        let tree =
+            tree_from(r#"<y-pop><group name="Work"><app name="A" exe="a.exe"/></group></y-pop>"#);
+        let root = tree.roots[0];
+        let (popup, mut session) = build_with(&tree, Some(root), Some(tree.tray_extras(root)));
+        let submenu = unsafe { GetSubMenu(popup.handle(), 2) };
+        assert!(!submenu.is_invalid(), "Configuration is item 2");
+        let texts = all_items(submenu);
+        assert_eq!(texts.len(), 5, "{texts:?}");
+        assert!(texts[1].starts_with("Edit "), "{texts:?}");
+        assert_eq!(texts[2], "Reload configuration");
+        assert_eq!(texts[3], "", "the rule");
+        assert!(texts[4].starts_with("Start with Windows"), "{texts:?}");
+
+        for (position, expected) in [
+            (0, Extra::Settings),
+            (1, Extra::EditConfig),
+            (2, Extra::Reload),
+            (4, Extra::Startup),
+        ] {
+            let id = unsafe { GetMenuItemID(submenu, position) };
+            assert!(
+                matches!(
+                    resolve_selection(id, &mut session),
+                    Some(Selection::Extra(found)) if found == expected
+                ),
+                "item {position}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_menu_with_its_own_settings_entry_gets_no_configuration_submenu() {
+        let _guard = serialized();
+        let tree = tree_from(r#"<y-pop><group name="W"><settings/></group></y-pop>"#);
+        let root = tree.roots[0];
+        let (popup, _session) = build_with(&tree, Some(root), Some(tree.tray_extras(root)));
+        let texts = all_items(popup.handle());
+        assert!(
+            !texts.iter().any(|text| text == "Configuration"),
+            "{texts:?}"
+        );
     }
 
     #[test]
@@ -799,7 +906,11 @@ mod tests {
         let root = tree.roots[0];
         let (popup, _session) = build_with(&tree, None, Some(tree.tray_extras(root)));
         let texts = all_items(popup.handle());
-        assert_eq!(texts, ["Open Search", "About", "Quit"], "{texts:?}");
+        assert_eq!(
+            texts,
+            ["Open Search", "Configuration", "About", "Quit"],
+            "{texts:?}"
+        );
     }
 
     #[test]

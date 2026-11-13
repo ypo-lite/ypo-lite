@@ -137,7 +137,12 @@ impl Settings {
 
     /// Adds a layer to the group at `index` (the end if past it); its index.
     /// `None` when the group is aimed by a target, or is not there.
-    pub fn insert_group_layer(&mut self, group: usize, index: usize, layer: Layer) -> Option<usize> {
+    pub fn insert_group_layer(
+        &mut self,
+        group: usize,
+        index: usize,
+        layer: Layer,
+    ) -> Option<usize> {
         let (layers, parts) = self.group_layers_mut(group)?;
         Some(insert(layers, parts, index, layer))
     }
@@ -172,7 +177,12 @@ impl Settings {
     /// Gives group `to` a copy of the layers group `from` is aimed by (a target
     /// counts as its one layer), without their comments. Whether anything changed.
     pub fn copy_group_layers(&mut self, from: usize, to: usize) -> bool {
-        let Some(layers) = self.controls.keys.get(from).map(|group| group.scope.layers()) else {
+        let Some(layers) = self
+            .controls
+            .keys
+            .get(from)
+            .map(|group| group.scope.layers())
+        else {
             return false;
         };
         from != to && self.set_group_scope(to, Scope::Layers(layers))
@@ -236,11 +246,9 @@ impl Settings {
             .iter()
             .enumerate()
             .filter(|(index, binding)| {
-                self.mouse[..*index]
-                    .iter()
-                    .any(|earlier| {
-                        earlier.input == binding.input && earlier.modifiers == binding.modifiers
-                    })
+                self.mouse[..*index].iter().any(|earlier| {
+                    earlier.input == binding.input && earlier.modifiers == binding.modifiers
+                })
             })
             .map(|(index, _)| index)
             .collect()
@@ -376,7 +384,10 @@ mod tests {
         assert_eq!(settings.group_layer_count(0), 2);
         // A target-aimed group has no layers of its own to edit.
         assert_eq!(settings.group_layer_count(1), 0);
-        let extra = Layer { modifiers: MOD_CONTROL.0, target: Target::Focused };
+        let extra = Layer {
+            modifiers: MOD_CONTROL.0,
+            target: Target::Focused,
+        };
         assert_eq!(settings.insert_group_layer(1, 0, extra), None);
 
         assert_eq!(settings.insert_group_layer(0, 1, extra), Some(1));
@@ -411,8 +422,14 @@ mod tests {
         // The target group takes the layers of the first.
         assert!(settings.copy_group_layers(0, 1));
         assert_eq!(settings.group_layer_count(1), 2);
-        assert_eq!(settings.controls.keys[0].scope, settings.controls.keys[1].scope);
-        assert!(!settings.copy_group_layers(0, 1), "nothing changes the second time");
+        assert_eq!(
+            settings.controls.keys[0].scope,
+            settings.controls.keys[1].scope
+        );
+        assert!(
+            !settings.copy_group_layers(0, 1),
+            "nothing changes the second time"
+        );
         assert!(!settings.copy_group_layers(0, 0));
         assert!(!settings.copy_group_layers(0, 9));
 

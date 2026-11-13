@@ -79,10 +79,7 @@ mod tests {
 
     fn mic(muted: bool) -> Inputs {
         Inputs {
-            microphone: Some(State {
-                level: 0.5,
-                muted,
-            }),
+            microphone: Some(State { level: 0.5, muted }),
         }
     }
 
@@ -99,7 +96,10 @@ mod tests {
         assert_eq!(decide(Rule::MicMuted, &mic(true)), Appearance::MicMuted);
         assert_eq!(decide(Rule::MicMuted, &mic(false)), Appearance::Normal);
         // No microphone, or one that cannot be read: nothing to warn about.
-        assert_eq!(decide(Rule::MicMuted, &Inputs::default()), Appearance::Normal);
+        assert_eq!(
+            decide(Rule::MicMuted, &Inputs::default()),
+            Appearance::Normal
+        );
     }
 
     #[test]

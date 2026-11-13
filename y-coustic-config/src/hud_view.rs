@@ -118,7 +118,12 @@ impl HudUi {
             state: state.map(|(level, muted)| ((level * 100.0).round() as u8, muted)),
             dark,
         };
-        if let Some((_, picture)) = self.pictures.borrow().iter().find(|(known, _)| *known == key) {
+        if let Some((_, picture)) = self
+            .pictures
+            .borrow()
+            .iter()
+            .find(|(known, _)| *known == key)
+        {
             return picture.clone();
         }
 
@@ -158,7 +163,9 @@ pub fn hud_view(
     viewport: Viewport,
     context: &ViewContext<ConfigApp>,
 ) -> View {
-    let split = Split::new(viewport).min_widths(440.0, 300.0).weights(1.5, 1.0);
+    let split = Split::new(viewport)
+        .min_widths(440.0, 300.0)
+        .weights(1.5, 1.0);
     let controls = controls(settings, ui, split.primary(), context);
     let preview = preview_pane(settings, ui, split.secondary(), context);
 
@@ -187,9 +194,18 @@ fn controls(
 ) -> View {
     let hud = &settings.hud;
     Stack::vertical(space::XL)
-        .child("style", section("Style", style_cards(hud, ui, viewport, context)))
-        .child("position", section("Where it appears", position_grid(hud, context)))
-        .child("look", section("Size and look", look(hud, viewport, context)))
+        .child(
+            "style",
+            section("Style", style_cards(hud, ui, viewport, context)),
+        )
+        .child(
+            "position",
+            section("Where it appears", position_grid(hud, context)),
+        )
+        .child(
+            "look",
+            section("Size and look", look(hud, viewport, context)),
+        )
         .child("timing", section("How long it stays", timing(hud, context)))
         .child("using", section("Using it", using(hud, viewport, context)))
         .into()
@@ -231,20 +247,21 @@ fn style_cards(
 
 fn position_grid(hud: &HudConfig, context: &ViewContext<ConfigApp>) -> View {
     let rows = POSITIONS.iter().enumerate().map(|(row, places)| {
-        let buttons = Stack::horizontal(space::XS).children(places.iter().map(|&(position, glyph)| {
-            let button: View = Button::new()
-                .style(if hud.position == position {
-                    ButtonStyle::Accent
-                } else {
-                    ButtonStyle::Default
-                })
-                .min_width(0.0)
-                .width(size::ICON_BUTTON)
-                .on_click(context.callback(move |()| Msg::Edit(Edit::HudPosition(position))))
-                .content(glyph)
-                .tooltip(position.name());
-            (position.name(), button)
-        }));
+        let buttons =
+            Stack::horizontal(space::XS).children(places.iter().map(|&(position, glyph)| {
+                let button: View = Button::new()
+                    .style(if hud.position == position {
+                        ButtonStyle::Accent
+                    } else {
+                        ButtonStyle::Default
+                    })
+                    .min_width(0.0)
+                    .width(size::ICON_BUTTON)
+                    .on_click(context.callback(move |()| Msg::Edit(Edit::HudPosition(position))))
+                    .content(glyph)
+                    .tooltip(position.name());
+                (position.name(), button)
+            }));
         (format!("row{row}"), View::from(buttons))
     });
     Stack::vertical(space::M)
@@ -302,11 +319,7 @@ fn look(hud: &HudConfig, viewport: Viewport, context: &ViewContext<ConfigApp>) -
     let font = setting(
         "Font",
         "The font family of the text. A name Windows does not have falls back to its default font.",
-        text_box(
-            hud.font.clone(),
-            "Segoe UI",
-            context.callback(Msg::HudFont),
-        ),
+        text_box(hud.font.clone(), "Segoe UI", context.callback(Msg::HudFont)),
         viewport,
     );
     Stack::vertical(space::M)
@@ -421,7 +434,9 @@ fn preview_pane(
         let mut sample = Stack::vertical(space::XS).child("title", text::caption(title));
         match ui.picture(&settings.hud, kind, state, ui.dark) {
             Some(picture) => sample = sample.child("picture", fitted(&picture, width)),
-            None => sample = sample.child("failed", text::caption("The preview could not be drawn.")),
+            None => {
+                sample = sample.child("failed", text::caption("The preview could not be drawn."))
+            }
         }
         body = body.child(index, sample);
     }
@@ -446,7 +461,11 @@ mod tests {
             let style = Style::from_name(name).expect("a known style");
             assert!(STYLES.iter().any(|(known, _)| *known == style), "{name}");
         }
-        let places: Vec<Position> = POSITIONS.iter().flatten().map(|&(position, _)| position).collect();
+        let places: Vec<Position> = POSITIONS
+            .iter()
+            .flatten()
+            .map(|&(position, _)| position)
+            .collect();
         assert_eq!(places.len(), 9);
         for name in [
             "top-left",
@@ -499,7 +518,9 @@ mod tests {
             scale: 150,
             ..HudConfig::default()
         };
-        let picture = ui.picture(&hud, Kind::Master, Some((0.5, false)), true).unwrap();
+        let picture = ui
+            .picture(&hud, Kind::Master, Some((0.5, false)), true)
+            .unwrap();
         let (width, height) = design_size(hud.style);
         assert_eq!(picture.width, f64::from(width) * 1.5);
         assert_eq!(picture.height, f64::from(height) * 1.5);
@@ -510,7 +531,12 @@ mod tests {
         let ui = HudUi::default();
         let hud = HudConfig::default();
         for level in 0..=100 {
-            ui.picture(&hud, Kind::Master, Some((level as f32 / 100.0, false)), true);
+            ui.picture(
+                &hud,
+                Kind::Master,
+                Some((level as f32 / 100.0, false)),
+                true,
+            );
         }
         assert!(ui.pictures.borrow().len() <= CACHE_LIMIT);
     }

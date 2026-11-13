@@ -34,12 +34,12 @@ pub(crate) fn choose<T: Copy + 'static>(
     options: &'static [(T, &'static str)],
     make: impl Fn(T) -> Edit + 'static,
 ) -> Callback<Option<usize>> {
-    context.callback(move |index: Option<usize>| {
-        match index.and_then(|index| options.get(index)) {
+    context.callback(
+        move |index: Option<usize>| match index.and_then(|index| options.get(index)) {
             Some((value, _)) => Msg::Edit(make(*value)),
             None => Msg::Ignored,
-        }
-    })
+        },
+    )
 }
 
 pub(crate) fn labels<T>(options: &[(T, &'static str)]) -> Vec<&'static str> {
@@ -58,16 +58,15 @@ const WATCH: &[(WatchMode, &str)] = &[
 
 /// A watch mode as a short row of choices. The master has no icon variant to
 /// keep true, so *Tray icon* would do nothing there.
-fn watch_choice(
-    context: &ViewContext<ConfigApp>,
-    endpoint: Endpoint,
-    current: WatchMode,
-) -> View {
+fn watch_choice(context: &ViewContext<ConfigApp>, endpoint: Endpoint, current: WatchMode) -> View {
     let choices: Vec<Choice<'_>> = WATCH
         .iter()
         .map(|(mode, label)| {
             if endpoint == Endpoint::Master && *mode == WatchMode::Tray {
-                Choice::disabled(label, "The master volume has no icon variant, so this would do nothing")
+                Choice::disabled(
+                    label,
+                    "The master volume has no icon variant, so this would do nothing",
+                )
             } else {
                 Choice::new(label)
             }
@@ -162,7 +161,10 @@ pub fn general_view(
         "The volume step, what to do when something else changes the volume, and the file.",
         Stack::vertical(space::XL)
             .child("step", section("Volume", step))
-            .child("watching", section("When something else changes the volume", watching))
+            .child(
+                "watching",
+                section("When something else changes the volume", watching),
+            )
             .child("file", section("File", file)),
     )
 }
@@ -213,7 +215,9 @@ pub fn tray_view(
             combo(
                 labels(ACTIONS),
                 position(ACTIONS, current),
-                choose(context, ACTIONS, move |action| Edit::TrayClick(which, action)),
+                choose(context, ACTIONS, move |action| {
+                    Edit::TrayClick(which, action)
+                }),
             ),
             viewport,
         )
@@ -221,7 +225,12 @@ pub fn tray_view(
     let mut clicks = Stack::vertical(space::M)
         .child(
             "single",
-            click("Click", "A left click on the icon.", Click::Single, tray.click),
+            click(
+                "Click",
+                "A left click on the icon.",
+                Click::Single,
+                tray.click,
+            ),
         )
         .child(
             "double",
@@ -234,7 +243,12 @@ pub fn tray_view(
         )
         .child(
             "middle",
-            click("Middle click", "A click with the wheel button.", Click::Middle, tray.middle_click),
+            click(
+                "Middle click",
+                "A click with the wheel button.",
+                Click::Middle,
+                tray.middle_click,
+            ),
         );
     if tray.double_click != TrayAction::None {
         clicks = clicks.child(
@@ -374,7 +388,13 @@ mod tests {
         // A value with no option would show an empty box and could not be left
         // alone by the user: the lists must cover the library's names.
         for name in [
-            "none", "mixer", "hud", "mute", "mute-mic", "volume-up", "volume-down",
+            "none",
+            "mixer",
+            "hud",
+            "mute",
+            "mute-mic",
+            "volume-up",
+            "volume-down",
         ] {
             let action = TrayAction::from_name(name).expect("a known action");
             assert!(position(ACTIONS, action).is_some(), "{name}");

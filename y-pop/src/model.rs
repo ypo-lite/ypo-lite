@@ -127,6 +127,9 @@ pub enum PresenterStyle {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct TrayExtras {
     pub search: bool,
+    /// The **Configuration** submenu (settings, edit, reload, start with
+    /// Windows).
+    pub configuration: bool,
     pub about: bool,
     pub quit: bool,
 }
@@ -751,16 +754,20 @@ impl ConfigTree {
     /// it, and a second copy right next to it would only be noise. One in a
     /// submenu does not count — it is not what a right click would show.
     pub fn tray_extras(&self, root: NodeId) -> TrayExtras {
-        let (mut about, mut quit) = (true, true);
+        // The Configuration submenu follows the same rule, with a Settings
+        // entry.
+        let (mut about, mut quit, mut configuration) = (true, true, true);
         for id in std::iter::once(root).chain(self.children(root)) {
             match self.node(id).kind {
                 NodeKind::About => about = false,
                 NodeKind::Quit => quit = false,
+                NodeKind::Settings => configuration = false,
                 _ => {}
             }
         }
         TrayExtras {
             search: self.search.is_some(),
+            configuration,
             about,
             quit,
         }

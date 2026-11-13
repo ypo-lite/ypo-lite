@@ -196,7 +196,11 @@ pub fn apply_to_application(
     let (sessions, applications, found) = locate(target)?;
     let application = &applications[found];
     let state = write_application(&sessions, application, change, step_pct);
-    Some((RowId::App(application.key.clone()), app_ref(application), state))
+    Some((
+        RowId::App(application.key.clone()),
+        app_ref(application),
+        state,
+    ))
 }
 
 /// Writes `change` to every session of `application` and returns what they

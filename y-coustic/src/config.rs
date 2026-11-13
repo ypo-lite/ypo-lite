@@ -955,7 +955,10 @@ impl Reader {
             let name = element.name();
             if !kept::SECTIONS.contains(&name) || self.kept.section(name).is_some() {
                 // Unknown, or a second copy: the first is the one read.
-                pending.push(Note::new(kept::element_xml(element), element.blank_before()));
+                pending.push(Note::new(
+                    kept::element_xml(element),
+                    element.blank_before(),
+                ));
                 continue;
             }
             let part = Part {
@@ -967,10 +970,14 @@ impl Reader {
                 Vec::new()
             } else {
                 // A section with no entries: whatever comments it holds.
-                notes_of(element.children_with_comments().filter_map(|node| match node {
-                    xml::Node::Comment(comment) => Some(comment),
-                    xml::Node::Element(_) => None,
-                }))
+                notes_of(
+                    element
+                        .children_with_comments()
+                        .filter_map(|node| match node {
+                            xml::Node::Comment(comment) => Some(comment),
+                            xml::Node::Element(_) => None,
+                        }),
+                )
             };
             *self.kept.section_mut(name) = kept::Section { part, tail };
         }
@@ -1002,9 +1009,10 @@ impl Reader {
                         };
                         items.push((value, part));
                     }
-                    None => {
-                        pending.push(Note::new(kept::element_xml(element), element.blank_before()))
-                    }
+                    None => pending.push(Note::new(
+                        kept::element_xml(element),
+                        element.blank_before(),
+                    )),
                 },
             }
         }
@@ -1433,7 +1441,10 @@ impl Reader {
         };
         let modifiers = self.mouse_modifiers(element, input)?;
         let target = self.mouse_target(element)?;
-        let invert = match element.attr("invert").map(|a| a.trim().to_ascii_lowercase()) {
+        let invert = match element
+            .attr("invert")
+            .map(|a| a.trim().to_ascii_lowercase())
+        {
             None => false,
             Some(text) if text == "true" => true,
             Some(text) if text == "false" => false,
@@ -1557,7 +1568,10 @@ impl Reader {
         let anchor = match element.attr("anchor") {
             None => defaults.anchor,
             Some(name) => Anchor::from_name(name).unwrap_or_else(|| {
-                self.warn(element, format!("anchor={name:?} is not tray, cursor or hud"));
+                self.warn(
+                    element,
+                    format!("anchor={name:?} is not tray, cursor or hud"),
+                );
                 defaults.anchor
             }),
         };
@@ -1615,7 +1629,10 @@ impl Reader {
             let text = element.attr(name)?;
             let parsed = Color::parse(text);
             if parsed.is_none() {
-                self.warn(element, format!("{name}={text:?} is not a colour (#RRGGBB)"));
+                self.warn(
+                    element,
+                    format!("{name}={text:?} is not a colour (#RRGGBB)"),
+                );
             }
             parsed
         };
@@ -1763,7 +1780,10 @@ mod tests {
         assert_eq!(settings.hud, HudConfig::default());
         assert_eq!(settings.controls.keys.len(), 3);
         assert_eq!(settings.controls.keys[0].scope.layers().len(), 2);
-        assert_eq!(settings.controls.keys[2].scope, Scope::Target(Target::Focused));
+        assert_eq!(
+            settings.controls.keys[2].scope,
+            Scope::Target(Target::Focused)
+        );
         assert_eq!(settings.hotkeys.len(), 5);
         assert_eq!(settings.mouse.len(), 5);
         assert_eq!(settings.mixer, MixerConfig::default());
@@ -2007,12 +2027,10 @@ mod tests {
 
     #[test]
     fn colors_are_read_per_kind_and_survive_a_round_trip() {
-        let settings = load(&doc(
-            r##"<colors panel="#101010" accent="#00FF00">
+        let settings = load(&doc(r##"<colors panel="#101010" accent="#00FF00">
                     <microphone accent="#D9534F" muted="#888"/>
                     <application text="#EEEEEE"/>
-                </colors>"##,
-        ));
+                </colors>"##));
         assert!(settings.warnings.is_empty(), "{:?}", settings.warnings);
         let colors = settings.hud.colors;
         assert_eq!(colors.all.panel, Color::parse("#101010"));
@@ -2057,8 +2075,6 @@ mod tests {
         assert!(again.warnings.is_empty(), "{:?}", again.warnings);
         assert_eq!(again.tray, settings.tray);
     }
-
-
 
     fn mouse_of(body: &str) -> Settings {
         load(&doc(&format!("<mouse>{body}</mouse>")))
@@ -2204,7 +2220,10 @@ mod tests {
         assert_eq!(original.bindings().len(), 1);
 
         let text = original.to_xml();
-        assert!(text.contains(r#"<!-- <layer mod="Shift" target="mic"/> -->"#), "{text}");
+        assert!(
+            text.contains(r#"<!-- <layer mod="Shift" target="mic"/> -->"#),
+            "{text}"
+        );
         let again = load(&text);
         assert!(again.warnings.is_empty(), "{:?}", again.warnings);
     }
@@ -2336,7 +2355,6 @@ mod tests {
         assert_eq!(settings.warnings.len(), 1);
     }
 
-
     #[test]
     fn the_hud_is_interactive_unless_told_otherwise() {
         assert!(load(&doc("")).hud.interactive);
@@ -2396,7 +2414,13 @@ mod tests {
 
     #[test]
     fn every_style_and_position_has_a_name_that_reads_back() {
-        for style in [Style::Bar, Style::VBar, Style::Ring, Style::Text, Style::Compact] {
+        for style in [
+            Style::Bar,
+            Style::VBar,
+            Style::Ring,
+            Style::Text,
+            Style::Compact,
+        ] {
             assert_eq!(Style::from_name(style.name()), Some(style));
         }
         for position in [
@@ -2414,7 +2438,6 @@ mod tests {
             assert_eq!(Position::from_name(position.name()), Some(position));
         }
     }
-
 
     /// The settings without what is only about the file's text: what two
     /// loads of the same meaning must share.
@@ -2474,14 +2497,12 @@ mod tests {
 
     #[test]
     fn unknown_attributes_and_unusable_elements_survive_a_save() {
-        let original = load(&doc(
-            r#"<hotkeys>
+        let original = load(&doc(r#"<hotkeys>
                 <hotkey key="Win+F1" action="mute" colour="red"/>
                 <hotkey key="Win+F2" action="frobnicate"/>
                 <hotkey key="Win+F3" action="mute"/>
             </hotkeys>
-            <frob size="3"/>"#,
-        ));
+            <frob size="3"/>"#));
         assert_eq!(original.hotkeys.len(), 2);
         assert_eq!(original.warnings.len(), 3, "{:?}", original.warnings);
 
@@ -2503,8 +2524,7 @@ mod tests {
 
     #[test]
     fn comments_in_each_list_stay_with_their_entry_and_the_blank_lines_stay() {
-        let original = load(&doc(
-            r#"<controls>
+        let original = load(&doc(r#"<controls>
                 <!-- the keys -->
                 <keys up="Win+NumAdd" target="master"/>
 
@@ -2521,8 +2541,7 @@ mod tests {
             <mouse>
                 <!-- the wheel -->
                 <wheel mod="Alt"/>
-            </mouse>"#,
-        ));
+            </mouse>"#));
         assert!(original.warnings.is_empty(), "{:?}", original.warnings);
         assert_eq!(original.kept.keys[0].part.lead[0].text, "the keys");
         assert_eq!(original.kept.keys[1].part.lead[0].text, "the second group");
@@ -2543,7 +2562,6 @@ mod tests {
         let first = text.find(r#"key="Win+F1""#).unwrap();
         assert!(one < first);
     }
-
 
     #[test]
     fn round_trips_through_to_xml() {

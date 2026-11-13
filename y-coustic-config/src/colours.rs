@@ -60,7 +60,13 @@ pub enum Slot {
 }
 
 impl Slot {
-    pub const ALL: [Slot; 5] = [Slot::Panel, Slot::Text, Slot::Track, Slot::Accent, Slot::Muted];
+    pub const ALL: [Slot; 5] = [
+        Slot::Panel,
+        Slot::Text,
+        Slot::Track,
+        Slot::Accent,
+        Slot::Muted,
+    ];
 
     pub fn title(self) -> &'static str {
         match self {
@@ -290,7 +296,11 @@ mod tests {
         assert_eq!(get(&settings.hud.colors, target), Some(GREEN));
         assert!(!run(&mut settings, &mut ui, ColourMsg::Color(GREEN)));
         // A colour with an alpha is stored opaque.
-        assert!(run(&mut settings, &mut ui, ColourMsg::Color(Color::rgba(1, 2, 3, 40))));
+        assert!(run(
+            &mut settings,
+            &mut ui,
+            ColourMsg::Color(Color::rgba(1, 2, 3, 40))
+        ));
         assert_eq!(get(&settings.hud.colors, target), Some(Color::rgb(1, 2, 3)));
     }
 
@@ -302,13 +312,21 @@ mod tests {
 
         run(&mut settings, &mut ui, ColourMsg::Open(target));
         run(&mut settings, &mut ui, ColourMsg::Color(GREEN));
-        assert!(run(&mut settings, &mut ui, ColourMsg::Close { revert: true }));
+        assert!(run(
+            &mut settings,
+            &mut ui,
+            ColourMsg::Close { revert: true }
+        ));
         assert_eq!(get(&settings.hud.colors, target), None);
         assert!(ui.editing.is_none());
 
         run(&mut settings, &mut ui, ColourMsg::Open(target));
         run(&mut settings, &mut ui, ColourMsg::Color(GREEN));
-        assert!(!run(&mut settings, &mut ui, ColourMsg::Close { revert: false }));
+        assert!(!run(
+            &mut settings,
+            &mut ui,
+            ColourMsg::Close { revert: false }
+        ));
         assert_eq!(get(&settings.hud.colors, target), Some(GREEN));
 
         // Opening the open swatch again closes it.
@@ -338,22 +356,56 @@ mod tests {
     fn the_general_accent_does_not_reach_the_microphone_but_its_own_does() {
         let mut settings = settings();
         let mut ui = ColoursUi::default();
-        let before = effective(&settings.hud.colors, addr(Set::Microphone, Slot::Accent), true);
+        let before = effective(
+            &settings.hud.colors,
+            addr(Set::Microphone, Slot::Accent),
+            true,
+        );
 
-        run(&mut settings, &mut ui, ColourMsg::Open(addr(Set::All, Slot::Accent)));
+        run(
+            &mut settings,
+            &mut ui,
+            ColourMsg::Open(addr(Set::All, Slot::Accent)),
+        );
         run(&mut settings, &mut ui, ColourMsg::Color(GREEN));
         run(&mut settings, &mut ui, ColourMsg::Close { revert: false });
-        assert_eq!(effective(&settings.hud.colors, addr(Set::Master, Slot::Accent), true), GREEN);
-        assert_eq!(effective(&settings.hud.colors, addr(Set::Application, Slot::Accent), true), GREEN);
         assert_eq!(
-            effective(&settings.hud.colors, addr(Set::Microphone, Slot::Accent), true),
+            effective(&settings.hud.colors, addr(Set::Master, Slot::Accent), true),
+            GREEN
+        );
+        assert_eq!(
+            effective(
+                &settings.hud.colors,
+                addr(Set::Application, Slot::Accent),
+                true
+            ),
+            GREEN
+        );
+        assert_eq!(
+            effective(
+                &settings.hud.colors,
+                addr(Set::Microphone, Slot::Accent),
+                true
+            ),
             before
         );
 
-        run(&mut settings, &mut ui, ColourMsg::Open(addr(Set::Microphone, Slot::Accent)));
-        run(&mut settings, &mut ui, ColourMsg::Color(Color::rgb(1, 2, 3)));
+        run(
+            &mut settings,
+            &mut ui,
+            ColourMsg::Open(addr(Set::Microphone, Slot::Accent)),
+        );
+        run(
+            &mut settings,
+            &mut ui,
+            ColourMsg::Color(Color::rgb(1, 2, 3)),
+        );
         assert_eq!(
-            effective(&settings.hud.colors, addr(Set::Microphone, Slot::Accent), true),
+            effective(
+                &settings.hud.colors,
+                addr(Set::Microphone, Slot::Accent),
+                true
+            ),
             Color::rgb(1, 2, 3)
         );
     }
@@ -371,19 +423,35 @@ mod tests {
         }
         assert_eq!(count(&settings.hud.colors, Set::Master), 2);
 
-        run(&mut settings, &mut ui, ColourMsg::Open(addr(Set::Master, Slot::Track)));
-        assert!(run(&mut settings, &mut ui, ColourMsg::ResetSet(Set::Master)));
+        run(
+            &mut settings,
+            &mut ui,
+            ColourMsg::Open(addr(Set::Master, Slot::Track)),
+        );
+        assert!(run(
+            &mut settings,
+            &mut ui,
+            ColourMsg::ResetSet(Set::Master)
+        ));
         assert!(ui.editing.is_none(), "a picker on a cleared set closes");
         assert_eq!(count(&settings.hud.colors, Set::Master), 0);
         assert_eq!(count(&settings.hud.colors, Set::Microphone), 2);
-        assert!(!run(&mut settings, &mut ui, ColourMsg::ResetSet(Set::Master)));
+        assert!(!run(
+            &mut settings,
+            &mut ui,
+            ColourMsg::ResetSet(Set::Master)
+        ));
     }
 
     #[test]
     fn what_was_chosen_is_what_y_coustic_reads_back() {
         let mut settings = settings();
         let mut ui = ColoursUi::default();
-        run(&mut settings, &mut ui, ColourMsg::Open(addr(Set::Application, Slot::Muted)));
+        run(
+            &mut settings,
+            &mut ui,
+            ColourMsg::Open(addr(Set::Application, Slot::Muted)),
+        );
         run(&mut settings, &mut ui, ColourMsg::Color(GREEN));
         run(&mut settings, &mut ui, ColourMsg::Close { revert: false });
         let again = Settings::parse(PathBuf::from("test.xml"), &settings.to_xml()).unwrap();

@@ -48,7 +48,8 @@ impl Sessions {
             let Ok(device) = (unsafe { devices.Item(index) }) else {
                 continue;
             };
-            let Ok(manager) = (unsafe { device.Activate::<IAudioSessionManager2>(CLSCTX_ALL, None) })
+            let Ok(manager) =
+                (unsafe { device.Activate::<IAudioSessionManager2>(CLSCTX_ALL, None) })
             else {
                 continue;
             };
@@ -106,7 +107,8 @@ fn read(
     // [`super::grouping`] already treats as a row of its own.
     let pid = unsafe { details.GetProcessId() }.unwrap_or(0);
     let is_system = unsafe { details.IsSystemSoundsSession() } == S_OK;
-    let expired = unsafe { control.GetState() }.is_ok_and(|state| state == AudioSessionStateExpired);
+    let expired =
+        unsafe { control.GetState() }.is_ok_and(|state| state == AudioSessionStateExpired);
 
     let display_name = unsafe { control.GetDisplayName() }
         .ok()

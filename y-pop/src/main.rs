@@ -291,12 +291,7 @@ impl YPop {
                     y_core::shell::open(folder);
                 }
             }
-            Command::StartWithWindows => {
-                let enable = !y_core::startup::is_enabled(ipc::STARTUP_NAME);
-                if let Err(error) = y_core::startup::set_enabled(ipc::STARTUP_NAME, enable) {
-                    y_core::log::line(format_args!("start with Windows: {error}"));
-                }
-            }
+            Command::StartWithWindows => self.toggle_startup(),
             Command::About => self.show_about(),
             Command::Quit => window::quit(0),
         }
@@ -332,7 +327,7 @@ impl YPop {
     }
 
     /// Does what an entry of the right-click menu says.
-    fn run_extra(&mut self, extra: menu::Extra) {
+    fn run_extra(&mut self, hwnd: HWND, extra: menu::Extra) {
         match extra {
             menu::Extra::Search => {
                 if let Some(search) = self.search.as_mut()
@@ -341,8 +336,21 @@ impl YPop {
                     y_core::log::line(format_args!("search could not open: {error}"));
                 }
             }
+            menu::Extra::Settings => self.open_settings(),
+            menu::Extra::EditConfig => y_core::shell::open(&config::path()),
+            menu::Extra::Reload => self.reload(hwnd),
+            menu::Extra::Startup => self.toggle_startup(),
             menu::Extra::About => self.show_about(),
             menu::Extra::Quit => window::quit(0),
+        }
+    }
+
+    /// Flips the `Run` registration; a failure goes to the log, as for the
+    /// search window's own command.
+    fn toggle_startup(&self) {
+        let enable = !y_core::startup::is_enabled(ipc::STARTUP_NAME);
+        if let Err(error) = y_core::startup::set_enabled(ipc::STARTUP_NAME, enable) {
+            y_core::log::line(format_args!("start with Windows: {error}"));
         }
     }
 
@@ -407,7 +415,7 @@ impl YPop {
             match selection {
                 menu::Selection::Node(node) => self.run(hwnd, node, anchor),
                 menu::Selection::Launch(app) => launch_and_report(hwnd, &app, self.usage()),
-                menu::Selection::Extra(extra) => self.run_extra(extra),
+                menu::Selection::Extra(extra) => self.run_extra(hwnd, extra),
             }
         }
 

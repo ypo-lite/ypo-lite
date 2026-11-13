@@ -53,9 +53,9 @@ built.
 2. Press `Win` + `NumAdd` or `NumSub` to change the volume, `Win` + `Numpad0` to
    mute, or hold `Alt` and turn the wheel.
 3. Press `Win` + `Alt` + `V`, or click the icon, for the mixer.
-4. Right-click the icon for the menu: **Reload configuration**, **Open
-   configuration** (creates the file if there is none), **Start with Windows**,
-   **About**, **Exit**.
+4. Right-click the icon for the menu: **Configuration** (**Settings…**, **Edit
+   y-coustic.xml**, which creates the file if there is none, **Reload
+   configuration**, **Start with Windows**), **About**, **Exit**.
 
 <!-- Add once taken, see docs/screenshots.md:
 ![The tray icon and its menu](docs/images/y-coustic_tray_01.png)

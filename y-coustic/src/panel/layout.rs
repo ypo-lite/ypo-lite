@@ -168,7 +168,7 @@ impl Layout {
         (ratio * self.max_scroll() as f32).round() as usize
     }
 
-/// `scroll` kept within what the list can scroll.    pub fn paged_to(&self, scroll: usize) -> usize {        scroll.min(self.max_scroll())    }
+    /// `scroll` kept within what the list can scroll.    pub fn paged_to(&self, scroll: usize) -> usize {        scroll.min(self.max_scroll())    }
     /// `scroll` kept within what the list can scroll.
     pub fn paged_to(&self, scroll: usize) -> usize {
         scroll.min(self.max_scroll())
@@ -346,9 +346,7 @@ pub fn move_selection(selected: usize, delta: isize, count: usize) -> usize {
     if count == 0 {
         return 0;
     }
-    selected
-        .saturating_add_signed(delta)
-        .min(count - 1)
+    selected.saturating_add_signed(delta).min(count - 1)
 }
 
 #[cfg(test)]
@@ -472,7 +470,6 @@ mod tests {
         assert!(right > left);
     }
 
-
     #[test]
     fn the_scrollbar_exists_only_when_the_list_does_not_fit() {
         assert!(!layout(5, 5, 0).scrollable());
@@ -561,7 +558,11 @@ mod tests {
         let travel = (track.bottom - track.top) - (bottom - top);
 
         assert_eq!(l.scroll_for_thumb(track.top - 50, 0), 0, "above: the top");
-        assert_eq!(l.scroll_for_thumb(track.bottom + 50, 0), 7, "below: the end");
+        assert_eq!(
+            l.scroll_for_thumb(track.bottom + 50, 0),
+            7,
+            "below: the end"
+        );
         // Halfway down the travel is halfway down the scroll.
         let halfway = l.scroll_for_thumb(track.top + travel / 2, 0);
         assert!((3..=4).contains(&halfway), "{halfway}");
@@ -595,11 +596,19 @@ mod tests {
     fn the_selection_stays_in_view() {
         let l = layout(12, 5, 0);
         assert_eq!(l.scroll_to_show(3), 0, "already shown");
-        assert_eq!(l.scroll_to_show(5), 1, "just enough to show it at the bottom");
+        assert_eq!(
+            l.scroll_to_show(5),
+            1,
+            "just enough to show it at the bottom"
+        );
         assert_eq!(l.scroll_to_show(11), 7);
 
         let scrolled = layout(12, 5, 7);
-        assert_eq!(scrolled.scroll_to_show(6), 6, "just enough to show it on top");
+        assert_eq!(
+            scrolled.scroll_to_show(6),
+            6,
+            "just enough to show it on top"
+        );
         assert_eq!(scrolled.scroll_to_show(0), 0);
         assert_eq!(scrolled.scroll_to_show(9), 7);
     }

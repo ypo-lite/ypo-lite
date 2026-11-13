@@ -11,15 +11,17 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, LPARAM};
+use windows::Win32::Security::{GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation};
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
 };
-use windows::Win32::Security::{GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation};
 use windows::Win32::System::Threading::{
     GetCurrentProcess, GetCurrentProcessId, OpenProcess, OpenProcessToken, PROCESS_NAME_WIN32,
     PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
 };
-use windows::Win32::UI::WindowsAndMessaging::{EnumChildWindows, GetClassNameW, GetWindowThreadProcessId};
+use windows::Win32::UI::WindowsAndMessaging::{
+    EnumChildWindows, GetClassNameW, GetWindowThreadProcessId,
+};
 use windows::core::{BOOL, PWSTR};
 
 /// A process handle closed on drop.
@@ -152,7 +154,13 @@ pub fn uwp_app_pid(window: HWND) -> Option<u32> {
 
     let mut search = Search { host, found: None };
     // Stopping the enumeration makes this return an error: not a failure.
-    let _ = unsafe { EnumChildWindows(Some(window), Some(visit), LPARAM(&mut search as *mut _ as isize)) };
+    let _ = unsafe {
+        EnumChildWindows(
+            Some(window),
+            Some(visit),
+            LPARAM(&mut search as *mut _ as isize),
+        )
+    };
     search.found
 }
 

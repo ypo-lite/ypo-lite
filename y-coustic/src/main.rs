@@ -42,8 +42,8 @@ use crate::audio::watch::{WM_DEFAULT_DEVICE_CHANGED, WM_ENDPOINT_CHANGED, Watche
 use crate::audio::{Flow, Microphones};
 use crate::hud::{Hud, Reading, Request as HudRequest, WM_TRAY_WHEEL, WheelHook, take_tray_wheel};
 use crate::mixer::RowId;
-use crate::panel::{OpenWith, Panel, Request};
 use crate::mouse::{MouseHook, WM_MOUSE_ACTION, WM_MOUSE_WHEEL};
+use crate::panel::{OpenWith, Panel, Request};
 
 const APP: AppInfo = AppInfo::new("Y-Coustic", ipc::CLASS).single_instance();
 
@@ -115,7 +115,6 @@ struct YCoustic {
     /// after a save.
     reload_message: u32,
 }
-
 
 impl YCoustic {
     fn new() -> Self {
@@ -278,7 +277,11 @@ impl YCoustic {
             return;
         }
         if matches!(action, Action::VolumeUp | Action::VolumeDown | Action::Mute)
-            && let Some(row) = self.panel.as_ref().and_then(|panel| panel.selected()).cloned()
+            && let Some(row) = self
+                .panel
+                .as_ref()
+                .and_then(|panel| panel.selected())
+                .cloned()
         {
             self.carry_out(vec![Request::Change {
                 row,
@@ -435,29 +438,37 @@ impl YCoustic {
     }
 
     fn show_context_menu(&mut self, hwnd: HWND, position: POINT) {
-        let Ok(menu) = PopupMenu::new() else { return };
+        let Ok(mut menu) = PopupMenu::new() else {
+            return;
+        };
         let _ = menu.add_disabled_item(APP.name);
         let _ = menu.add_disabled_item(&format!("{} hotkeys", self.bindings.len()));
         let _ = menu.add_separator();
-        let _ = menu.add_item(IDM_SETTINGS, "Settings…");
-        let _ = menu.add_item(IDM_RELOAD, "Reload configuration");
-        let _ = menu.add_item(IDM_OPEN_CONFIG, "Open configuration");
-        let _ = menu.add_separator();
-        // Only when the configuration has volume keys to take over.
-        if let Some(settings) = self.settings.as_ref()
-            && settings.has_media_group()
-        {
-            let _ = menu.add_check_item(
-                IDM_REPLACE_VOLUME,
-                "Replace the Windows volume indicator",
-                settings.replaces_windows_volume(),
+
+        // The same submenu as in every Ypo-Lite app.
+        if let Ok(configuration) = PopupMenu::new() {
+            let _ = configuration.add_item(IDM_SETTINGS, "Settings…");
+            let _ = configuration.add_item(IDM_OPEN_CONFIG, &format!("Edit {}", config::FILE_NAME));
+            let _ = configuration.add_item(IDM_RELOAD, "Reload configuration");
+            let _ = configuration.add_separator();
+            // Only when the configuration has volume keys to take over.
+            if let Some(settings) = self.settings.as_ref()
+                && settings.has_media_group()
+            {
+                let _ = configuration.add_check_item(
+                    IDM_REPLACE_VOLUME,
+                    "Replace the Windows volume indicator",
+                    settings.replaces_windows_volume(),
+                );
+            }
+            let _ = configuration.add_check_item(
+                IDM_STARTUP,
+                "Start with Windows",
+                startup::is_enabled(STARTUP_NAME),
             );
+            let _ = menu.add_submenu("Configuration", configuration);
         }
-        let _ = menu.add_check_item(
-            IDM_STARTUP,
-            "Start with Windows",
-            startup::is_enabled(STARTUP_NAME),
-        );
+        let _ = menu.add_separator();
         let _ = menu.add_item(IDM_ABOUT, "About");
         let _ = menu.add_item(IDM_EXIT, "Exit");
 
@@ -581,7 +592,11 @@ Config: {}",
     /// a click on its glyph or anywhere else. What it asks for is done here (the
     /// HUD touches no audio) and what came of it is drawn in place.
     fn on_hud_message(&mut self, msg: u32, lparam: LPARAM) {
-        let Some(request) = self.hud.as_mut().and_then(|hud| hud.on_message(msg, lparam)) else {
+        let Some(request) = self
+            .hud
+            .as_mut()
+            .and_then(|hud| hud.on_message(msg, lparam))
+        else {
             return;
         };
         match request {
@@ -608,12 +623,11 @@ Config: {}",
     fn on_tray_popup_open(&mut self, hwnd: HWND) {
         // The wheel over the icon, from the moment the pointer is on it: the
         // hook takes the wheel inside the icon's rectangle, kept from now.
-        let wheel = self.settings.as_ref().is_some_and(|settings| {
-            settings.tray.wheel && settings.tray.hover_delay > 0
-        });
-        if wheel
-            && let Some(rect) = self.tray.as_ref().and_then(|tray| tray.rect())
-        {
+        let wheel = self
+            .settings
+            .as_ref()
+            .is_some_and(|settings| settings.tray.wheel && settings.tray.hover_delay > 0);
+        if wheel && let Some(rect) = self.tray.as_ref().and_then(|tray| tray.rect()) {
             self.tray_wheel = WheelHook::install_tray(hwnd, rect).ok();
         }
 
@@ -670,7 +684,8 @@ Config: {}",
         // The one click arriving as two messages, or the tail of a double click
         // that has already acted.
         let double_time = Duration::from_millis(u64::from(unsafe { GetDoubleClickTime() }));
-        if recently(self.last_tray_click, SAME_CLICK) || recently(self.last_double_click, double_time)
+        if recently(self.last_tray_click, SAME_CLICK)
+            || recently(self.last_double_click, double_time)
         {
             return;
         }
@@ -684,7 +699,14 @@ Config: {}",
         } else {
             self.click_pending = true;
             self.click_closed_mixer = self.mixer_just_closed();
-            unsafe { SetTimer(Some(hwnd), CLICK_TIMER_ID, double_time.as_millis() as u32, None) };
+            unsafe {
+                SetTimer(
+                    Some(hwnd),
+                    CLICK_TIMER_ID,
+                    double_time.as_millis() as u32,
+                    None,
+                )
+            };
         }
     }
 
@@ -874,11 +896,14 @@ Config: {}",
     /// The panel's second: the rows are read again, unless a bar is being
     /// dragged, which they would move under the pointer.
     fn on_panel_timer(&mut self) {
-        if self.panel.as_ref().is_some_and(|panel| !panel.is_dragging()) {
+        if self
+            .panel
+            .as_ref()
+            .is_some_and(|panel| !panel.is_dragging())
+        {
             self.refresh_panel();
         }
     }
-
 }
 
 /// `Hotkey::parse` adds `MOD_NOREPEAT`. Holding a volume key should keep
@@ -1020,7 +1045,10 @@ impl TrayApp for YCoustic {
                     TrayEvent::Select => self.on_tray_select(hwnd),
                     TrayEvent::DoubleClick => self.on_tray_double_click(hwnd),
                     TrayEvent::MiddleClick => {
-                        let action = self.settings.as_ref().map(|settings| settings.tray.middle_click);
+                        let action = self
+                            .settings
+                            .as_ref()
+                            .map(|settings| settings.tray.middle_click);
                         if let Some(action) = action {
                             self.run_tray_action(hwnd, action, false);
                         }

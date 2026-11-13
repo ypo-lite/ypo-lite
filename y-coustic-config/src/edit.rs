@@ -346,19 +346,16 @@ pub fn apply(settings: &mut Settings, edit: Edit) -> bool {
                 )
                 .is_some()
         }
-        Edit::MoveGroupLayer { group, index, up } => settings
-            .move_group_layer(group, index, !up)
-            .is_some(),
+        Edit::MoveGroupLayer { group, index, up } => {
+            settings.move_group_layer(group, index, !up).is_some()
+        }
         Edit::RemoveGroupLayer(group, index) => settings.remove_group_layer(group, index),
         Edit::DuplicateGroup(group) => settings.duplicate_entry(List::Keys, group).is_some(),
         Edit::CopyLayers { to, from } => settings.copy_group_layers(from, to),
-        Edit::HotkeyAction(index, kind) => settings
-            .hotkeys
-            .get_mut(index)
-            .is_some_and(|binding| {
-                let action = kind.action(binding.action);
-                set(&mut binding.action, action)
-            }),
+        Edit::HotkeyAction(index, kind) => settings.hotkeys.get_mut(index).is_some_and(|binding| {
+            let action = kind.action(binding.action);
+            set(&mut binding.action, action)
+        }),
         Edit::HotkeyTarget(index, target) => settings
             .hotkeys
             .get_mut(index)
@@ -465,11 +462,8 @@ mod tests {
     use super::*;
 
     fn settings() -> Settings {
-        Settings::parse(
-            PathBuf::from("test.xml"),
-            y_coustic::config::DEFAULT_XML,
-        )
-        .expect("the shipped file loads")
+        Settings::parse(PathBuf::from("test.xml"), y_coustic::config::DEFAULT_XML)
+            .expect("the shipped file loads")
     }
 
     #[test]
@@ -491,7 +485,10 @@ mod tests {
         ];
         for edit in edits {
             assert!(apply(&mut settings, edit), "{edit:?} changed nothing");
-            assert!(!apply(&mut settings, edit), "{edit:?} reported a change twice");
+            assert!(
+                !apply(&mut settings, edit),
+                "{edit:?} reported a change twice"
+            );
         }
         assert_eq!(settings.step, 12);
         assert_eq!(settings.watch.master, WatchMode::Hud);
@@ -522,12 +519,24 @@ mod tests {
             .position(|group| !group.has_media_keys())
             .expect("the shipped file has a numpad group");
         // Up, down and mute: two can go, the last cannot.
-        assert!(apply(&mut settings, Edit::ClearGroupKey(numpad, GroupKey::Mute)));
-        assert!(apply(&mut settings, Edit::ClearGroupKey(numpad, GroupKey::Down)));
-        assert!(!apply(&mut settings, Edit::ClearGroupKey(numpad, GroupKey::Up)));
+        assert!(apply(
+            &mut settings,
+            Edit::ClearGroupKey(numpad, GroupKey::Mute)
+        ));
+        assert!(apply(
+            &mut settings,
+            Edit::ClearGroupKey(numpad, GroupKey::Down)
+        ));
+        assert!(!apply(
+            &mut settings,
+            Edit::ClearGroupKey(numpad, GroupKey::Up)
+        ));
         assert!(settings.controls.keys[numpad].up.is_some());
         // Already empty: nothing to clear.
-        assert!(!apply(&mut settings, Edit::ClearGroupKey(numpad, GroupKey::Mute)));
+        assert!(!apply(
+            &mut settings,
+            Edit::ClearGroupKey(numpad, GroupKey::Mute)
+        ));
     }
 
     #[test]
@@ -535,21 +544,53 @@ mod tests {
         let mut settings = settings();
         let layers = |settings: &Settings| settings.controls.keys[0].scope.layers();
         let before = layers(&settings)[0].modifiers;
-        assert!(apply(&mut settings, Edit::GroupLayerModifier(0, 0, MOD_CONTROL)));
+        assert!(apply(
+            &mut settings,
+            Edit::GroupLayerModifier(0, 0, MOD_CONTROL)
+        ));
         assert_ne!(layers(&settings)[0].modifiers, before);
-        assert!(apply(&mut settings, Edit::GroupLayerModifier(0, 0, MOD_CONTROL)));
+        assert!(apply(
+            &mut settings,
+            Edit::GroupLayerModifier(0, 0, MOD_CONTROL)
+        ));
         assert_eq!(layers(&settings)[0].modifiers, before);
-        assert!(!apply(&mut settings, Edit::GroupLayerModifier(0, 99, MOD_CONTROL)));
-        assert!(!apply(&mut settings, Edit::GroupLayerModifier(99, 0, MOD_CONTROL)));
+        assert!(!apply(
+            &mut settings,
+            Edit::GroupLayerModifier(0, 99, MOD_CONTROL)
+        ));
+        assert!(!apply(
+            &mut settings,
+            Edit::GroupLayerModifier(99, 0, MOD_CONTROL)
+        ));
 
-        assert!(apply(&mut settings, Edit::GroupLayerTarget(0, 0, Target::Pointed)));
-        assert!(!apply(&mut settings, Edit::GroupLayerTarget(0, 0, Target::Pointed)));
+        assert!(apply(
+            &mut settings,
+            Edit::GroupLayerTarget(0, 0, Target::Pointed)
+        ));
+        assert!(!apply(
+            &mut settings,
+            Edit::GroupLayerTarget(0, 0, Target::Pointed)
+        ));
 
         let (first, second) = (layers(&settings)[0], layers(&settings)[1]);
-        assert!(apply(&mut settings, Edit::MoveGroupLayer { group: 0, index: 0, up: false }));
+        assert!(apply(
+            &mut settings,
+            Edit::MoveGroupLayer {
+                group: 0,
+                index: 0,
+                up: false
+            }
+        ));
         assert_eq!(layers(&settings)[0], second);
         assert_eq!(layers(&settings)[1], first);
-        assert!(!apply(&mut settings, Edit::MoveGroupLayer { group: 0, index: 0, up: true }));
+        assert!(!apply(
+            &mut settings,
+            Edit::MoveGroupLayer {
+                group: 0,
+                index: 0,
+                up: true
+            }
+        ));
 
         let count = layers(&settings).len();
         assert!(apply(&mut settings, Edit::AddGroupLayer(0)));
@@ -580,7 +621,10 @@ mod tests {
         assert!(apply(&mut settings, back));
         assert_eq!(
             settings.controls.keys[0].scope,
-            Scope::Layers(vec![Layer { modifiers: 0, target: first_target }])
+            Scope::Layers(vec![Layer {
+                modifiers: 0,
+                target: first_target
+            }])
         );
 
         // The target of a group that is aimed by one.
@@ -600,22 +644,34 @@ mod tests {
 
         apply(&mut settings, Edit::GroupScope(1, ScopeKind::Target));
         assert!(apply(&mut settings, Edit::CopyLayers { to: 1, from: 0 }));
-        assert_eq!(settings.controls.keys[1].scope, settings.controls.keys[0].scope);
+        assert_eq!(
+            settings.controls.keys[1].scope,
+            settings.controls.keys[0].scope
+        );
         assert!(!apply(&mut settings, Edit::CopyLayers { to: 1, from: 0 }));
     }
 
     #[test]
     fn a_hotkey_keeps_its_level_and_never_goes_above_100() {
         let mut settings = settings();
-        assert!(apply(&mut settings, Edit::HotkeyAction(0, ActionKind::SetVolume)));
+        assert!(apply(
+            &mut settings,
+            Edit::HotkeyAction(0, ActionKind::SetVolume)
+        ));
         assert!(apply(&mut settings, Edit::HotkeyLevel(0, 70)));
         assert_eq!(settings.hotkeys[0].action, Action::SetVolume(70));
         assert!(apply(&mut settings, Edit::HotkeyLevel(0, 250)));
         assert_eq!(settings.hotkeys[0].action, Action::SetVolume(100));
         // Choosing the same kind again is not an edit, level included.
-        assert!(!apply(&mut settings, Edit::HotkeyAction(0, ActionKind::SetVolume)));
+        assert!(!apply(
+            &mut settings,
+            Edit::HotkeyAction(0, ActionKind::SetVolume)
+        ));
         // A level is only for the action that has one.
-        assert!(apply(&mut settings, Edit::HotkeyAction(0, ActionKind::Mute)));
+        assert!(apply(
+            &mut settings,
+            Edit::HotkeyAction(0, ActionKind::Mute)
+        ));
         assert!(!apply(&mut settings, Edit::HotkeyLevel(0, 20)));
         assert_eq!(ActionKind::of(settings.hotkeys[0].action), ActionKind::Mute);
     }
@@ -641,7 +697,10 @@ mod tests {
     fn moving_and_removing_go_through_the_library_and_removing_has_an_undo_label() {
         let mut settings = settings();
         let count = settings.hotkeys.len();
-        assert_eq!(Edit::Remove(List::Hotkeys, 0).undo_label(&settings), Some("Deleted a hotkey"));
+        assert_eq!(
+            Edit::Remove(List::Hotkeys, 0).undo_label(&settings),
+            Some("Deleted a hotkey")
+        );
         assert_eq!(Edit::Step(3).undo_label(&settings), None);
         assert!(apply(&mut settings, Edit::Remove(List::Hotkeys, 0)));
         assert_eq!(settings.hotkeys.len(), count - 1);
@@ -662,14 +721,23 @@ mod tests {
         assert!(apply(&mut settings, Edit::MouseInput(wheel, Input::Middle)));
         assert_eq!(settings.mouse[wheel].action, Some(Action::Mute));
         assert!(!settings.mouse[wheel].invert);
-        assert!(!apply(&mut settings, Edit::MouseInput(wheel, Input::Middle)));
+        assert!(!apply(
+            &mut settings,
+            Edit::MouseInput(wheel, Input::Middle)
+        ));
 
         // Back to a wheel: no action.
-        assert!(apply(&mut settings, Edit::MouseInput(wheel, Input::WheelTilt)));
+        assert!(apply(
+            &mut settings,
+            Edit::MouseInput(wheel, Input::WheelTilt)
+        ));
         assert_eq!(settings.mouse[wheel].action, None);
 
         // A wheel has no action to choose, a button has no direction.
-        assert!(!apply(&mut settings, Edit::MouseAction(wheel, ActionKind::Mixer)));
+        assert!(!apply(
+            &mut settings,
+            Edit::MouseAction(wheel, ActionKind::Mixer)
+        ));
         assert!(apply(&mut settings, Edit::MouseInvert(wheel, true)));
         assert!(apply(&mut settings, Edit::MouseInput(wheel, Input::Left)));
         assert!(!apply(&mut settings, Edit::MouseInvert(wheel, true)));
@@ -684,13 +752,19 @@ mod tests {
         // The last modifier of a wheel cannot be switched off...
         assert!(!apply(&mut settings, Edit::MouseModifier(wheel, MOD_ALT)));
         // ...another can be added first, and then Alt can go.
-        assert!(apply(&mut settings, Edit::MouseModifier(wheel, MOD_CONTROL)));
+        assert!(apply(
+            &mut settings,
+            Edit::MouseModifier(wheel, MOD_CONTROL)
+        ));
         assert!(apply(&mut settings, Edit::MouseModifier(wheel, MOD_ALT)));
         assert_eq!(settings.mouse[wheel].modifiers, MOD_CONTROL.0);
 
         // A side button may be bare.
         assert!(apply(&mut settings, Edit::MouseInput(wheel, Input::X1)));
-        assert!(apply(&mut settings, Edit::MouseModifier(wheel, MOD_CONTROL)));
+        assert!(apply(
+            &mut settings,
+            Edit::MouseModifier(wheel, MOD_CONTROL)
+        ));
         assert_eq!(settings.mouse[wheel].modifiers, 0);
         // And becoming a main button again puts a modifier back.
         assert!(apply(&mut settings, Edit::MouseInput(wheel, Input::Right)));
@@ -706,12 +780,18 @@ mod tests {
         assert!(apply(&mut settings, Edit::MouseTarget(button, Target::Mic)));
         assert!(!apply(&mut settings, Edit::MouseLevel(button, 30)));
 
-        assert!(apply(&mut settings, Edit::MouseAction(button, ActionKind::SetVolume)));
+        assert!(apply(
+            &mut settings,
+            Edit::MouseAction(button, ActionKind::SetVolume)
+        ));
         assert!(apply(&mut settings, Edit::MouseLevel(button, 30)));
         assert_eq!(settings.mouse[button].action, Some(Action::SetVolume(30)));
         assert!(!apply(&mut settings, Edit::MouseLevel(button, 30)));
 
-        assert!(apply(&mut settings, Edit::MouseAction(button, ActionKind::Mixer)));
+        assert!(apply(
+            &mut settings,
+            Edit::MouseAction(button, ActionKind::Mixer)
+        ));
         assert_eq!(settings.mouse[button].action, Some(Action::Mixer));
         assert_eq!(settings.mouse[button].target, Target::Master);
     }
@@ -722,7 +802,10 @@ mod tests {
         apply(&mut settings, Edit::AddMouse(MouseKind::Button));
         let last = settings.mouse.len() - 1;
         apply(&mut settings, Edit::MouseInput(last, Input::X2));
-        apply(&mut settings, Edit::MouseAction(last, ActionKind::SetVolume));
+        apply(
+            &mut settings,
+            Edit::MouseAction(last, ActionKind::SetVolume),
+        );
         apply(&mut settings, Edit::MouseLevel(last, 40));
         let again = Settings::parse(PathBuf::from("test.xml"), &settings.to_xml()).unwrap();
         assert!(again.warnings.is_empty(), "{:?}", again.warnings);
@@ -745,7 +828,10 @@ mod tests {
         ];
         for edit in edits {
             assert!(apply(&mut settings, edit), "{edit:?} changed nothing");
-            assert!(!apply(&mut settings, edit), "{edit:?} reported a change twice");
+            assert!(
+                !apply(&mut settings, edit),
+                "{edit:?} reported a change twice"
+            );
         }
         apply(&mut settings, Edit::HudTimeout(1));
         assert_eq!(settings.hud.timeout, *TIMEOUT_RANGE.start());

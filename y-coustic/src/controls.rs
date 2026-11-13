@@ -24,7 +24,6 @@
 //! | `windows` (default) | Windows, with its flyout | y-coustic layers |
 //! | `replace` | y-coustic, with its HUD | y-coustic layers |
 
-
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     HOT_KEY_MODIFIERS, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, MOD_WIN, VIRTUAL_KEY,
     VK_VOLUME_DOWN, VK_VOLUME_MUTE, VK_VOLUME_UP,
@@ -253,8 +252,16 @@ pub struct Expansion {
 pub fn expand(hotkeys: &[Binding], controls: &Controls) -> (Vec<Binding>, Vec<String>) {
     let expansion = expand_origins(hotkeys, controls);
     (
-        expansion.bindings.into_iter().map(|(binding, _)| binding).collect(),
-        expansion.problems.into_iter().map(|problem| problem.message).collect(),
+        expansion
+            .bindings
+            .into_iter()
+            .map(|(binding, _)| binding)
+            .collect(),
+        expansion
+            .problems
+            .into_iter()
+            .map(|problem| problem.message)
+            .collect(),
     )
 }
 
@@ -617,8 +624,17 @@ mod tests {
         ]);
         let (bindings, warnings) = expand(&[], &controls);
         assert!(warnings.is_empty(), "{warnings:?}");
-        assert_eq!(bindings.iter().filter(|b| b.target == Target::Focused).count(), 6);
-        assert_eq!(bindings.iter().filter(|b| b.target == Target::Mic).count(), 6);
+        assert_eq!(
+            bindings
+                .iter()
+                .filter(|b| b.target == Target::Focused)
+                .count(),
+            6
+        );
+        assert_eq!(
+            bindings.iter().filter(|b| b.target == Target::Mic).count(),
+            6
+        );
         assert_eq!(bindings.len(), 12);
     }
 
@@ -643,17 +659,25 @@ mod tests {
 
         // The single hotkey comes first, then the layers of the groups.
         assert_eq!(expansion.bindings[0].1, Origin::Hotkey(0));
-        assert!(expansion
-            .bindings
-            .iter()
-            .any(|(_, origin)| *origin == Origin::Layer { group: 0, layer: 0 }));
+        assert!(
+            expansion
+                .bindings
+                .iter()
+                .any(|(_, origin)| *origin == Origin::Layer { group: 0, layer: 0 })
+        );
 
         let places: Vec<Place> = expansion.problems.iter().map(|p| p.place).collect();
         // Alt on the first group's only layer; the second group controls nothing;
         // the third group's Shift+VolumeUp is the single hotkey's.
-        assert!(places.contains(&Place::Layer { group: 0, layer: 0 }), "{places:?}");
+        assert!(
+            places.contains(&Place::Layer { group: 0, layer: 0 }),
+            "{places:?}"
+        );
         assert!(places.contains(&Place::Group(1)), "{places:?}");
-        assert!(places.contains(&Place::Layer { group: 2, layer: 1 }), "{places:?}");
+        assert!(
+            places.contains(&Place::Layer { group: 2, layer: 1 }),
+            "{places:?}"
+        );
         assert_eq!(places.len(), 3);
 
         // `expand` says the same in words.

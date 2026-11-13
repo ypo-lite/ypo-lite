@@ -41,7 +41,8 @@ fn stitch(rows: &[Vec<Rendered>], background: Color) -> (i32, i32, Vec<u8>) {
     let row_width = |row: &Vec<Rendered>| {
         row.iter().map(|picture| picture.width).sum::<i32>() + GAP * (row.len() as i32 - 1)
     };
-    let row_height = |row: &Vec<Rendered>| row.iter().map(|picture| picture.height).max().unwrap_or(0);
+    let row_height =
+        |row: &Vec<Rendered>| row.iter().map(|picture| picture.height).max().unwrap_or(0);
     let width = rows.iter().map(row_width).max().unwrap_or(0) + 2 * GAP;
     let height = rows.iter().map(row_height).sum::<i32>() + GAP * (rows.len() as i32 + 1);
 
@@ -102,13 +103,22 @@ fn main() {
     );
 
     // The five styles on the same volume.
-    let styles = [Style::Bar, Style::Compact, Style::Text, Style::VBar, Style::Ring]
-        .map(|style| {
-            let hud = HudConfig { style, ..HudConfig::default() };
-            draw(&hud, Kind::Master, state(0.6, false), true)
-        })
-        .into_iter()
-        .collect();
+    let styles = [
+        Style::Bar,
+        Style::Compact,
+        Style::Text,
+        Style::VBar,
+        Style::Ring,
+    ]
+    .map(|style| {
+        let hud = HudConfig {
+            style,
+            ..HudConfig::default()
+        };
+        draw(&hud, Kind::Master, state(0.6, false), true)
+    })
+    .into_iter()
+    .collect();
     write(&folder, "y-coustic_styles_01.png", &[styles], BACKGROUND);
 
     // Colours per kind: the master, a live microphone and an application in three
@@ -154,5 +164,4 @@ fn main() {
         ],
         BACKGROUND,
     );
-
 }

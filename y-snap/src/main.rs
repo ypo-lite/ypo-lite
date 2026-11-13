@@ -566,11 +566,12 @@ impl YSnap {
             let _ = configuration.add_item(IDM_SETTINGS, "Settings…");
             let _ = configuration.add_item(IDM_OPEN_CONFIG, "Edit y-snap.xml");
             let _ = configuration.add_item(IDM_RELOAD, "Reload configuration");
+            let _ = configuration.add_separator();
+            let startup = y_core::startup::is_enabled(ipc::STARTUP_NAME);
+            let _ = configuration.add_check_item(IDM_STARTUP, "Start with Windows", startup);
             let _ = menu.add_submenu("Configuration", configuration);
         }
         let _ = menu.add_separator();
-        let startup = y_core::startup::is_enabled(ipc::STARTUP_NAME);
-        let _ = menu.add_check_item(IDM_STARTUP, "Start with Windows", startup);
         let _ = menu.add_item(IDM_ABOUT, "About");
         let _ = menu.add_item(IDM_EXIT, "Exit");
 

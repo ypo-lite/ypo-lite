@@ -31,8 +31,8 @@
 mod colours;
 mod colours_view;
 mod edit;
-mod key_edit;
 mod hud_view;
+mod key_edit;
 mod keys_view;
 mod mouse_view;
 mod prefs;
@@ -108,7 +108,9 @@ impl Screen {
     }
 
     pub fn from_tag(tag: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|screen| screen.tag() == tag.trim())
+        Self::ALL
+            .into_iter()
+            .find(|screen| screen.tag() == tag.trim())
     }
 
     fn title(self) -> &'static str {
@@ -206,10 +208,7 @@ enum Msg {
 /// y-coustic's own *Open configuration* does.
 fn load(path: &std::path::Path) -> (Result<Settings, LoadError>, bool) {
     match Settings::load_from(path.to_owned()) {
-        Err(LoadError::Missing(_)) => (
-            Settings::parse(path.to_owned(), config::DEFAULT_XML),
-            true,
-        ),
+        Err(LoadError::Missing(_)) => (Settings::parse(path.to_owned(), config::DEFAULT_XML), true),
         loaded => (loaded, false),
     }
 }
@@ -324,7 +323,11 @@ impl Component for ConfigApp {
             // Nothing to edit if the file can't be read: say why, plainly,
             // and keep Reload within reach for when it's been fixed.
             Err(error) => {
-                let screen = page("Couldn't load y-coustic.xml", &error.to_string(), View::empty());
+                let screen = page(
+                    "Couldn't load y-coustic.xml",
+                    &error.to_string(),
+                    View::empty(),
+                );
                 let bar = self.bar("y-coustic.xml couldn't be loaded", false, None, context);
                 let app: View = Grid::new()
                     .rows([GridLength::STAR, GridLength::Auto])
@@ -414,9 +417,13 @@ impl ConfigApp {
             Screen::Keys => keys_view::keys_view(settings, viewport, context),
             Screen::Mouse => mouse_view::mouse_view(settings, viewport, context),
             Screen::Hud => hud_view::hud_view(settings, &self.hud_ui, viewport, context),
-            Screen::Colours => {
-                colours_view::colours_view(settings, &self.colours_ui, &self.hud_ui, viewport, context)
-            }
+            Screen::Colours => colours_view::colours_view(
+                settings,
+                &self.colours_ui,
+                &self.hud_ui,
+                viewport,
+                context,
+            ),
             Screen::Mixer => simple::mixer_view(settings, viewport, context),
         }
     }
@@ -537,7 +544,10 @@ impl ConfigApp {
             Some(error) => (format!("Save failed: {error}"), false),
             None if self.dirty => ("Unsaved changes".to_owned(), true),
             None => match self.applied {
-                Some(true) => ("Saved and applied: y-coustic is reloading it".to_owned(), true),
+                Some(true) => (
+                    "Saved and applied: y-coustic is reloading it".to_owned(),
+                    true,
+                ),
                 Some(false) => (
                     "Saved. y-coustic isn't running; it'll use these settings when it starts"
                         .to_owned(),
@@ -680,10 +690,8 @@ mod tests {
 
     /// A folder of its own under the temp folder, empty.
     fn scratch(name: &str) -> PathBuf {
-        let directory = std::env::temp_dir().join(format!(
-            "y-coustic-config-{name}-{}",
-            std::process::id()
-        ));
+        let directory =
+            std::env::temp_dir().join(format!("y-coustic-config-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&directory);
         std::fs::create_dir_all(&directory).unwrap();
         directory
@@ -842,7 +850,10 @@ mod tests {
         app.apply_edit(edit::Edit::Remove(y_coustic::edit::List::Hotkeys, 0));
         assert_eq!(app.settings.as_ref().unwrap().hotkeys.len(), hotkeys - 1);
         assert!(app.dirty);
-        assert_eq!(app.undo.as_ref().map(|undo| undo.label.as_str()), Some("Deleted a hotkey"));
+        assert_eq!(
+            app.undo.as_ref().map(|undo| undo.label.as_str()),
+            Some("Deleted a hotkey")
+        );
 
         // An edit with nothing to undo leaves the Undo that is there alone.
         app.apply_edit(edit::Edit::Step(app.settings.as_ref().unwrap().step + 1));
@@ -864,14 +875,18 @@ mod tests {
         let before = app.settings.as_ref().unwrap().hotkeys[0].hotkey;
 
         app.edit_key(KeyMsg::Open(KeyTarget::Hotkey(0)));
-        app.edit_key(KeyMsg::Key(windows::Win32::UI::Input::KeyboardAndMouse::VK_F9));
+        app.edit_key(KeyMsg::Key(
+            windows::Win32::UI::Input::KeyboardAndMouse::VK_F9,
+        ));
         assert!(!app.dirty);
         app.edit_key(KeyMsg::Closed { accepted: false });
         assert!(!app.dirty);
         assert_eq!(app.settings.as_ref().unwrap().hotkeys[0].hotkey, before);
 
         app.edit_key(KeyMsg::Open(KeyTarget::Hotkey(0)));
-        app.edit_key(KeyMsg::Key(windows::Win32::UI::Input::KeyboardAndMouse::VK_F9));
+        app.edit_key(KeyMsg::Key(
+            windows::Win32::UI::Input::KeyboardAndMouse::VK_F9,
+        ));
         app.edit_key(KeyMsg::Closed { accepted: true });
         assert!(app.dirty);
         assert_ne!(app.settings.as_ref().unwrap().hotkeys[0].hotkey, before);
@@ -885,7 +900,10 @@ mod tests {
         let mut app = test_app(default_settings(&path), path.clone());
         app.go(Screen::Hud);
         assert_eq!(app.screen, Screen::Hud);
-        assert_eq!(Prefs::load(&prefs::path_for(&path)).last_screen, Screen::Hud);
+        assert_eq!(
+            Prefs::load(&prefs::path_for(&path)).last_screen,
+            Screen::Hud
+        );
         let _ = std::fs::remove_dir_all(&directory);
     }
 }

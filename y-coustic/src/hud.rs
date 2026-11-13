@@ -23,27 +23,21 @@ use windows::Win32::Foundation::{HWND, LPARAM, POINT, RECT};
 use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, KillTimer, SetTimer};
 use windows::core::Result;
 
-
-
 use y_core::monitor::Monitor;
-use y_core::overlay::{
-    Font, Overlay, OverlaySpec,
-};
+use y_core::overlay::{Font, Overlay, OverlaySpec};
 
 use y_coustic::config::{self, Style};
 use y_coustic::model::{self, Action, Change, Kind, State};
 
-use y_coustic::look::{AppRef, Look};
 use crate::mixer::RowId;
+use y_coustic::look::{AppRef, Look};
 
 mod forward;
 
 use forward::Forwarder;
-use y_coustic::paint::layout::{
-    FONT_HEIGHT, Geometry, Hit, against, design_size, follow, place,
-};
-use y_coustic::paint::{Skin, draw};
 pub use forward::{WM_TRAY_WHEEL, WheelHook, is_message, take_tray_wheel};
+use y_coustic::paint::layout::{FONT_HEIGHT, Geometry, Hit, against, design_size, follow, place};
+use y_coustic::paint::{Skin, draw};
 
 /// The `wParam` of the `WM_TIMER` that hides the HUD.
 pub const TIMER_ID: usize = 0xC0_0001;
@@ -384,7 +378,11 @@ impl Hud {
 
     /// Hides, fading out first when the settings ask for a fade.
     fn begin_hide(&mut self) {
-        let Some(slot) = self.slot.as_ref().filter(|_| self.fade_ms > 0 && self.visible) else {
+        let Some(slot) = self
+            .slot
+            .as_ref()
+            .filter(|_| self.fade_ms > 0 && self.visible)
+        else {
             self.hide();
             return;
         };
@@ -409,7 +407,8 @@ impl Hud {
         };
         let elapsed = fade.started.elapsed().as_millis() as u32;
         if let Some(slot) = self.slot.as_ref() {
-            slot.overlay.set_opacity(fade_alpha(fade.from, fade.to, elapsed, self.fade_ms));
+            slot.overlay
+                .set_opacity(fade_alpha(fade.from, fade.to, elapsed, self.fade_ms));
             let _ = slot.overlay.refresh();
         }
         if elapsed >= self.fade_ms {
@@ -486,9 +485,13 @@ impl Hud {
         let reading = self.current.as_ref()?;
         let (width, height) = slot.overlay.size();
         let named = slot.skin.style == Style::Bar && self.look.is_some() && reading.state.is_some();
-        Some(Geometry::new(slot.skin.style, width, height, named, |length| {
-            slot.skin.px(slot.dpi, length)
-        }))
+        Some(Geometry::new(
+            slot.skin.style,
+            width,
+            height,
+            named,
+            |length| slot.skin.px(slot.dpi, length),
+        ))
     }
 
     /// One of the messages of the HUD ([`is_message`]). What the pointer asks

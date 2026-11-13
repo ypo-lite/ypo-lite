@@ -344,7 +344,13 @@ mod tests {
 
     #[test]
     fn button_names_round_trip() {
-        for input in [Input::Left, Input::Right, Input::Middle, Input::X1, Input::X2] {
+        for input in [
+            Input::Left,
+            Input::Right,
+            Input::Middle,
+            Input::X1,
+            Input::X2,
+        ] {
             let name = input.button_name().unwrap();
             assert_eq!(Input::from_button_name(&name.to_uppercase()), Some(input));
         }

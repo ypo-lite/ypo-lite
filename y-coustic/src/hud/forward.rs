@@ -261,7 +261,11 @@ fn take(which: Which) -> i32 {
     cell(which).with(|cell| {
         cell.try_borrow_mut()
             .ok()
-            .and_then(|mut state| state.as_mut().map(|state| std::mem::take(&mut state.pending)))
+            .and_then(|mut state| {
+                state
+                    .as_mut()
+                    .map(|state| std::mem::take(&mut state.pending))
+            })
             .unwrap_or(0)
     })
 }

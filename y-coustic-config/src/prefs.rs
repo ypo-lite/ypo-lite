@@ -79,7 +79,8 @@ mod tests {
 
     #[test]
     fn saving_and_loading_through_a_file() {
-        let directory = std::env::temp_dir().join(format!("y-coustic-prefs-{}", std::process::id()));
+        let directory =
+            std::env::temp_dir().join(format!("y-coustic-prefs-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&directory);
         std::fs::create_dir_all(&directory).unwrap();
         let path = path_for(&directory.join("y-coustic.xml"));

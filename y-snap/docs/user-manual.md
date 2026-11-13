@@ -61,11 +61,10 @@ The menu lists, from the top:
 - **Hidden windows**, when there are any, with **Restore all hidden windows**;
 - how many hotkeys and overlay actions are loaded, or what is wrong with the
   configuration when it did not load;
-- **Configuration**, a submenu with **Settings…**, **Edit y-snap.xml** and
-  **Reload configuration**;
-- **Start with Windows**, checked when y-snap runs at logon; click to turn it on or
-  off (the same setting as the installer's start-up option, and as the switch at the
-  bottom of the settings app);
+- **Configuration**, a submenu with **Settings…**, **Edit y-snap.xml**,
+  **Reload configuration** and **Start with Windows**, checked when y-snap runs at
+  logon; click to turn it on or off (the same setting as the installer's start-up
+  option, and as the switch at the bottom of the settings app);
 - **About**: a balloon with the version, what is loaded, where the file is and how
   much memory y-snap uses. Clicking the balloon opens the settings app;
 - **Exit**, which brings every hidden window back first.

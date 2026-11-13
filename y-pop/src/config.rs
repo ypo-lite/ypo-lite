@@ -1118,6 +1118,15 @@ mod tests {
     }
 
     #[test]
+    fn a_menu_that_holds_settings_does_not_get_a_configuration_submenu() {
+        let plain = extras(r#"<y-pop><group name="W"><app name="A" exe="a.exe"/></group></y-pop>"#);
+        assert!(plain.configuration);
+
+        let own = extras(r#"<y-pop><group name="W"><settings/></group></y-pop>"#);
+        assert!(!own.configuration);
+    }
+
+    #[test]
     fn an_icon_that_is_an_app_or_a_quit_button_still_gets_the_rest() {
         let app = extras(r#"<y-pop><app name="A" exe="a.exe"/></y-pop>"#);
         assert!(app.about && app.quit, "an app has no menu to hold them");

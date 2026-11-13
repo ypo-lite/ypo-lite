@@ -93,8 +93,11 @@ level each gets an icon that does nothing.
 | Left click | opens its menu | does what the item does: an app launches |
 | Right click | its menu, then the extras below | the extras alone |
 
-The extras are **Open Search** when the file has a `<search>`, then **About** and
-**Quit**, each unless that menu already holds one at its top level.
+The extras are **Open Search** when the file has a `<search>`, a **Configuration**
+submenu (**Settings…**, **Edit y-pop.xml**, **Reload configuration** and **Start with
+Windows**), then **About** and **Quit**, each unless that menu already holds one at
+its top level (a `<settings/>` for **Configuration**). The same submenu is in the
+tray menu of y-snap and y-coustic.
 
 Every tray icon shows y-pop's own icon, whatever `icon` says; `icon` is for rows
 in a menu. Its tooltip is its `name`.

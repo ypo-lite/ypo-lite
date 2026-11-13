@@ -109,7 +109,11 @@ impl Palette {
                 palette.glyph = text;
             }
             palette.track = tint.track.unwrap_or(palette.track);
-            let accent = if kind == Kind::Mic && !is_own { None } else { tint.accent };
+            let accent = if kind == Kind::Mic && !is_own {
+                None
+            } else {
+                tint.accent
+            };
             if muted {
                 palette.fill = tint.muted.unwrap_or(palette.fill);
             } else {
@@ -249,18 +253,30 @@ pub fn draw(
         let (w, h) = (track.right - track.left, track.bottom - track.top);
         if g.ring() {
             let (outer, thickness) = (g.outer as f32, g.thickness as f32);
-            paint(canvas, track.left, track.top, w, h, palette.track, |x, y| {
-                in_ring(x - outer, y - outer, outer, thickness)
-            });
+            paint(
+                canvas,
+                track.left,
+                track.top,
+                w,
+                h,
+                palette.track,
+                |x, y| in_ring(x - outer, y - outer, outer, thickness),
+            );
             if level > 0.0 {
                 paint(canvas, track.left, track.top, w, h, palette.fill, |x, y| {
                     in_arc(x - outer, y - outer, outer, thickness, level)
                 });
             }
         } else if g.vertical() {
-            paint(canvas, track.left, track.top, w, h, palette.track, |x, y| {
-                in_capsule(y, x, h as f32, w as f32)
-            });
+            paint(
+                canvas,
+                track.left,
+                track.top,
+                w,
+                h,
+                palette.track,
+                |x, y| in_capsule(y, x, h as f32, w as f32),
+            );
             let filled = fill_width(level, h, w);
             if filled > 0 {
                 paint(
@@ -274,9 +290,15 @@ pub fn draw(
                 );
             }
         } else {
-            paint(canvas, track.left, track.top, w, h, palette.track, |x, y| {
-                in_capsule(x, y, w as f32, h as f32)
-            });
+            paint(
+                canvas,
+                track.left,
+                track.top,
+                w,
+                h,
+                palette.track,
+                |x, y| in_capsule(x, y, w as f32, h as f32),
+            );
             let filled = fill_width(level, w, h);
             if filled > 0 {
                 paint(
@@ -299,7 +321,11 @@ pub fn draw(
 /// The last step: the border, then the corners, which see the finished image.
 fn finish(canvas: &mut Canvas, skin: &Skin, px: &impl Fn(i32) -> i32, border_color: Color) {
     let radius = px(skin.radius);
-    let border = if skin.border > 0 { px(skin.border).max(1) } else { 0 };
+    let border = if skin.border > 0 {
+        px(skin.border).max(1)
+    } else {
+        0
+    };
     if border == 0 {
         canvas.round_corners(radius);
         return;
@@ -508,7 +534,6 @@ pub fn mix(below: u32, color: Color, coverage: f32) -> u32 {
     };
     0xFF00_0000 | (channel(16, color.r) << 16) | (channel(8, color.g) << 8) | channel(0, color.b)
 }
-
 
 /// A HUD drawn into memory: its size in pixels, and the surface as
 /// `0xAARRGGBB` premultiplied words, top row first.
@@ -730,7 +755,10 @@ mod colour_tests {
         assert_eq!(Palette::current(Kind::App, false, &colors).fill, blue);
         let mic = Palette::current(Kind::Mic, false, &colors).fill;
         assert_ne!(mic, green);
-        assert_eq!(mic, Palette::current(Kind::Mic, false, &Colors::default()).fill);
+        assert_eq!(
+            mic,
+            Palette::current(Kind::Mic, false, &Colors::default()).fill
+        );
 
         let own = Colors {
             microphone: Tint {
@@ -764,15 +792,31 @@ mod render_tests {
 
     #[test]
     fn each_style_is_drawn_at_its_own_size_scaled_by_size_and_dpi() {
-        for style in [Style::Bar, Style::VBar, Style::Ring, Style::Text, Style::Compact] {
-            let settings = HudConfig { style, ..HudConfig::default() };
+        for style in [
+            Style::Bar,
+            Style::VBar,
+            Style::Ring,
+            Style::Text,
+            Style::Compact,
+        ] {
+            let settings = HudConfig {
+                style,
+                ..HudConfig::default()
+            };
             let (width, height) = layout::design_size(style);
             let picture =
                 render(&settings, Kind::Master, state(0.5, false), None, true, 96).unwrap();
-            assert_eq!((picture.width, picture.height), (width, height), "{style:?}");
+            assert_eq!(
+                (picture.width, picture.height),
+                (width, height),
+                "{style:?}"
+            );
             assert_eq!(picture.pixels.len(), (width * height) as usize);
 
-            let scaled = HudConfig { scale: 150, ..settings };
+            let scaled = HudConfig {
+                scale: 150,
+                ..settings
+            };
             let big = render(&scaled, Kind::Master, state(0.5, false), None, true, 192).unwrap();
             assert_eq!(big.width, width * 3, "{style:?}");
         }
@@ -784,7 +828,10 @@ mod render_tests {
         let (width, height) = layout::design_size(settings.style);
         let geometry = Geometry::new(settings.style, width, height, false, |length| length);
         let track = geometry.track.expect("the bar style has a track");
-        let probe = (track.left + (track.right - track.left) * 4 / 5, (track.top + track.bottom) / 2);
+        let probe = (
+            track.left + (track.right - track.left) * 4 / 5,
+            (track.top + track.bottom) / 2,
+        );
 
         let palette = Palette::for_theme(true, Kind::Master, false, &settings.colors);
         let high = render(&settings, Kind::Master, state(0.95, false), None, true, 96).unwrap();
@@ -818,13 +865,22 @@ mod render_tests {
         let mut tinted = HudConfig::default();
         tinted.colors.all.panel = Some(Color::rgb(0x12, 0x34, 0x56));
         let custom = render(&tinted, Kind::Master, state(0.5, false), None, true, 96).unwrap();
-        assert_eq!(pixel(&custom, at.0, at.1), opaque(Color::rgb(0x12, 0x34, 0x56)));
+        assert_eq!(
+            pixel(&custom, at.0, at.1),
+            opaque(Color::rgb(0x12, 0x34, 0x56))
+        );
     }
 
     #[test]
     fn the_corners_are_cut_by_the_radius() {
-        let round = HudConfig { radius: 12, ..HudConfig::default() };
-        let square = HudConfig { radius: 0, ..HudConfig::default() };
+        let round = HudConfig {
+            radius: 12,
+            ..HudConfig::default()
+        };
+        let square = HudConfig {
+            radius: 0,
+            ..HudConfig::default()
+        };
         let rounded = render(&round, Kind::Master, state(0.5, false), None, true, 96).unwrap();
         let sharp = render(&square, Kind::Master, state(0.5, false), None, true, 96).unwrap();
         assert_eq!(pixel(&rounded, 0, 0) >> 24, 0, "the corner is transparent");
@@ -833,8 +889,15 @@ mod render_tests {
 
     #[test]
     fn a_picture_comes_out_as_a_png() {
-        let png = render_png(&HudConfig::default(), Kind::Master, state(0.4, false), None, true, 96)
-            .expect("a PNG");
+        let png = render_png(
+            &HudConfig::default(),
+            Kind::Master,
+            state(0.4, false),
+            None,
+            true,
+            96,
+        )
+        .expect("a PNG");
         assert_eq!(&png[1..4], b"PNG");
         // No device: a message instead of a bar, still a picture.
         assert!(render_png(&HudConfig::default(), Kind::Mic, None, None, false, 96).is_some());

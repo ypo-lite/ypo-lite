@@ -2,7 +2,9 @@
 //! them, the single hotkeys, and what all of that comes to when y-coustic
 //! registers it. Every control reports an [`Edit`], or opens the key dialog.
 
-use windows::Win32::UI::Input::KeyboardAndMouse::{HOT_KEY_MODIFIERS, MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    HOT_KEY_MODIFIERS, MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN,
+};
 use windows_reactor::*;
 use y_core::hotkey::Hotkey;
 use y_coustic::config::Settings;
@@ -193,8 +195,16 @@ pub(crate) fn list_actions(
         index,
         count,
         (
-            Edit::Move { list, index, up: true },
-            Edit::Move { list, index, up: false },
+            Edit::Move {
+                list,
+                index,
+                up: true,
+            },
+            Edit::Move {
+                list,
+                index,
+                up: false,
+            },
             Edit::Remove(list, index),
         ),
         what,
@@ -261,7 +271,10 @@ fn group_card(
         let clear = (present > 1).then_some(Edit::ClearGroupKey(index, which));
         grid = grid.item(
             label,
-            field(label, key_cell(key, KeyTarget::Group(index, which), clear, context)),
+            field(
+                label,
+                key_cell(key, KeyTarget::Group(index, which), clear, context),
+            ),
         );
     }
     if group.has_media_keys() {
@@ -287,7 +300,11 @@ fn group_card(
             context.callback(move |choice: usize| {
                 Msg::Edit(Edit::GroupScope(
                     index,
-                    if choice == 0 { ScopeKind::Target } else { ScopeKind::Layers },
+                    if choice == 0 {
+                        ScopeKind::Target
+                    } else {
+                        ScopeKind::Layers
+                    },
                 ))
             }),
         ),
@@ -299,7 +316,9 @@ fn group_card(
             combo(
                 labels(TARGETS),
                 position(TARGETS, *target),
-                choose(context, TARGETS, move |target| Edit::GroupTarget(index, target)),
+                choose(context, TARGETS, move |target| {
+                    Edit::GroupTarget(index, target)
+                }),
             ),
         ),
         Scope::Layers(layers) => layers_block(settings, problems, index, layers, inner, context),
@@ -321,10 +340,18 @@ fn group_card(
                 index,
                 count,
                 context.callback(move |()| {
-                    Msg::Edit(Edit::Move { list: List::Keys, index, up: true })
+                    Msg::Edit(Edit::Move {
+                        list: List::Keys,
+                        index,
+                        up: true,
+                    })
                 }),
                 context.callback(move |()| {
-                    Msg::Edit(Edit::Move { list: List::Keys, index, up: false })
+                    Msg::Edit(Edit::Move {
+                        list: List::Keys,
+                        index,
+                        up: false,
+                    })
                 }),
             ),
         )
@@ -390,7 +417,11 @@ fn layers_block(
             }),
         );
         let here = messages_at(problems, |place| {
-            place == Place::Layer { group, layer: index }
+            place
+                == Place::Layer {
+                    group,
+                    layer: index,
+                }
         });
         Row::new(
             format!("layer{index}"),
@@ -401,8 +432,16 @@ fn layers_block(
                     index,
                     count,
                     (
-                        Edit::MoveGroupLayer { group, index, up: true },
-                        Edit::MoveGroupLayer { group, index, up: false },
+                        Edit::MoveGroupLayer {
+                            group,
+                            index,
+                            up: true,
+                        },
+                        Edit::MoveGroupLayer {
+                            group,
+                            index,
+                            up: false,
+                        },
                         Edit::RemoveGroupLayer(group, index),
                     ),
                     "Delete this layer",
@@ -437,7 +476,10 @@ fn layers_block(
                     false,
                     true,
                     context.callback(move |()| {
-                        Msg::Edit(Edit::CopyLayers { to: group, from: other })
+                        Msg::Edit(Edit::CopyLayers {
+                            to: group,
+                            from: other,
+                        })
                     }),
                 ),
             )
@@ -491,7 +533,9 @@ fn hotkeys(settings: &Settings, viewport: Viewport, context: &ViewContext<Config
             combo(
                 labels(TARGETS),
                 position(TARGETS, binding.target),
-                choose(context, TARGETS, move |target| Edit::HotkeyTarget(index, target)),
+                choose(context, TARGETS, move |target| {
+                    Edit::HotkeyTarget(index, target)
+                }),
             )
             .into()
         };
@@ -499,13 +543,20 @@ fn hotkeys(settings: &Settings, viewport: Viewport, context: &ViewContext<Config
             format!("hotkey{index}"),
             vec![
                 with_marker(
-                    key_cell(Some(binding.hotkey), KeyTarget::Hotkey(index), None, context),
+                    key_cell(
+                        Some(binding.hotkey),
+                        KeyTarget::Hotkey(index),
+                        None,
+                        context,
+                    ),
                     &messages_at(&problems, |place| place == Place::Hotkey(index)),
                 ),
                 combo(
                     labels(ACTIONS),
                     position(ACTIONS, ActionKind::of(binding.action)),
-                    choose(context, ACTIONS, move |kind| Edit::HotkeyAction(index, kind)),
+                    choose(context, ACTIONS, move |kind| {
+                        Edit::HotkeyAction(index, kind)
+                    }),
                 )
                 .into(),
                 target,
@@ -524,7 +575,9 @@ fn hotkeys(settings: &Settings, viewport: Viewport, context: &ViewContext<Config
         Stack::vertical(space::M)
             .child(
                 "about",
-                text::caption("One key for one thing, for whatever the groups and layers do not cover."),
+                text::caption(
+                    "One key for one thing, for whatever the groups and layers do not cover.",
+                ),
             )
             .child("table", table)
             .child(
@@ -553,25 +606,32 @@ fn registers(settings: &Settings) -> View {
         body = body.child("warnings", note(warnings.join("\n")));
     }
 
-    let lines = bindings.iter().enumerate().map(|(index, (binding, origin))| {
-        let line: View = Stack::horizontal(space::M)
-            .child(
-                "key",
-                keycaps(&combo_labels(binding.hotkey.modifiers, Some(binding.hotkey.key)), false),
-            )
-            .child(
-                "does",
-                text::caption(describe(binding.action, binding.target)).vertical_alignment(VerticalAlignment::Center),
-            )
-            .child(
-                "from",
-                text::caption(origin_text(settings, *origin))
-                    .vertical_alignment(VerticalAlignment::Center)
-                    .opacity(emphasis::SUBTLE),
-            )
-            .into();
-        (format!("binding{index}"), line)
-    });
+    let lines = bindings
+        .iter()
+        .enumerate()
+        .map(|(index, (binding, origin))| {
+            let line: View = Stack::horizontal(space::M)
+                .child(
+                    "key",
+                    keycaps(
+                        &combo_labels(binding.hotkey.modifiers, Some(binding.hotkey.key)),
+                        false,
+                    ),
+                )
+                .child(
+                    "does",
+                    text::caption(describe(binding.action, binding.target))
+                        .vertical_alignment(VerticalAlignment::Center),
+                )
+                .child(
+                    "from",
+                    text::caption(origin_text(settings, *origin))
+                        .vertical_alignment(VerticalAlignment::Center)
+                        .opacity(emphasis::SUBTLE),
+                )
+                .into();
+            (format!("binding{index}"), line)
+        });
     body = body.child("list", Stack::vertical(space::XS).children(lines));
 
     section(
@@ -585,7 +645,8 @@ fn registers(settings: &Settings) -> View {
 fn origin_text(settings: &Settings, origin: Origin) -> String {
     match origin {
         Origin::Hotkey(index) => format!("hotkey {}", index + 1),
-        Origin::Layer { group, layer } => match settings.controls.keys.get(group).map(|g| &g.scope) {
+        Origin::Layer { group, layer } => match settings.controls.keys.get(group).map(|g| &g.scope)
+        {
             Some(Scope::Layers(_)) => format!("group {}, layer {}", group + 1, layer + 1),
             _ => format!("group {}", group + 1),
         },
@@ -619,7 +680,12 @@ mod tests {
 
     #[test]
     fn every_action_and_target_the_file_can_hold_has_an_option() {
-        for target in [Target::Master, Target::Mic, Target::Focused, Target::Pointed] {
+        for target in [
+            Target::Master,
+            Target::Mic,
+            Target::Focused,
+            Target::Pointed,
+        ] {
             assert!(position(TARGETS, target).is_some(), "{target:?}");
         }
         for action in [
@@ -629,7 +695,10 @@ mod tests {
             Action::SetVolume(30),
             Action::Mixer,
         ] {
-            assert!(position(ACTIONS, ActionKind::of(action)).is_some(), "{action:?}");
+            assert!(
+                position(ACTIONS, ActionKind::of(action)).is_some(),
+                "{action:?}"
+            );
         }
         for plain in [Plain::Windows, Plain::Replace] {
             assert!(position(PLAINS, plain).is_some());
@@ -665,31 +734,46 @@ mod tests {
         .expect("the shipped file loads");
         // Group 2 controls nothing; the first group's second layer gets Alt.
         settings.controls.keys[1].scope = Scope::default();
-        settings.controls.keys[0].scope = Scope::Layers(vec![Layer {
-            modifiers: 0,
-            target: Target::Master,
-        }, Layer {
-            modifiers: windows::Win32::UI::Input::KeyboardAndMouse::MOD_ALT.0,
-            target: Target::Mic,
-        }]);
+        settings.controls.keys[0].scope = Scope::Layers(vec![
+            Layer {
+                modifiers: 0,
+                target: Target::Master,
+            },
+            Layer {
+                modifiers: windows::Win32::UI::Input::KeyboardAndMouse::MOD_ALT.0,
+                target: Target::Mic,
+            },
+        ]);
         let problems = settings.expansion().problems;
         assert_eq!(
             messages_at(&problems, |place| place == Place::Group(1)).len(),
             1
         );
         assert_eq!(
-            messages_at(&problems, |place| place == Place::Layer { group: 0, layer: 1 }).len(),
+            messages_at(&problems, |place| place
+                == Place::Layer { group: 0, layer: 1 })
+            .len(),
             1
         );
-        assert!(messages_at(&problems, |place| place == Place::Layer { group: 0, layer: 0 }).is_empty());
+        assert!(
+            messages_at(&problems, |place| place
+                == Place::Layer { group: 0, layer: 0 })
+            .is_empty()
+        );
         assert!(messages_at(&problems, |place| place == Place::Hotkey(0)).is_empty());
         assert!(marker(&[]).is_none());
     }
 
     #[test]
     fn the_readout_says_what_a_binding_does() {
-        assert_eq!(describe(Action::VolumeUp, Target::Master), "Volume up · Master volume");
-        assert_eq!(describe(Action::SetVolume(30), Target::Mic), "Set the level to 30% · Microphone");
+        assert_eq!(
+            describe(Action::VolumeUp, Target::Master),
+            "Volume up · Master volume"
+        );
+        assert_eq!(
+            describe(Action::SetVolume(30), Target::Mic),
+            "Set the level to 30% · Microphone"
+        );
         assert_eq!(describe(Action::Mixer, Target::Master), "Open the mixer");
     }
 }

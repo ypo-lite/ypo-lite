@@ -52,8 +52,8 @@ use crate::config::{Button, Gesture as GestureConfig, Mouse};
 use y_core::target;
 
 use super::geometry::window_rect;
-use y_core::modifier_guard;
 use super::modifiers_held;
+use y_core::modifier_guard;
 
 /// A window resized down to nothing is not a feature.
 const MIN_SIZE: i32 = 32;

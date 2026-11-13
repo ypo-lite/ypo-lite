@@ -45,10 +45,9 @@ use std::time::{Duration, Instant};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::ScreenToClient;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetCapture, GetKeyState, ReleaseCapture, SetCapture, SetFocus, VIRTUAL_KEY,
-    VK_DOWN, VK_END, VK_ESCAPE, VK_HOME, VK_LEFT, VK_NEXT, VK_NUMPAD0, VK_PRIOR, VK_RIGHT, VK_SHIFT,
-    VK_SPACE, VK_UP,
-    VK_VOLUME_DOWN, VK_VOLUME_MUTE, VK_VOLUME_UP,
+    GetCapture, GetKeyState, ReleaseCapture, SetCapture, SetFocus, VIRTUAL_KEY, VK_DOWN, VK_END,
+    VK_ESCAPE, VK_HOME, VK_LEFT, VK_NEXT, VK_NUMPAD0, VK_PRIOR, VK_RIGHT, VK_SHIFT, VK_SPACE,
+    VK_UP, VK_VOLUME_DOWN, VK_VOLUME_MUTE, VK_VOLUME_UP,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     GetForegroundWindow, KillTimer, PostMessageW, SetForegroundWindow, SetTimer, WM_APPCOMMAND,
@@ -66,9 +65,9 @@ use y_core::window::WindowHandler;
 use y_coustic::config::{Anchor, Colors, HudConfig, MixerConfig, Position};
 use y_coustic::model::{self, Action, Change, Kind, State};
 
+use crate::mixer::{Row, RowId};
 use y_coustic::look::{AppRef, Look};
 use y_coustic::paint::{self as hud, Palette};
-use crate::mixer::{Row, RowId};
 
 pub mod layout;
 
@@ -428,9 +427,21 @@ fn place(
             let x = (icon.left + icon.right) / 2 - size.0 / 2;
             let middle = area.top + (area.bottom - area.top) / 2;
             if icon.top >= middle {
-                (POINT { x, y: icon.top - size.1 - margin }, true)
+                (
+                    POINT {
+                        x,
+                        y: icon.top - size.1 - margin,
+                    },
+                    true,
+                )
             } else {
-                (POINT { x, y: icon.bottom + margin }, false)
+                (
+                    POINT {
+                        x,
+                        y: icon.bottom + margin,
+                    },
+                    false,
+                )
             }
         }
         (Anchor::Hud, _) => (
@@ -445,7 +456,11 @@ fn place(
             (
                 POINT {
                     x: pointer.x - size.0 / 2,
-                    y: if below { pointer.y + margin } else { pointer.y - size.1 - margin },
+                    y: if below {
+                        pointer.y + margin
+                    } else {
+                        pointer.y - size.1 - margin
+                    },
                 },
                 !below,
             )
@@ -506,7 +521,11 @@ impl Open {
             VK_UP => self.select(layout::move_selection(index, -1, count)),
             VK_DOWN => self.select(layout::move_selection(index, 1, count)),
             // A page, or the ends: the list follows the selection.
-            VK_PRIOR => self.select(layout::move_selection(index, -(self.max_rows as isize), count)),
+            VK_PRIOR => self.select(layout::move_selection(
+                index,
+                -(self.max_rows as isize),
+                count,
+            )),
             VK_NEXT => self.select(layout::move_selection(index, self.max_rows as isize, count)),
             VK_HOME => self.select(0),
             VK_END => self.select(count.saturating_sub(1)),
@@ -751,16 +770,29 @@ impl Open {
 
         // The scrollbar, when there is more than the rows shown: the thumb says
         // how much, and where. Vertical capsules, as the bars are horizontal.
-        if let (Some(track), Some((thumb_top, thumb_bottom))) = (layout.track_rect(), layout.thumb())
+        if let (Some(track), Some((thumb_top, thumb_bottom))) =
+            (layout.track_rect(), layout.thumb())
         {
             let (width, height) = (track.right - track.left, track.bottom - track.top);
-            hud::paint(canvas, track.left, track.top, width, height, palette.track, |x, y| {
-                hud::in_capsule(y, x, height as f32, width as f32)
-            });
+            hud::paint(
+                canvas,
+                track.left,
+                track.top,
+                width,
+                height,
+                palette.track,
+                |x, y| hud::in_capsule(y, x, height as f32, width as f32),
+            );
             let length = thumb_bottom - thumb_top;
-            hud::paint(canvas, track.left, thumb_top, width, length, palette.fill, |x, y| {
-                hud::in_capsule(y, x, length as f32, width as f32)
-            });
+            hud::paint(
+                canvas,
+                track.left,
+                thumb_top,
+                width,
+                length,
+                palette.fill,
+                |x, y| hud::in_capsule(y, x, length as f32, width as f32),
+            );
         }
 
         canvas.round_corners(self.radius);
@@ -798,7 +830,11 @@ fn row_name<'a>(row: &'a Row, look: Option<&'a Look>) -> &'a str {
 /// panel's.
 fn dimmed(text: Color, panel: Color) -> Color {
     let half = |a: u8, b: u8| ((u16::from(a) + u16::from(b)) / 2) as u8;
-    Color::rgb(half(text.r, panel.r), half(text.g, panel.g), half(text.b, panel.b))
+    Color::rgb(
+        half(text.r, panel.r),
+        half(text.g, panel.g),
+        half(text.b, panel.b),
+    )
 }
 
 /// What every row is drawn with.
@@ -860,9 +896,15 @@ fn draw_row(
             let waves = hud::waves(level, muted);
             let kind = row.kind;
             let edge = side as f32;
-            hud::paint(canvas, icon.left, icon.top, side, side, palette.glyph, |x, y| {
-                hud::in_glyph(kind, x / edge, y / edge, waves, muted)
-            });
+            hud::paint(
+                canvas,
+                icon.left,
+                icon.top,
+                side,
+                side,
+                palette.glyph,
+                |x, y| hud::in_glyph(kind, x / edge, y / edge, waves, muted),
+            );
         }
     }
 
@@ -884,14 +926,26 @@ fn draw_row(
 
     let bar_width = bar_right - bar_left;
     let top = row_rect.top + (row_rect.bottom - row_rect.top - bar_height) / 2;
-    hud::paint(canvas, bar_left, top, bar_width, bar_height, palette.track, |x, y| {
-        hud::in_capsule(x, y, bar_width as f32, bar_height as f32)
-    });
+    hud::paint(
+        canvas,
+        bar_left,
+        top,
+        bar_width,
+        bar_height,
+        palette.track,
+        |x, y| hud::in_capsule(x, y, bar_width as f32, bar_height as f32),
+    );
     let filled = hud::fill_width(level, bar_width, bar_height);
     if filled > 0 {
-        hud::paint(canvas, bar_left, top, filled, bar_height, palette.fill, |x, y| {
-            hud::in_capsule(x, y, filled as f32, bar_height as f32)
-        });
+        hud::paint(
+            canvas,
+            bar_left,
+            top,
+            filled,
+            bar_height,
+            palette.fill,
+            |x, y| hud::in_capsule(x, y, filled as f32, bar_height as f32),
+        );
     }
 
     let text = if state.muted {

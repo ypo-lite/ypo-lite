@@ -34,10 +34,10 @@ use windows::Win32::Foundation::{HWND, LPARAM, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{DWMWA_CAPTION_BUTTON_BOUNDS, DwmGetWindowAttribute};
 use windows::Win32::UI::HiDpi::GetSystemMetricsForDpi;
 use windows::Win32::UI::WindowsAndMessaging::{
-    GWL_STYLE, GetClassNameW, GetWindowLongW, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCLOSE, HTHELP, HTHSCROLL,
-    HTLEFT, HTMAXBUTTON, HTMINBUTTON, HTRIGHT, HTSYSMENU, HTTOP, HTTOPLEFT, HTTOPRIGHT, HTVSCROLL,
-    KillTimer, PostMessageW, SM_CXSIZE, SM_CYCAPTION, SetTimer, WS_MINIMIZEBOX,
-    WindowFromPoint,
+    GWL_STYLE, GetClassNameW, GetWindowLongW, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCLOSE,
+    HTHELP, HTHSCROLL, HTLEFT, HTMAXBUTTON, HTMINBUTTON, HTRIGHT, HTSYSMENU, HTTOP, HTTOPLEFT,
+    HTTOPRIGHT, HTVSCROLL, KillTimer, PostMessageW, SM_CXSIZE, SM_CYCAPTION, SetTimer,
+    WS_MINIMIZEBOX, WindowFromPoint,
 };
 use y_core::monitor::Monitor;
 
@@ -272,7 +272,8 @@ fn is_clearly_elsewhere(hit: i32) -> bool {
 /// message loop, never from the hook. `None` when `pt` is not confirmed on the
 /// button (or the answer is implausible): the caller falls back to estimates.
 pub fn probe_min_button(window: HWND, pt: POINT) -> Option<RECT> {
-    let is_min = |x: i32, y: i32| geometry::hit_test(window, POINT { x, y }) == Some(HTMINBUTTON as i32);
+    let is_min =
+        |x: i32, y: i32| geometry::hit_test(window, POINT { x, y }) == Some(HTMINBUTTON as i32);
     if !is_min(pt.x, pt.y) {
         return None;
     }

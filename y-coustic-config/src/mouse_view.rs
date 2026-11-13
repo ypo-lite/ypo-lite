@@ -100,7 +100,9 @@ fn row(
     if shadowed {
         listens = listens.child(
             "shadowed",
-            text::caption("An earlier binding has the same input and modifiers: this one never fires."),
+            text::caption(
+                "An earlier binding has the same input and modifiers: this one never fires.",
+            ),
         );
     }
 
@@ -168,7 +170,9 @@ fn row(
         combo(
             labels(TARGETS),
             position(TARGETS, binding.target),
-            choose(context, TARGETS, move |target| Edit::MouseTarget(index, target)),
+            choose(context, TARGETS, move |target| {
+                Edit::MouseTarget(index, target)
+            }),
         )
         .into()
     };

@@ -254,13 +254,13 @@ under the pointer, else the master).
 | Resting the pointer on it | shows the master volume next to the icon, after 600 ms (see below) |
 | Right | the menu below |
 
-The menu:
+The menu, with the items below under *Configuration* (the same submenu as in y-snap and y-pop):
 
 | Menu item | Does |
 | --- | --- |
 | *Settings…* | opens `y-coustic-config.exe` from next to `y-coustic.exe` (one window at a time); without it, opens the file and says so |
+| *Edit y-coustic.xml* | opens the file; creates it from the defaults first if it does not exist |
 | *Reload configuration* | reads `y-coustic.xml` again and re-registers the hotkeys |
-| *Open configuration* | opens the file; creates it from the defaults first if it does not exist |
 | *Replace the Windows volume indicator* | shown when the file has volume keys: gives the bare volume keys to y-coustic or back to Windows, saves the file and reloads |
 | *Start with Windows* | adds or removes y-coustic from the current user's start-up |
 | *About* | version, memory use and the path of the configuration file in use |

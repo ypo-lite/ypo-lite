@@ -6,8 +6,8 @@
 
 use windows::Win32::Foundation::{POINT, RECT};
 
-use y_core::monitor::Monitor;
 use crate::config::{Position, Style};
+use y_core::monitor::Monitor;
 
 // Design sizes, at 100% scaling.
 pub const PADDING: i32 = 16;
@@ -393,7 +393,9 @@ mod tests {
     fn the_parts_scale_with_the_monitor() {
         let plain = geometry(Style::Bar, false);
         let (width, height) = design_size(Style::Bar);
-        let double = Geometry::new(Style::Bar, width * 2, height * 2, false, |length| length * 2);
+        let double = Geometry::new(Style::Bar, width * 2, height * 2, false, |length| {
+            length * 2
+        });
         assert_eq!(bar(&double).left, bar(&plain).left * 2);
         assert_eq!(bar(&double).right, bar(&plain).right * 2);
         assert_eq!(double.glyph.right - double.glyph.left, GLYPH * 2);
@@ -415,7 +417,10 @@ mod tests {
             assert!(inside(g.glyph), "{style:?} glyph");
             if let Some(track) = g.track {
                 assert!(inside(track), "{style:?} track {track:?}");
-                assert!(track.right > track.left && track.bottom > track.top, "{style:?}");
+                assert!(
+                    track.right > track.left && track.bottom > track.top,
+                    "{style:?}"
+                );
             }
             if let Some(text) = g.text {
                 assert!(inside(text), "{style:?} text {text:?}");
@@ -496,7 +501,10 @@ mod tests {
         assert_eq!(at(Position::CenterLeft), (MARGIN, 375));
         assert_eq!(at(Position::CenterRight), (1000 - 200 - MARGIN, 375));
         assert_eq!(at(Position::BottomLeft), (MARGIN, 800 - 50 - MARGIN));
-        assert_eq!(at(Position::BottomRight), (1000 - 200 - MARGIN, 800 - 50 - MARGIN));
+        assert_eq!(
+            at(Position::BottomRight),
+            (1000 - 200 - MARGIN, 800 - 50 - MARGIN)
+        );
     }
 
     #[test]
@@ -504,7 +512,10 @@ mod tests {
         let monitor = monitor();
         let size = (200, 50);
         let beside = follow(POINT { x: 300, y: 300 }, size, &monitor);
-        assert_eq!((beside.x, beside.y), (300 + CURSOR_OFFSET, 300 + CURSOR_OFFSET));
+        assert_eq!(
+            (beside.x, beside.y),
+            (300 + CURSOR_OFFSET, 300 + CURSOR_OFFSET)
+        );
         // Near the right and bottom edges it goes to the other side.
         let flipped = follow(POINT { x: 950, y: 780 }, size, &monitor);
         assert_eq!(flipped.x, 950 - CURSOR_OFFSET - 200);

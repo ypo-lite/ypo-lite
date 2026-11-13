@@ -36,7 +36,9 @@ pub fn colours_view(
     viewport: Viewport,
     context: &ViewContext<ConfigApp>,
 ) -> View {
-    let split = Split::new(viewport).min_widths(440.0, 300.0).weights(1.5, 1.0);
+    let split = Split::new(viewport)
+        .min_widths(440.0, 300.0)
+        .weights(1.5, 1.0);
     let sets = sets(settings, colours_ui, hud_ui.dark, split.primary(), context);
     let preview = preview_pane(settings, hud_ui, split.secondary(), context);
 
@@ -156,7 +158,11 @@ fn swatch(
                 .opacity(emphasis::SUBTLE),
         );
     let open_button: View = Button::new()
-        .style(if open { ButtonStyle::Accent } else { ButtonStyle::Default })
+        .style(if open {
+            ButtonStyle::Accent
+        } else {
+            ButtonStyle::Default
+        })
         .fill()
         .horizontal_content_alignment(HorizontalAlignment::Stretch)
         .on_click(context.callback(move |()| Msg::Colour(ColourMsg::Open(addr))))
@@ -215,7 +221,9 @@ fn preview_pane(
         let mut sample = Stack::vertical(space::XS).child("title", text::caption(title));
         match ui.picture(&settings.hud, kind, Some((level, muted)), ui.dark) {
             Some(picture) => sample = sample.child("picture", fitted(&picture, width)),
-            None => sample = sample.child("failed", text::caption("The preview could not be drawn.")),
+            None => {
+                sample = sample.child("failed", text::caption("The preview could not be drawn."))
+            }
         }
         body = body.child(index, sample);
     }
@@ -244,8 +252,15 @@ mod tests {
     #[test]
     fn the_preview_covers_every_kind_the_colours_can_reach() {
         for kind in [Kind::Master, Kind::Mic, Kind::App] {
-            assert!(SAMPLES.iter().any(|(_, known, _, _)| *known == kind), "{kind:?}");
+            assert!(
+                SAMPLES.iter().any(|(_, known, _, _)| *known == kind),
+                "{kind:?}"
+            );
         }
-        assert!(SAMPLES.iter().any(|(_, kind, _, muted)| *kind == Kind::Mic && *muted));
+        assert!(
+            SAMPLES
+                .iter()
+                .any(|(_, kind, _, muted)| *kind == Kind::Mic && *muted)
+        );
     }
 }

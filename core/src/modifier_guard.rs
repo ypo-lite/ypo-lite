@@ -54,6 +54,7 @@
 
 use std::cell::Cell;
 
+use crate::hotkey::{absorb_modifier_tap, unwatch_foreground, watch_foreground};
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -64,7 +65,6 @@ use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, SetWindowsHookExW, UnhookWindowsHookEx,
     WH_KEYBOARD_LL, WM_KEYUP, WM_SYSKEYUP,
 };
-use crate::hotkey::{absorb_modifier_tap, unwatch_foreground, watch_foreground};
 
 thread_local! {
     /// The Alt/Win bits (from [`MOD_ALT`] / [`MOD_WIN`]) at least one

@@ -534,10 +534,15 @@ impl PopupMenu {
     }
 
     /// An item with a check mark, for settings toggled from the tray menu.
-    /// Always native — no themed caller exists yet, and a themed check mark
-    /// needs its own glyph handling in [`paint::handle_draw_item`] that
-    /// isn't worth building ahead of a use for it.
+    /// On a native menu it is the system's check mark. A themed menu has no
+    /// check glyph in [`paint::handle_draw_item`], so it says the state in
+    /// the shortcut column instead — a trailing "On" or "Off", as the search
+    /// window shows the same setting.
     pub fn add_check_item(&self, id: u32, text: &str, checked: bool) -> Result<()> {
+        if self.design.is_some() {
+            let state = if checked { "On" } else { "Off" };
+            return self.add_item_with_shortcut(id, text, Some(state));
+        }
         let flags = if checked {
             MF_STRING | MF_CHECKED
         } else {
