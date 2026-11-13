@@ -410,18 +410,31 @@ impl YSnap {
             return;
         };
 
+        // A dwell timer armed just before the pointer entered the popup can
+        // still fire while it is over a tile. The popup is already up for
+        // this window: re-showing would re-measure from a pointer that is no
+        // longer on the button (the probe fails, the estimate differs) and
+        // move the popup from under the pointer.
+        if min_overlay.is_showing_for(target) {
+            return;
+        }
+
         // One bounded, one-time check against the real window — see
         // `mouse::confirm_min_button`'s own doc comment for why this is the
         // one place it is safe to ask, and why an unreadable cursor position
         // is treated the same as a rejection rather than shown anyway.
-        let confirmed = monitor::cursor_position()
-            .is_ok_and(|position| mouse::confirm_min_button(target, position));
-        if !confirmed {
+        let Ok(position) = monitor::cursor_position() else {
+            return;
+        };
+        if !mouse::confirm_min_button(target, position) {
             return;
         }
+        // Ask the window where its button really is, so the popup lands
+        // right under it whatever the application draws in its title bar.
+        let measured = mouse::probe_min_button(target, position);
 
         if let Some(settings) = &self.settings {
-            let _ = min_overlay.show(target, &settings.overlay);
+            let _ = min_overlay.show(target, &settings.overlay, measured);
         }
     }
 

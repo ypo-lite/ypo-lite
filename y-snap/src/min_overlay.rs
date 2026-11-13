@@ -85,15 +85,28 @@ impl MinOverlay {
     /// Shows the popup under `window`'s minimize button. Does nothing if the
     /// configuration has no `<minbutton>` actions — the common case, and one
     /// [`crate::mouse`] cannot tell on its own without knowing the config.
-    pub fn show(&mut self, window: HWND, config: &OverlayConfig) -> Result<()> {
+    ///
+    /// `measured` is the button's real rectangle when the window could be
+    /// asked for it ([`mouse::probe_min_button`]); otherwise the popup falls
+    /// back to the geometric estimate.
+    pub fn show(
+        &mut self,
+        window: HWND,
+        config: &OverlayConfig,
+        measured: Option<RECT>,
+    ) -> Result<()> {
         if self.items.is_empty() {
             return Ok(());
         }
 
-        let Some(button) = mouse::min_button_rect(window) else {
+        let Some(button) = measured.or_else(|| mouse::min_button_rect(window)) else {
             self.hide();
             return Ok(());
         };
+        let top = measured
+            .map(|rect| rect.bottom)
+            .or_else(|| mouse::min_popup_top(window))
+            .unwrap_or(button.bottom);
 
         if self.overlay.is_none() {
             let handler = ClickHandler {
@@ -129,7 +142,7 @@ impl MinOverlay {
         let position = Monitor::from_window(window).keep_inside(
             POINT {
                 x: button.left + (button.right - button.left) / 2 - size.0 / 2,
-                y: mouse::min_popup_top(window).unwrap_or(button.bottom) + GAP,
+                y: top + GAP,
             },
             size,
         );
@@ -138,6 +151,11 @@ impl MinOverlay {
             .expect("created above")
             .show_at(position)?;
         Ok(())
+    }
+
+    /// Whether the popup is already showing for `window`.
+    pub fn is_showing_for(&self, window: HWND) -> bool {
+        self.target == Some(window)
     }
 
     /// Hides the popup. Safe to call when it is already hidden.

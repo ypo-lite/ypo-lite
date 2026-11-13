@@ -28,12 +28,16 @@
 //! drawing and for `SetWindowPos` — nothing that can wait belongs inside the
 //! hook callback.
 
+use std::ffi::c_void;
+
 use windows::Win32::Foundation::{HWND, LPARAM, POINT, RECT, WPARAM};
+use windows::Win32::Graphics::Dwm::{DWMWA_CAPTION_BUTTON_BOUNDS, DwmGetWindowAttribute};
 use windows::Win32::UI::HiDpi::GetSystemMetricsForDpi;
 use windows::Win32::UI::WindowsAndMessaging::{
-    GWL_STYLE, GetWindowLongW, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCLOSE, HTHELP, HTHSCROLL,
+    GWL_STYLE, GetClassNameW, GetWindowLongW, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCLOSE, HTHELP, HTHSCROLL,
     HTLEFT, HTMAXBUTTON, HTMINBUTTON, HTRIGHT, HTSYSMENU, HTTOP, HTTOPLEFT, HTTOPRIGHT, HTVSCROLL,
     KillTimer, PostMessageW, SM_CXSIZE, SM_CYCAPTION, SetTimer, WS_MINIMIZEBOX,
+    WindowFromPoint,
 };
 use y_core::monitor::Monitor;
 
@@ -95,6 +99,21 @@ impl Hover {
     pub fn update(&mut self, pt: POINT) {
         if !self.overlay.is_invalid() && point_in_window(self.overlay, pt) {
             return; // the pointer reached the popup; the hover has not left
+        }
+
+        // The application's own "Minimize" tooltip pops up just under the
+        // button, in the very strip the pointer crosses to reach the popup.
+        // It belongs to another process and cannot be suppressed from here
+        // (unlike maximize, which has no tooltip), so it is looked through
+        // instead: a tooltip under the pointer, inside the hovered window's
+        // caption-button region, counts as still being on the button. Without
+        // this, `target::at` refuses the tooltip, the hover is lost, and the
+        // popup hides before the pointer gets to it.
+        if !self.hovered.is_invalid()
+            && candidate_rect(self.hovered).is_some_and(|rect| point_in(rect, pt))
+            && tooltip_under(pt)
+        {
+            return;
         }
 
         let hwnd = min_button_target(pt).unwrap_or_default();
@@ -242,6 +261,57 @@ fn is_clearly_elsewhere(hit: i32) -> bool {
     hit >= 0 && ELSEWHERE.contains(&(hit as u32))
 }
 
+/// The minimize button's real rectangle, as the window itself reports it:
+/// `pt` is known to be on the button (the pointer has dwelt there), so this
+/// bisects outward from it with bounded `WM_NCHITTEST`s until the answer stops
+/// being `HTMINBUTTON` — down, up, left and right. That is how Windows itself
+/// learns where a caption button is (the snap-layouts flyout of maximize asks
+/// the window the same question), and it works for windows that draw their
+/// own title bar (Windows Terminal's tabs, Chrome) where no metric or DWM
+/// query gets the button's size right. ~20 probes, run once per popup from the
+/// message loop, never from the hook. `None` when `pt` is not confirmed on the
+/// button (or the answer is implausible): the caller falls back to estimates.
+pub fn probe_min_button(window: HWND, pt: POINT) -> Option<RECT> {
+    let is_min = |x: i32, y: i32| geometry::hit_test(window, POINT { x, y }) == Some(HTMINBUTTON as i32);
+    if !is_min(pt.x, pt.y) {
+        return None;
+    }
+
+    let frame = geometry::visual_window_rect(window).ok()?;
+    let dpi = Monitor::from_window(window).dpi;
+    let reach = unsafe { GetSystemMetricsForDpi(SM_CXSIZE, dpi) } * 3;
+
+    // The first coordinate past the button going from `from` towards `to`,
+    // assuming the button is one contiguous run along that line.
+    let edge = |from: i32, to: i32, on_line: &dyn Fn(i32) -> bool| -> Option<i32> {
+        if on_line(to) {
+            return None; // still on the button at the search limit: nonsense
+        }
+        let (mut inside, mut outside) = (from, to);
+        while (outside - inside).abs() > 1 {
+            let mid = inside + (outside - inside) / 2;
+            if on_line(mid) {
+                inside = mid;
+            } else {
+                outside = mid;
+            }
+        }
+        Some(inside) // the last coordinate still on the button
+    };
+
+    let bottom = edge(pt.y, pt.y + reach, &|y| is_min(pt.x, y))?;
+    let top = edge(pt.y, (pt.y - reach).max(frame.top), &|y| is_min(pt.x, y)).unwrap_or(frame.top);
+    let left = edge(pt.x, pt.x - reach, &|x| is_min(x, pt.y))?;
+    let right = edge(pt.x, pt.x + reach, &|x| is_min(x, pt.y))?;
+
+    Some(RECT {
+        left,
+        top,
+        right: right + 1,
+        bottom: bottom + 1,
+    })
+}
+
 /// A generous candidate region covering the whole cluster of caption
 /// buttons (minimize, maximize, close) — not [`min_button_rect`]'s own
 /// narrow guess at minimize's exact slot.
@@ -267,7 +337,10 @@ fn candidate_rect(window: HWND) -> Option<RECT> {
         left: rect.right - button * 4,
         right: rect.right,
         top: rect.top,
-        bottom: rect.top + caption * CANDIDATE_HEIGHT_FACTOR,
+        // Never shorter than the popup's anchor, so the region always touches
+        // the popup however tall the title bar is.
+        bottom: (rect.top + caption * CANDIDATE_HEIGHT_FACTOR)
+            .max(min_popup_top(window).unwrap_or_default()),
     })
 }
 
@@ -282,7 +355,58 @@ const CANDIDATE_HEIGHT_FACTOR: i32 = 2;
 /// Screen y just under the caption-button area of `window` — where the
 /// minimize popup's top edge goes. See [`CANDIDATE_HEIGHT_FACTOR`].
 pub fn min_popup_top(window: HWND) -> Option<i32> {
-    candidate_rect(window).map(|rect| rect.bottom)
+    let rect = geometry::visual_window_rect(window).ok()?;
+    let dpi = Monitor::from_window(window).dpi;
+    let caption = unsafe { GetSystemMetricsForDpi(SM_CYCAPTION, dpi) };
+    // Preferred: ask DWM where the caption buttons really end. The title bar
+    // height differs between restored and maximized windows (Notepad++, for
+    // one), and no system metric tells which; DWM measures the actual
+    // buttons. Same safety as `visual_window_rect`: dwm.exe, not the target.
+    // Fallback: 1.5 captions, just under Win11's ~1.35-caption button.
+    Some(caption_buttons_bottom(window, caption).unwrap_or(rect.top + caption * 3 / 2))
+}
+
+/// Screen y of the bottom edge of `window`'s caption buttons, from
+/// `DWMWA_CAPTION_BUTTON_BOUNDS` (relative to the `GetWindowRect` origin).
+/// `None` when DWM has no answer or an implausible one (zero, or taller than
+/// five captions — a custom frame reporting something unrelated).
+fn caption_buttons_bottom(window: HWND, caption: i32) -> Option<i32> {
+    let mut bounds = RECT::default();
+    unsafe {
+        DwmGetWindowAttribute(
+            window,
+            DWMWA_CAPTION_BUTTON_BOUNDS,
+            &mut bounds as *mut RECT as *mut c_void,
+            size_of::<RECT>() as u32,
+        )
+    }
+    .ok()?;
+    if bounds.bottom <= 0 || bounds.bottom > caption * 5 {
+        return None;
+    }
+    Some(geometry::window_rect(window).ok()?.top + bounds.bottom)
+}
+
+/// Whether the window under `pt` is a tooltip (`tooltips_class32`, the class
+/// of the classic and the themed caption-button tooltips alike). Two cheap
+/// calls that never leave this thread's reach into another window procedure —
+/// safe in the hook, like the rest of [`Hover::update`].
+fn tooltip_under(pt: POINT) -> bool {
+    let window = unsafe { WindowFromPoint(pt) };
+    if window.is_invalid() {
+        return false;
+    }
+    let mut buffer = [0u16; 32];
+    let length = unsafe { GetClassNameW(window, &mut buffer) };
+    if length <= 0 {
+        return false;
+    }
+    // XAML applications (Windows Terminal, the Settings app...) draw their
+    // tooltips in a windowed popup of their own, not a `tooltips_class32`.
+    matches!(
+        String::from_utf16_lossy(&buffer[..length as usize]).as_str(),
+        "tooltips_class32" | "Xaml_WindowedPopupClass"
+    )
 }
 
 /// The window whose minimize button `pt` is over, if any.
