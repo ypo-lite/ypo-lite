@@ -159,6 +159,7 @@ mod tests {
             action: Action::Close,
             target: Target::Pointed,
             desktop: 0,
+            style: None,
         }
     }
 

@@ -25,6 +25,13 @@ use y_core::xml::{self, Document, Element};
 
 use crate::action::{Action, Target};
 
+mod finder;
+use finder::write_finder;
+pub use finder::{
+    Finder, Look, Recall, Shake, ShakeShape, Shape, Side, Style, Tap, TapKey, normalize_process,
+    range as finder_range,
+};
+
 /// The file y-snap looks for.
 pub const FILE_NAME: &str = "y-snap.xml";
 
@@ -41,6 +48,8 @@ pub struct Settings {
     pub overlay: Overlay,
     /// The `<minbutton>` popup, and what a right-click on the button does.
     pub min_button: MinButton,
+    /// The `<finder>` section: the mouse finder's look and its triggers.
+    pub finder: Finder,
     /// Problems that did not stop the file from loading, one line each.
     pub warnings: Vec<String>,
 }
@@ -92,6 +101,9 @@ pub struct Binding {
     pub target: Target,
     /// Which desktop `desktop-move`/`desktop-send` go to, 1-based; 0 when unset.
     pub desktop: u32,
+    /// Which finder style `find-mouse` plays: an index into
+    /// `Settings::finder.styles`, `None` for the default one.
+    pub style: Option<u16>,
     /// Take the combination with a low-level keyboard hook when the system
     /// refuses to register it — how a `Win+…` combination the shell already
     /// owns can be reclaimed. Off by default: a combination belonging to
@@ -224,6 +236,8 @@ pub struct MouseShortcut {
     pub target: Target,
     /// Which desktop `desktop-move`/`desktop-send` go to, 1-based; 0 when unset.
     pub desktop: u32,
+    /// Which finder style `find-mouse` plays, see [`Binding::style`].
+    pub style: Option<u16>,
 }
 
 impl MouseShortcut {
@@ -483,6 +497,7 @@ impl Settings {
             mouse_shortcuts: Vec::new(),
             overlay: Overlay::default(),
             min_button: MinButton::default(),
+            finder: Finder::default(),
             warnings: Vec::new(),
         }
     }
@@ -508,6 +523,14 @@ impl Settings {
         let root = document.root();
         reader.warn_duplicate_sections(root);
 
+        // First: bindings may name a finder style, which has to be known.
+        let finder = reader.finder(root);
+        reader.styles = finder
+            .styles
+            .iter()
+            .map(|style| style.name.clone())
+            .collect();
+
         let hotkeys = reader.hotkeys(root);
         let mouse = reader.mouse(root);
         let mouse_shortcuts = reader.mouse_shortcuts(root, &mouse);
@@ -517,6 +540,7 @@ impl Settings {
             mouse_shortcuts,
             overlay: reader.overlay(root),
             min_button: reader.min_button(root),
+            finder,
             warnings: std::mem::take(&mut reader.warnings),
             path,
         };
@@ -540,10 +564,12 @@ impl Settings {
         let mut out = String::new();
         out.push_str("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<y-snap>\n");
 
-        write_mouse(&mut out, &self.mouse, &self.mouse_shortcuts);
-        write_hotkeys(&mut out, &self.hotkeys);
+        let styles = &self.finder.styles;
+        write_mouse(&mut out, &self.mouse, &self.mouse_shortcuts, styles);
+        write_hotkeys(&mut out, &self.hotkeys, styles);
         write_overlay(&mut out, &self.overlay);
         write_min_button(&mut out, &self.min_button);
+        write_finder(&mut out, &self.finder);
 
         out.push_str("</y-snap>\n");
         out
@@ -566,7 +592,19 @@ impl Settings {
     }
 }
 
-fn write_mouse(out: &mut String, mouse: &Mouse, shortcuts: &[MouseShortcut]) {
+/// ` style="name"` for a binding that picks a finder style.
+fn write_style_ref(out: &mut String, style: Option<u16>, styles: &[finder::Style]) {
+    if let Some(style) = style.and_then(|index| styles.get(index as usize)) {
+        let _ = write!(out, " style=\"{}\"", escape_attr(&style.name));
+    }
+}
+
+fn write_mouse(
+    out: &mut String,
+    mouse: &Mouse,
+    shortcuts: &[MouseShortcut],
+    styles: &[finder::Style],
+) {
     // Written only when true: false is what a missing attribute means.
     if mouse.allow_maximized {
         out.push_str("\t<mouse allow-maximized=\"true\">\n");
@@ -598,12 +636,13 @@ fn write_mouse(out: &mut String, mouse: &Mouse, shortcuts: &[MouseShortcut]) {
         if shortcut.desktop != 0 {
             let _ = write!(out, " desktop=\"{}\"", shortcut.desktop);
         }
+        write_style_ref(out, shortcut.style, styles);
         out.push_str("/>\n");
     }
     out.push_str("\t</mouse>\n");
 }
 
-fn write_hotkeys(out: &mut String, hotkeys: &[Binding]) {
+fn write_hotkeys(out: &mut String, hotkeys: &[Binding], styles: &[finder::Style]) {
     out.push_str("\t<hotkeys>\n");
     for binding in hotkeys {
         let _ = write!(
@@ -617,6 +656,7 @@ fn write_hotkeys(out: &mut String, hotkeys: &[Binding]) {
         if binding.desktop != 0 {
             let _ = write!(out, " desktop=\"{}\"", binding.desktop);
         }
+        write_style_ref(out, binding.style, styles);
         if binding.steal {
             out.push_str(" steal-from-shell=\"true\"");
         }
@@ -905,9 +945,27 @@ fn expand(text: &str) -> String {
 #[derive(Default)]
 struct Reader {
     warnings: Vec<String>,
+    /// The finder's style names, in order, once `<finder>` has been read:
+    /// what a binding's `style` attribute is looked up in.
+    styles: Vec<String>,
 }
 
 impl Reader {
+    /// The `style` attribute of a `find-mouse` binding, as an index into the
+    /// finder's styles. `None` (the default style) when absent or unknown.
+    fn style_ref(&mut self, element: Element<'_>, action: Action) -> Option<u16> {
+        let name = element.attr("style")?.trim();
+        if action != Action::FindMouse {
+            self.warn(element, "style only applies to the find-mouse action");
+            return None;
+        }
+        let found = self.styles.iter().position(|style| style == name);
+        if found.is_none() {
+            self.warn(element, format!("there is no finder style named {name:?}"));
+        }
+        found.and_then(|index| u16::try_from(index).ok())
+    }
+
     fn warn(&mut self, element: Element<'_>, message: impl fmt::Display) {
         self.warnings
             .push(format!("line {}: {message}", element.line()));
@@ -919,7 +977,7 @@ impl Reader {
     /// second, merged set of settings — it is entirely ignored, with nothing
     /// else here in a position to notice.
     fn warn_duplicate_sections(&mut self, root: Element<'_>) {
-        const SECTIONS: &[&str] = &["hotkeys", "mouse", "overlay", "minbutton"];
+        const SECTIONS: &[&str] = &["hotkeys", "mouse", "overlay", "minbutton", "finder"];
         for name in SECTIONS {
             for extra in root.children_named(name).skip(1) {
                 self.warn(
@@ -972,7 +1030,14 @@ impl Reader {
             }
             self.check(
                 element,
-                &["key", "action", "target", "desktop", "steal-from-shell"],
+                &[
+                    "key",
+                    "action",
+                    "target",
+                    "desktop",
+                    "style",
+                    "steal-from-shell",
+                ],
             );
 
             let Some(action) = self.action(element) else {
@@ -1006,6 +1071,7 @@ impl Reader {
                 action,
                 target: self.target(element),
                 desktop: self.desktop(element),
+                style: self.style_ref(element, action),
                 steal: element.attr_bool("steal-from-shell").unwrap_or(false),
             });
         }
@@ -1097,7 +1163,10 @@ impl Reader {
         let mut shortcuts: Vec<MouseShortcut> = Vec::new();
 
         for element in section.children().filter(|e| e.name() == "shortcut") {
-            self.check(element, &["button", "mod", "action", "target", "desktop"]);
+            self.check(
+                element,
+                &["button", "mod", "action", "target", "desktop", "style"],
+            );
 
             let Some(name) = element.attr("button") else {
                 self.warn(element, "a <shortcut> needs a button attribute");
@@ -1148,6 +1217,7 @@ impl Reader {
                 action,
                 target,
                 desktop: self.desktop(element),
+                style: self.style_ref(element, action),
             };
             if let Some(problem) = shortcut_problem(&shortcut, &shortcuts, mouse) {
                 self.warn(element, format!("shortcut ignored: {problem}"));
@@ -1627,6 +1697,7 @@ mod tests {
             action: Action::Close,
             target: Target::Pointed,
             desktop: 0,
+            style: None,
         };
 
         assert_eq!(

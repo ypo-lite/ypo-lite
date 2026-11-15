@@ -63,6 +63,21 @@ Overlay `Split`, down to `shell::MIN_WINDOW` (560×472, title bar included).
 
 No reordering: order means nothing here, duplicates being refused.
 
+## Mouse finder (`finder.rs`)
+
+| # | Requirement | Status | Notes |
+|---|---|---|---|
+| 1 | The styles table fits any width without scrolling sideways | 👁 | `Table` with flex columns; cards below `min_width()`. Check at `shell::MIN_WINDOW`. |
+| 2 | A style's editor opens under its row; Cancel restores it | 👁 | `Row::detail` + `Editing::FinderStyle` snapshot. The default look has its own editor (`Editing::FinderBase`). |
+| 3 | A style with no name, or another's name, can't be kept | 👁 | `style_problem`: Done is disabled, Save refuses while it is open (y-snap would skip such a style). |
+| 4 | Opening the screen does not mark it "Unsaved changes" | 👁 | Every `apply_*` returns whether the value changed; number boxes and combos report on first draw. |
+| 5 | A shake always recognises something | ✅ | The last "kind of shake" chip can't be switched off (tested). |
+| 6 | Deleting a style keeps hotkeys, shortcuts and the default pointing at the right one | ✅ | `delete_style` remaps their indices (tested). |
+| 7 | Trigger cards, tuning fields and the colour picker reflow | 👁 | `AutoGrid`s from the card's narrowed `Viewport`. The colour picker is wide: check at the minimum window. |
+| 8 | The exclude list takes names as y-snap compares them | ✅ | `normalize_process` (`Game.EXE` → `game`), no duplicates (tested). |
+
+Test button: plays the look being edited, saved or not, in the running y-snap (`ipc::request_finder_test`; disabled with a note when y-snap is not running). Not built: a shake sensitivity preset. A `find-mouse` hotkey or shortcut picks its style in the Target cell (header "Target / style"); changing its action to something else clears the style. Styles can be reordered (the Reorder toggle under the table, as on the other lists): the default style and the `style` of hotkeys and shortcuts follow their style (`move_style`, tested).
+
 ## Action overlay (`overlay/`)
 
 | # | Requirement | Status | Notes |

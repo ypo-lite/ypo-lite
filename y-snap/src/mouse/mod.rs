@@ -54,10 +54,7 @@ use std::cell::{Cell, RefCell};
 use windows::Win32::{
     Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
     System::LibraryLoader::GetModuleHandleW,
-    UI::Input::KeyboardAndMouse::{
-        GetAsyncKeyState, HOT_KEY_MODIFIERS, MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, VIRTUAL_KEY,
-        VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
-    },
+    UI::Input::KeyboardAndMouse::HOT_KEY_MODIFIERS,
     UI::WindowsAndMessaging::{
         CallNextHookEx, GetCursorPos, HC_ACTION, HHOOK, KillTimer, MSLLHOOKSTRUCT, PostMessageW,
         SWP_NOACTIVATE, SWP_NOZORDER, SetTimer, SetWindowPos, SetWindowsHookExW,
@@ -67,6 +64,7 @@ use windows::Win32::{
     },
 };
 use windows::core::Result;
+use y_core::hotkey::modifiers_held;
 use y_core::ids::WM_APP_FIRST;
 use y_core::monitor::Monitor;
 
@@ -216,11 +214,30 @@ pub struct MouseHook {
 }
 
 impl MouseHook {
+    /// Whether the configuration uses the mouse at all: a drag or resize
+    /// gesture, a shortcut, the minimize-button popup or right-click, or a
+    /// finder shake (`shakes`, fed by this hook). When none is, y-snap installs
+    /// no `WH_MOUSE_LL` hook and arms no watchdog, so it costs the system
+    /// nothing per mouse event.
+    pub fn needed(
+        mouse: &Mouse,
+        shortcuts: &[MouseShortcut],
+        min_button: &crate::config::MinButton,
+        shakes: bool,
+    ) -> bool {
+        mouse.drag.is_some()
+            || mouse.resize.is_some()
+            || !shortcuts.is_empty()
+            || !min_button.items.is_empty()
+            || min_button.right_click_action.is_some()
+            || shakes
+    }
+
     /// Installs the hook. `owner` is where [`WM_MIN_HOVER`] is posted, and
     /// where [`REHOOK_TIMER_ID`] and [`MIN_HOVER_TIMER_ID`] are armed.
     ///
-    /// Installs even when every gesture in `mouse` is unset: hovering the
-    /// minimize button works on its own, independent of drag/resize.
+    /// Callers check [`MouseHook::needed`] first: with nothing to watch, no
+    /// hook (and no watchdog timer) should exist at all.
     pub fn install(
         owner: HWND,
         mouse: Mouse,
@@ -446,7 +463,10 @@ impl HookState {
             gesture::Step::Monitor(window, pt) => queue_monitor(self.owner, window, pt),
             // A pinned gesture owns the pointer too: no popup meanwhile.
             gesture::Step::Claimed => {}
-            gesture::Step::Idle => self.hover.update(pt),
+            // Hit-testing every move is the costly part: skipped when neither
+            // the popup nor the right-click action is configured.
+            gesture::Step::Idle if self.hover.enabled() => self.hover.update(pt),
+            gesture::Step::Idle => {}
         }
     }
 }
@@ -455,10 +475,33 @@ unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) 
     if code == HC_ACTION as i32 {
         let info = unsafe { &*(lparam.0 as *const MSLLHOOKSTRUCT) };
         let message = wparam.0 as u32;
+        // The pointer is confined (a game in play, a remote desktop...): y-snap
+        // stays out of it, unless a drag it started is still going on. The
+        // watchdog still needs to see the pointer move.
+        if crate::guard::confined_cached(info.time)
+            && !with_state_bool(|state| state.gesture.active())
+        {
+            if message == WM_MOUSEMOVE {
+                LAST_POINT.with(|cell| cell.set(Some(info.pt)));
+            }
+            return unsafe { CallNextHookEx(None, code, wparam, lparam) };
+        }
+        if matches!(
+            message,
+            WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN | WM_XBUTTONDOWN
+        ) {
+            y_snap::finder::input::on_button();
+        }
 
         let consumed = match message {
             WM_MOUSEMOVE => {
                 LAST_POINT.with(|cell| cell.set(Some(info.pt)));
+                y_snap::finder::input::on_move(
+                    info.pt.x,
+                    info.pt.y,
+                    info.time,
+                    info.flags & 1 != 0,
+                );
                 with_state(|state| state.on_move(info.pt));
                 false
             }
@@ -535,24 +578,4 @@ fn side_button(mouse_data: u32) -> Option<MouseTrigger> {
         2 => Some(MouseTrigger::X2),
         _ => None,
     }
-}
-
-/// The modifier keys held right now, in [`y_core::hotkey`]'s vocabulary.
-fn modifiers_held() -> HOT_KEY_MODIFIERS {
-    let held = |key: VIRTUAL_KEY| unsafe { GetAsyncKeyState(key.0 as i32) } as u16 & 0x8000 != 0;
-
-    let mut modifiers = 0;
-    if held(VK_LWIN) || held(VK_RWIN) {
-        modifiers |= MOD_WIN.0;
-    }
-    if held(VK_CONTROL) {
-        modifiers |= MOD_CONTROL.0;
-    }
-    if held(VK_MENU) {
-        modifiers |= MOD_ALT.0;
-    }
-    if held(VK_SHIFT) {
-        modifiers |= MOD_SHIFT.0;
-    }
-    HOT_KEY_MODIFIERS(modifiers)
 }

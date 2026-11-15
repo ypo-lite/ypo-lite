@@ -7,6 +7,7 @@
 //! [`y_snap::config::shortcut_problem`]'s, the same ones y-snap applies when
 //! it reads the file, so what this screen accepts is what y-snap will load.
 
+use crate::finder::style_combo;
 use crate::hotkeys::{ACTIONS, TARGETS};
 use crate::ui::key_picker::{MODIFIERS, combo_labels};
 use crate::ui::prelude::*;
@@ -15,13 +16,13 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{HOT_KEY_MODIFIERS, MOD_SHIFT, 
 use windows_reactor::*;
 use y_snap::action::{Action, Target};
 use y_snap::config::{
-    Mouse, MouseShortcut, MouseTrigger, Settings, ShortcutProblem, shortcut_problem,
+    Finder, Mouse, MouseShortcut, MouseTrigger, Settings, ShortcutProblem, shortcut_problem,
 };
 
 const COLUMNS: [Column; 5] = [
     Column::flex("Trigger", 170.0),
     Column::flex("Action", 150.0),
-    Column::flex("Target", 100.0),
+    Column::flex("Target / style", 100.0),
     Column::fixed("Desktop", 96.0),
     Column::actions(size::ICON_BUTTON),
 ];
@@ -100,6 +101,7 @@ pub fn first_free(shortcuts: &[MouseShortcut], mouse: &Mouse) -> Option<MouseSho
                 action: Action::Minimize,
                 target: MouseShortcut::DEFAULT_TARGET,
                 desktop: 0,
+                style: None,
             };
             shortcut_problem(&candidate, shortcuts, mouse)
                 .is_none()
@@ -129,7 +131,11 @@ pub fn mouse_shortcuts_view(
                 context.callback(|()| Msg::EditorClosed(EditorClose::Keep)),
             )
         });
-        Row::new(index.to_string(), cells(index, shortcut, context)).detail(detail)
+        Row::new(
+            index.to_string(),
+            cells(index, shortcut, &settings.finder, context),
+        )
+        .detail(detail)
     });
 
     // A clash can come from the Mouse gestures screen too: Drag changed to a
@@ -166,9 +172,30 @@ pub fn mouse_shortcuts_view(
     )
 }
 
-fn cells(index: usize, shortcut: &MouseShortcut, context: &ViewContext<ConfigApp>) -> Vec<View> {
+fn cells(
+    index: usize,
+    shortcut: &MouseShortcut,
+    finder: &Finder,
+    context: &ViewContext<ConfigApp>,
+) -> Vec<View> {
     let action = ACTIONS.iter().position(|a| *a == shortcut.action);
     let target = TARGETS.iter().position(|t| *t == shortcut.target);
+
+    // `find-mouse` acts on no window: the Target cell picks the finder style.
+    let target_or_style: View = if shortcut.action == Action::FindMouse {
+        style_combo(
+            finder,
+            shortcut.style,
+            context.callback(move |c| Msg::MouseShortcutStyleChanged(index, c)),
+        )
+    } else {
+        combo(
+            TARGETS.map(Target::name),
+            target,
+            context.callback(move |c| Msg::MouseShortcutTargetChanged(index, c)),
+        )
+        .into()
+    };
 
     let mut labels = combo_labels(shortcut.modifiers, None);
     labels.push(trigger_label(shortcut.trigger).to_owned());
@@ -199,12 +226,7 @@ fn cells(index: usize, shortcut: &MouseShortcut, context: &ViewContext<ConfigApp
             context.callback(move |c| Msg::MouseShortcutActionChanged(index, c)),
         )
         .into(),
-        combo(
-            TARGETS.map(Target::name),
-            target,
-            context.callback(move |c| Msg::MouseShortcutTargetChanged(index, c)),
-        )
-        .into(),
+        target_or_style,
         desktop,
         icon_button(
             Symbol::Delete,
@@ -322,6 +344,7 @@ mod tests {
             action: Action::Close,
             target: MouseShortcut::DEFAULT_TARGET,
             desktop: 0,
+            style: None,
         }
     }
 

@@ -14,7 +14,10 @@
 //! (UIPI filters posted messages upward). y-snap doesn't run elevated, so
 //! this isn't worked around.
 
+use y_core::overlay::Color;
 use y_core::single_instance;
+
+use crate::config::{Look, Shape, finder_range};
 
 /// y-snap's main window class — also its single-instance mutex name
 /// (`AppInfo::single_instance` derives one from the other).
@@ -55,4 +58,100 @@ pub fn request_reload() -> bool {
     }
     single_instance::notify_running_instance(reload_message());
     true
+}
+
+/// The registered message that asks a running y-snap to play a finder look
+/// once, as the settings app's Test button does with a style that is not
+/// saved yet. The look travels in the message's two parameters, see
+/// [`pack_look`]. Same id in every process that asks for it.
+pub fn finder_test_message() -> u32 {
+    single_instance::broadcast_message(&format!("{CLASS}.FinderTest"))
+}
+
+/// Asks a running y-snap to play `look` now. Returns whether there was one to
+/// ask.
+pub fn request_finder_test(look: &Look) -> bool {
+    if !is_running() {
+        return false;
+    }
+    let (wparam, lparam) = pack_look(look);
+    single_instance::notify_running_instance_with(finder_test_message(), wparam, lparam);
+    true
+}
+
+/// A [`Look`] as the two message parameters. Nothing else is needed to play
+/// it: a shape, a few small numbers and a colour. `recall` is left out (a test
+/// never moves the pointer).
+///
+/// `wParam`: shape (bits 0–7), auto colour (8), dimming (9–15), duration in
+/// ms (16–31), size (32–47), all monitors (48). `lParam`: the colour as `0xRRGGBB`.
+pub fn pack_look(look: &Look) -> (usize, isize) {
+    let shape = Shape::ALL
+        .iter()
+        .position(|s| *s == look.shape)
+        .unwrap_or(0) as u64;
+    let wparam = shape
+        | u64::from(look.auto_color) << 8
+        | u64::from(look.dim.min(100)) << 9
+        | u64::from(look.duration_ms.min(u32::from(u16::MAX))) << 16
+        | u64::from(look.size.min(u32::from(u16::MAX))) << 32
+        | u64::from(look.all_monitors) << 48;
+    let color =
+        u32::from(look.color.r) << 16 | u32::from(look.color.g) << 8 | u32::from(look.color.b);
+    (wparam as usize, color as isize)
+}
+
+/// The look [`pack_look`] made, or `None` for parameters no y-snap would send.
+/// Any process can post this message, so what comes out is held to the ranges
+/// the configuration file itself obeys.
+pub fn unpack_look(wparam: usize, lparam: isize) -> Option<Look> {
+    let wparam = wparam as u64;
+    let shape = *Shape::ALL.get((wparam & 0xFF) as usize)?;
+    let in_range = |value: u64, range: std::ops::RangeInclusive<u32>| {
+        u32::try_from(value).ok().filter(|v| range.contains(v))
+    };
+    let color = u32::try_from(lparam).ok().filter(|c| *c <= 0x00FF_FFFF)?;
+    Some(Look {
+        shape,
+        auto_color: wparam >> 8 & 1 == 1,
+        dim: in_range(wparam >> 9 & 0x7F, finder_range::DIM)?,
+        duration_ms: in_range(wparam >> 16 & 0xFFFF, finder_range::DURATION_MS)?,
+        size: in_range(wparam >> 32 & 0xFFFF, finder_range::SIZE)?,
+        all_monitors: wparam >> 48 & 1 == 1,
+        color: Color::rgb((color >> 16) as u8, (color >> 8) as u8, color as u8),
+        ..Look::default()
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_look_survives_the_trip() {
+        let look = Look {
+            shape: Shape::Spotlight,
+            duration_ms: 2500,
+            size: 333,
+            color: Color::rgb(1, 2, 3),
+            auto_color: true,
+            dim: 80,
+            all_monitors: true,
+            ..Look::default()
+        };
+        let (w, l) = pack_look(&look);
+        assert_eq!(unpack_look(w, l), Some(look));
+        let default = Look::default();
+        let (w, l) = pack_look(&default);
+        assert_eq!(unpack_look(w, l), Some(default));
+    }
+
+    #[test]
+    fn what_no_y_snap_would_send_is_refused() {
+        assert_eq!(unpack_look(0xFF, 0), None, "unknown shape");
+        assert_eq!(unpack_look(0, -1), None, "negative colour");
+        assert_eq!(unpack_look(0, 0x0100_0000), None, "colour too wide");
+        // A zero duration is outside the accepted range.
+        assert_eq!(unpack_look(0, 0), None);
+    }
 }

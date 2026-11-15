@@ -1,9 +1,9 @@
 # y-snap-config — user manual
 
 y-snap-config is the settings app of [y-snap](../../y-snap/README.md). It edits
-`y-snap.xml` for you: hotkeys, mouse gestures and shortcuts, the action overlay and
-the minimize-button popup, with a live preview where there is something to see.
-When you save, a running y-snap applies the change at once.
+`y-snap.xml` for you: hotkeys, mouse gestures and shortcuts, the mouse finder, the
+action overlay and the minimize-button popup, with a live preview where there is
+something to see. When you save, a running y-snap applies the change at once.
 
 Everything the app edits is also in the file, and the
 [configuration reference](../../y-snap/docs/configuration.md) describes it attribute
@@ -14,6 +14,7 @@ by attribute. This manual is about the app.
 - [Hotkeys](#hotkeys)
 - [Mouse gestures](#mouse-gestures)
 - [Mouse shortcuts](#mouse-shortcuts)
+- [Mouse finder](#mouse-finder)
 - [Action overlay](#action-overlay)
 - [Minimize button](#minimize-button)
 - [Saving, and what is kept](#saving-and-what-is-kept)
@@ -65,7 +66,7 @@ Global key combinations, each bound to one action. See
 | --- | --- |
 | **Key** | Click it to choose a combination. The picker lists every key by category (letters, function keys including `F13`–`F24`, media keys…) and has a search box. |
 | **Action** | What the combination does. |
-| **Target** | `pointed` acts on the window under the pointer, `focused` on the window that has the keyboard focus. |
+| **Target / style** | `pointed` acts on the window under the pointer, `focused` on the window that has the keyboard focus. For `find-mouse`, which acts on no window, the cell chooses the [finder style](#mouse-finder) to play instead; *(default style)* plays the default one. |
 | **Desktop** | The virtual desktop number, for the actions that need one, such as sending a window to a desktop. A dash means the action takes none. |
 | **Steal from shell** | Takes the combination with a low-level keyboard hook when Windows already owns it (most `Win+…` combinations). The hook sees every keystroke on the machine, so leave it off unless a row needs it. |
 
@@ -115,6 +116,56 @@ chose is the highlighted one.
 
 There is no *Reorder* here: order means nothing, since the same combination cannot
 be used twice.
+
+As on the Hotkeys page, a `find-mouse` shortcut picks its finder style in the
+**Target / style** column.
+
+---
+
+## Mouse finder
+
+A short animation around the pointer, to find it again: on this page you choose the
+looks, and what plays them. Nothing is automatic until a style has a trigger. How
+it behaves, and when it stays quiet, is in
+[the y-snap manual](../../y-snap/docs/user-manual.md#finding-the-pointer).
+
+**General**
+
+- **Stay quiet while a full-screen window is up**: the automatic triggers do nothing
+  while a game's menus or a full-screen video cover the pointer's monitor. The
+  `find-mouse` action still works.
+- **Excluded applications**: type an executable's name (`game`, with or without
+  `.exe`) and press **Add**. While one has the focus, the automatic triggers do
+  nothing.
+- **Default look**: *Edit* opens the look that `find-mouse` plays when there is no
+  style, and where a new style starts from.
+
+**Styles.** A table of named styles: its look, a summary of its triggers, and a
+**Default** button (the one `find-mouse` plays when it names none). Click a name to
+edit it, in place:
+
+- **Name**: needed, and different from the others. *Done* stays disabled and Save
+  refuses while it is not.
+- **Look**: the **Shape**, how long it plays, its size, how much the screen dims
+  (for the spotlight), **When it plays** (*Only show where it is*, or *Bring it to the
+  active window*, which also moves the pointer), and **Adapt the colour to what is
+  behind it**. The **Colour** is a swatch: click it to open the picker, click again
+  to close it. A shape that stays up says so, since it lasts four times the duration.
+- **Test** plays the look as it is on screen, saved or not, in the running y-snap,
+  around the pointer. It is disabled, with a line saying so, when y-snap is not
+  running. A test never moves the pointer.
+- **Triggers**: **Add a tap** or **Add a shake**, each a card with a delete button.
+  A tap is a **Key** (`Ctrl`, `Shift`, `Alt`, `Win`), a **Side**, a number of **Taps**,
+  the **Longest press** and the **Longest gap**. A shake is the **Keys held** while
+  shaking, the **Kinds of shake** (side to side, up and down, circles; at least one
+  stays on) and eight fine-tuning values: the slowest speed, the turns back and forth,
+  the quiet period after a detection, and so on. Every one has a range, and the
+  configuration reference says what each does.
+
+**Add style** makes a new one from the default look, with no trigger: add one, or bind
+`find-mouse` to a hotkey and pick the style there. **Reorder** moves styles up and
+down; hotkeys and shortcuts keep playing the same style. Deleting a style makes the
+hotkeys that used it play the default one.
 
 ---
 
