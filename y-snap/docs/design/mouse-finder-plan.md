@@ -615,3 +615,50 @@ running y-snap, around the pointer (which is on the settings window).
   (checked when the screen is drawn).
 - **Not looked at live.** To try: with y-snap running, open a style, change the
   shape or colour without saving, press Test.
+
+## Phase 6 built: `recall` (2026-11-15)
+
+`recall="center"` on `<finder>` or a `<style>`: before the indicator plays,
+the pointer is moved to the middle of the focused application window.
+
+- In `main.rs::find_mouse`, so every way of playing a style gets it: the
+  `find-mouse` action (hotkey, shortcut, tray) and the automatic triggers.
+  The guard has already had its say by then.
+- The window is `y_core::target::focused()` (the same filter as a hotkey's
+  `focused` target: no taskbar, tooltip or shell surface) and the move is
+  `window::center_cursor`, the `center-cursor` action's own code. With no such
+  window the pointer stays where it is and the indicator plays there.
+- The Test button never moves the pointer (the look it sends has no recall).
+- Screen: a "When it plays" dropdown in each look editor ("Only show where it
+  is" / "Bring it to the active window").
+- **Not looked at live.** To try: `recall="center"` on a style, lose the pointer
+  on another monitor, trigger it. Worth watching: a shake that warps the pointer
+  must not set another trigger off (the trigger's cooldown should cover it).
+
+**Reordering styles (2026-11-15).** The styles table has the Reorder toggle and
+the ↑/↓ rows of the other lists (`reorder::list_footer` / `row_actions`,
+`ListKind::FinderStyles`). The order is the file's, and it matters: the first
+style is the default unless one says `default="true"`, and a duplicate trigger
+is won by the earlier style. A hotkey's or shortcut's `style` is a position, so
+`finder::move_style` swaps the two styles and remaps the default and every
+binding's `style` with them (tested): a hotkey keeps playing the same style.
+
+## Phase 8 built: documentation (2026-11-15)
+
+- `y-snap/docs/configuration.md`: the `<finder>` reference (attributes and
+  ranges, shapes, `<exclude>`, `<style>`, `<tap>`, `<shake>`, when it stays
+  quiet), the `find-mouse` action, `style` on `<hotkey>` and `<shortcut>`.
+- `y-snap/docs/user-manual.md`: "Finding the pointer" (asking, tapping, shaking,
+  looks, the guard, `recall`, the Windows overlap), the tray entry, the action
+  table, the settings pages list, two troubleshooting entries.
+- `y-snap/README.md`: a "Find a lost pointer" section.
+- `y-snap/docs/development.md`: the six new files, and how the finder works
+  (hooks, idle cost, capture exclusion, why the cursor is not resized, the guard
+  signals and what was rejected, the Test message).
+- `y-snap-config/docs/user-manual.md`: the Mouse finder page, the Target / style
+  column.
+- Not done: screenshots of the new page (there is none yet), and the Windows
+  Mouse Sonar overlap is only documented, not detected (the plan's risk table
+  suggested reading `SPI_GETMOUSESONAR` to warn in the screen).
+- `development.md` mentions `examples/finder_probe.rs`; remove the line when
+  the probe is deleted.

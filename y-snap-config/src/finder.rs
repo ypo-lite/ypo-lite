@@ -18,13 +18,14 @@
 use std::ops::RangeInclusive;
 
 use crate::overlay::palette::{from_ui_color, to_ui_color};
+use crate::reorder::{list_footer, row_actions};
 use crate::ui::key_picker::MODIFIERS;
 use crate::ui::prelude::*;
-use crate::{ConfigApp, EditorClose, Msg};
+use crate::{ConfigApp, EditorClose, ListKind, Msg};
 use windows::Win32::UI::Input::KeyboardAndMouse::HOT_KEY_MODIFIERS;
 use windows_reactor::*;
 use y_snap::config::{
-    Finder, Look, Settings, Shake, ShakeShape, Shape, Side, Style, Tap, TapKey, finder_range,
+    Finder, Look, Recall, Settings, Shake, ShakeShape, Shape, Side, Style, Tap, TapKey, finder_range,
     normalize_process,
 };
 
@@ -45,6 +46,7 @@ pub enum LookEdit {
     Duration(Option<f64>),
     Size(Option<f64>),
     Dim(Option<f64>),
+    Recall(Option<usize>),
     AutoColor(bool),
     Color(Color),
 }
@@ -81,6 +83,14 @@ pub enum Open {
 }
 
 const SIDES: [Side; 3] = [Side::Any, Side::Left, Side::Right];
+const RECALLS: [Recall; 2] = [Recall::None, Recall::Center];
+
+fn recall_title(recall: Recall) -> &'static str {
+    match recall {
+        Recall::None => "Only show where it is",
+        Recall::Center => "Bring it to the active window",
+    }
+}
 
 /// How a shape reads in the UI, with what it does.
 pub fn shape_title(shape: Shape) -> &'static str {
@@ -163,6 +173,12 @@ pub fn apply_look(look: &mut Look, edit: LookEdit) -> bool {
         LookEdit::Dim(value) => {
             set_number(&mut look.dim, value, finder_range::DIM);
         }
+        LookEdit::Recall(Some(choice)) => {
+            if let Some(recall) = RECALLS.get(choice) {
+                look.recall = *recall;
+            }
+        }
+        LookEdit::Recall(None) => {}
         LookEdit::AutoColor(on) => look.auto_color = on,
         LookEdit::Color(color) => {
             // The picker has no alpha here: an indicator is always opaque.
@@ -319,6 +335,34 @@ pub fn style_combo(
         .into()
 }
 
+/// Swaps style `index` with the one above (`up`) or below it. The order is
+/// the file's, and what points at a style by position follows it: the default
+/// style, and the `style` of hotkeys and mouse shortcuts. `false`, and nothing
+/// changes, when there is no neighbour that way.
+pub fn move_style(settings: &mut Settings, index: usize, up: bool) -> bool {
+    let other = if up { index.checked_sub(1) } else { index.checked_add(1) };
+    let styles = settings.finder.styles.len();
+    let Some(other) = other.filter(|other| index < styles && *other < styles) else {
+        return false;
+    };
+    settings.finder.styles.swap(index, other);
+
+    let swap = |position: usize| match position {
+        p if p == index => other,
+        p if p == other => index,
+        p => p,
+    };
+    settings.finder.default_style = swap(settings.finder.default_style);
+    let fix = |style: &mut Option<u16>| {
+        if let Some(i) = *style {
+            *style = Some(swap(usize::from(i)) as u16);
+        }
+    };
+    settings.hotkeys.iter_mut().for_each(|b| fix(&mut b.style));
+    settings.mouse_shortcuts.iter_mut().for_each(|s| fix(&mut s.style));
+    true
+}
+
 /// Adds an excluded application, as y-snap compares them. `false` for an
 /// empty name or one already there.
 pub fn add_exclude(finder: &mut Finder, name: &str) -> bool {
@@ -384,12 +428,14 @@ const COLUMNS: [Column; 5] = [
     Column::flex("Look", 90.0),
     Column::flex("Triggers", 160.0),
     Column::fixed("Default", 96.0),
-    Column::actions(size::ICON_BUTTON),
+    // Room for the ↑/↓ pair while reordering; one delete button otherwise.
+    Column::actions(TWO_ICON_BUTTONS),
 ];
 
 pub fn finder_view(
     finder: &Finder,
     open: Open,
+    reordering: bool,
     color_open: bool,
     draft: &str,
     viewport: Viewport,
@@ -409,7 +455,11 @@ pub fn finder_view(
                 context.callback(|()| Msg::EditorClosed(EditorClose::Keep)),
             )
         });
-        Row::new(index.to_string(), cells(finder, index, style, context)).detail(detail)
+        Row::new(
+            index.to_string(),
+            cells(finder, index, style, reordering, context),
+        )
+        .detail(detail)
     });
 
     let base_editor = (open == Open::Base).then(|| {
@@ -465,7 +515,13 @@ pub fn finder_view(
                     .child("table", table.rows(rows).build(viewport))
                     .child(
                         "add",
-                        add_button("Add style", context.callback(|()| Msg::FinderStyleAdded)),
+                        list_footer(
+                            ListKind::FinderStyles,
+                            add_button("Add style", context.callback(|()| Msg::FinderStyleAdded)),
+                            finder.styles.len(),
+                            reordering,
+                            context,
+                        ),
                     ),
             ),
         )
@@ -488,6 +544,7 @@ fn cells(
     finder: &Finder,
     index: usize,
     style: &Style,
+    reordering: bool,
     context: &ViewContext<ConfigApp>,
 ) -> Vec<View> {
     let name: View = Button::new()
@@ -507,10 +564,19 @@ fn cells(
             true,
             context.callback(move |()| Msg::FinderStyleDefault(index)),
         ),
-        icon_button(
-            Symbol::Delete,
-            "Delete style",
-            context.callback(move |()| Msg::FinderStyleDeleted(index)),
+        row_actions(
+            ListKind::FinderStyles,
+            index,
+            finder.styles.len(),
+            reordering,
+            || {
+                icon_button(
+                    Symbol::Delete,
+                    "Delete style",
+                    context.callback(move |()| Msg::FinderStyleDeleted(index)),
+                )
+            },
+            context,
         ),
     ]
 }
@@ -725,6 +791,17 @@ fn look_editor(
             field(
                 "Screen dimming (%)",
                 number(look.dim, finder_range::DIM, LookEdit::Dim),
+            ),
+        ),
+        (
+            "recall",
+            field(
+                "When it plays",
+                combo(
+                    RECALLS.map(recall_title),
+                    RECALLS.iter().position(|r| *r == look.recall),
+                    context.callback(move |c| Msg::FinderLook(target, LookEdit::Recall(c))),
+                ),
             ),
         ),
     ]);
@@ -1148,6 +1225,16 @@ mod tests {
     }
 
     #[test]
+    fn recall_is_chosen_from_the_list() {
+        let mut look = Look::default();
+        assert!(!apply_look(&mut look, LookEdit::Recall(Some(0))));
+        assert!(apply_look(&mut look, LookEdit::Recall(Some(1))));
+        assert_eq!(look.recall, Recall::Center);
+        assert!(!apply_look(&mut look, LookEdit::Recall(Some(9))));
+        assert!(!apply_look(&mut look, LookEdit::Recall(None)));
+    }
+
+    #[test]
     fn a_tap_changes_by_choice_and_number() {
         let mut tap = Tap::new(TapKey::Ctrl);
         assert!(apply_tap(&mut tap, TapEdit::Key(Some(2))));
@@ -1205,6 +1292,34 @@ mod tests {
 
         delete_style(&mut settings, 1);
         assert_eq!(settings.finder.default_style, 0);
+    }
+
+    #[test]
+    fn moving_a_style_keeps_what_points_at_one() {
+        let mut settings = settings_with_styles(&["a", "b", "c"]);
+        settings.finder.default_style = 1;
+        let binding = |style| Binding {
+            hotkey: y_core::hotkey::Hotkey::parse("Ctrl+Alt+F13").unwrap(),
+            action: y_snap::action::Action::FindMouse,
+            target: y_snap::action::Target::Focused,
+            desktop: 0,
+            style,
+            steal: false,
+        };
+        settings.hotkeys = vec![binding(Some(0)), binding(Some(1)), binding(Some(2)), binding(None)];
+
+        assert!(move_style(&mut settings, 1, true));
+
+        let names: Vec<_> = settings.finder.styles.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["b", "a", "c"]);
+        // "b" is still the default and still what the second hotkey plays.
+        assert_eq!(settings.finder.default_style, 0);
+        let styles: Vec<_> = settings.hotkeys.iter().map(|b| b.style).collect();
+        assert_eq!(styles, [Some(1), Some(0), Some(2), None]);
+
+        assert!(!move_style(&mut settings, 0, true));
+        assert!(!move_style(&mut settings, 2, false));
+        assert!(!move_style(&mut settings, 9, true));
     }
 
     #[test]

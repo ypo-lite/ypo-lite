@@ -9,6 +9,7 @@ changes and troubleshooting, see the [user manual](user-manual.md).
 - [`<hotkeys>`](#hotkeys)
 - [`<mouse>`](#mouse)
 - [`<minbutton>`](#minbutton)
+- [`<finder>`](#finder)
 - [`<overlay>`](#overlay)
 
 ---
@@ -48,6 +49,7 @@ The same names work on a hotkey and on an overlay tile.
 | `minimize` / `maximize` / `close` | the obvious ones; `maximize` restores a maximized window |
 | `always-on-top` / `borderless` / `transparency` / `shade` / `hide-taskbar` | toggles |
 | `center-cursor` | put the pointer in the middle of the window |
+| `find-mouse` | show where the pointer is, see [`<finder>`](#finder). Needs no window; a `style` attribute picks which look |
 | `iconize` / `traynize` | hide the window behind an icon of its own, or in the tray menu, see [Hidden windows](user-manual.md#hidden-windows) |
 | `uniconize` / `uniconize-all` | bring back the window hidden last, or all of them, the latest first |
 | `desktop-next` / `desktop-prev` / `desktop-new` / `pin-toggle` | virtual desktops: switch to the next or previous one (wrapping), create one, pin the window to all |
@@ -69,6 +71,7 @@ The same names work on a hotkey and on an overlay tile.
 | `action` | required |
 | `target` | `focused` (default), or `pointed` for the window under the pointer, falling back to the focused one |
 | `desktop` | for `desktop-move` and `desktop-send` only, 1-based |
+| `style` | for `find-mouse` only: the name of the [`<finder>` style](#style) to play. Left out, or naming no style, plays the default one. On any other action it is a warning |
 | `steal-from-shell` | `true` takes a combination Windows already owns, with a low-level keyboard hook |
 
 `steal-from-shell` is off by default: a combination belonging to another
@@ -117,6 +120,7 @@ A modifier plus a mouse trigger fires one action, the way a hotkey does:
 | `action` | required, the same vocabulary as a hotkey, except `desktop-list` and `desktop-send-list` |
 | `target` | `pointed` (the default, unlike a hotkey) or `focused` |
 | `desktop` | for `desktop-move` and `desktop-send` only, 1-based |
+| `style` | for `find-mouse` only, as on a hotkey |
 
 * It fires on the press; the release is swallowed. A tilt has no release, so a
   held tilt fires once (events less than 500 ms apart are one hold) and fires
@@ -175,6 +179,144 @@ no tiles is not the same thing: the section being present at all is what
 turns `right-click-action`'s default on, so an empty one still fires
 `traynize` on right-click with no popup to show — write
 `right-click-action="none"` alongside it to have neither.
+
+## `<finder>`
+
+The mouse finder shows a short animation around the pointer, so that a lost one
+can be found again, mostly on several monitors. It is played by the
+[`find-mouse` action](#actions) (always available) and by **automatic
+triggers**: a modifier tapped quickly, or the pointer shaken.
+
+```xml
+<finder guard="true">
+	<exclude process="game"/>
+	<style name="quick" shape="halo" auto-color="true" default="true">
+		<tap key="ctrl"/>
+		<shake mod="Ctrl"/>
+	</style>
+	<style name="radar" shape="beacon" size="220">
+		<shake shapes="horizontal"/>
+	</style>
+</finder>
+```
+
+Leave the section out and only `find-mouse` works, with the built-in look. A
+trigger exists by being declared: there is no `enabled` flag, and a style with no
+`<tap>` or `<shake>` is played only by a hotkey, a shortcut or the tray menu.
+
+### `<finder>` attributes
+
+These are the defaults that every `<style>` inherits; each style may override any
+of the look attributes.
+
+| Attribute | Default | |
+| --- | --- | --- |
+| `shape` | `beacon` | `beacon`, `spotlight`, `crosshair`, `monitor`, `halo`, `negative` or `contrast`, see below |
+| `duration` | `1000` | how long it plays, in milliseconds (300–5000) |
+| `size` | `160` | the radius in device-independent pixels (40–600) |
+| `color` | `#FFB000` | `#RRGGBB` |
+| `auto-color` | `false` | darken the colour on a light backdrop and lighten it on a dark one, so it never melts into what is behind |
+| `dim` | `60` | how dark `spotlight` makes the screen, in percent (0–100) |
+| `recall` | `none` | `center` also moves the pointer to the middle of the focused application window before the indicator plays. With no such window the pointer stays where it is |
+| `guard` | `true` | automatic triggers stay quiet while a full-screen window is on the pointer's monitor, see [When it stays quiet](#when-it-stays-quiet). `<finder>` only, not a style |
+
+| Shape | |
+| --- | --- |
+| `beacon` | rings close in on the pointer, over a soft halo |
+| `spotlight` | the monitor dims and a clear circle closes in on the pointer |
+| `crosshair` | lines across the whole monitor, with a ring at the pointer |
+| `monitor` | the pointer's monitor flashes its border, and a small map shows where all the monitors are |
+| `halo` | a ring and glow that follow the pointer |
+| `negative` | a lens that shows the screen behind the pointer as a negative |
+| `contrast` | a ring drawn black or white, whichever stands out against what is behind it |
+
+`halo`, `negative` and `contrast` are *persistent*: they stay four times `duration`
+(ten seconds at most) and follow the pointer, instead of playing once. The effect
+never shows up in a screen capture, and it is click-through: it takes no focus and
+no click.
+
+### `<exclude>`
+
+`<exclude process="game"/>` — the executable's name, without the folder or `.exe`,
+in any case. While that application has the focus the automatic triggers do
+nothing, whatever the style. `find-mouse` still works. One element per
+application, for all styles.
+
+### `<style>`
+
+| Attribute | |
+| --- | --- |
+| `name` | required, unique. What a `style="…"` on a hotkey or shortcut refers to |
+| `default` | `true` marks the style `find-mouse` plays when it names none. The first style is the default otherwise |
+| the look attributes | `shape`, `duration`, `size`, `color`, `auto-color`, `dim`, `recall`, each overriding `<finder>`'s |
+
+A style holds any number of `<tap>` and `<shake>` elements. A second `default`, a
+style without a name, a second style of the same name, and a trigger declared
+twice (same tap, or same modifiers and kind of shake) are warnings: the first one
+stays.
+
+### `<tap>`
+
+A modifier key pressed and released quickly, several times: `ctrl` twice is the
+classic one. Anything else in between (another key, a mouse button, another
+modifier) starts it over, and a key held down or auto-repeating is not a tap.
+
+| Attribute | Default | |
+| --- | --- | --- |
+| `key` | required | `ctrl`, `shift`, `alt` or `win` |
+| `side` | `any` | `left`, `right` or `any`: which of the two keys counts |
+| `count` | `2` | how many taps (2–4). It fires on the release of the last one |
+| `hold` | `200` | a press held longer than this (ms, 100–400) is not a tap |
+| `gap` | `400` | two taps count together when their presses are at most this far apart (ms, 200–700) |
+
+Windows has its own *Show location of pointer when I press the CTRL key* option
+(Mouse settings, *Additional mouse settings*, *Pointer Options*). With it on, a
+double `ctrl` tap plays Windows' effect and this one together: turn one of them
+off, or tap another key.
+
+### `<shake>`
+
+The pointer moved quickly back and forth, or round and round.
+
+| Attribute | Default | |
+| --- | --- | --- |
+| `mod` | `none` | modifiers that must be held while shaking, the same dialect as a [`<shortcut>`](#shortcut): `Ctrl`, `Win+Alt`…, or `none`. They must match exactly |
+| `shapes` | `any` | `any`, or a list of `horizontal`, `vertical`, `circle` |
+| `speed` | `3000`, `1200` with a `mod` | the slowest mean speed that is a shake, in pixels per second (400–8000) |
+| `reversals` | `3`, `2` with a `mod` | direction changes a horizontal or vertical shake needs (1–6) |
+| `cooldown` | `1000` | after a detection, nothing is detected for this long (ms, 300–3000) |
+| `window` | `700` | how far back the movement is looked at (ms, 300–1500) |
+| `segment` | `120` | the smallest stroke that counts as a back-and-forth (px, 40–300) |
+| `dominance` | `1.5` | how much further the pointer must travel along the main axis than the other, for a shake to be horizontal or vertical (1.0–4.0) |
+| `degrees` | `450` | how much smooth turning a circle needs (270–900) |
+| `circle-speed` | `1500` | the slowest mean speed that is a circle (400–6000). A circle is slower than a shake. Not tuned yet |
+
+Without a modifier the defaults are firm, so that moving the pointer quickly never
+sets it off; with a modifier held you are already looking for the pointer, so a
+gentler shake is enough. A shake with a mouse button down (a drag) never counts.
+Distances and speeds are physical pixels, not scaled by the monitor, so a value
+tuned on one screen is a starting point on another.
+
+Events sent by another program (a macro, a remote-control tool) never trigger
+anything.
+
+### When it stays quiet
+
+* **While the pointer is confined** to part of the desktop, which a game in play
+  does (and a remote desktop or a virtual machine would), **all of y-snap is
+  suspended**: no gestures, no mouse shortcuts, no hotkeys except `quit` and
+  `reload`, no automatic trigger. The application owns the pointer, and nothing
+  y-snap does with it would make sense. There is no setting for this.
+* **A full-screen window on the pointer's monitor** keeps the automatic triggers
+  quiet: a game in its menus, a full-screen video. "Full-screen" is a window that
+  covers the monitor and has no title bar; the desktop and the taskbar do not
+  count. A video full-screen on one monitor does not stop the finder from helping
+  with a pointer lost on another. `guard="false"` turns this check off.
+* **An excluded application** with the focus, see [`<exclude>`](#exclude).
+
+An explicit `find-mouse` (a hotkey, a shortcut or the tray menu) ignores the last
+two: whoever asks wants the answer. It does not ignore a confined pointer, since
+y-snap is suspended then.
 
 ## `<overlay>`
 

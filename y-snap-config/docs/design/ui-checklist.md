@@ -76,7 +76,7 @@ No reordering: order means nothing here, duplicates being refused.
 | 7 | Trigger cards, tuning fields and the colour picker reflow | 👁 | `AutoGrid`s from the card's narrowed `Viewport`. The colour picker is wide: check at the minimum window. |
 | 8 | The exclude list takes names as y-snap compares them | ✅ | `normalize_process` (`Game.EXE` → `game`), no duplicates (tested). |
 
-Test button: plays the look being edited, saved or not, in the running y-snap (`ipc::request_finder_test`; disabled with a note when y-snap is not running). Not built: a shake sensitivity preset. A `find-mouse` hotkey or shortcut picks its style in the Target cell (header "Target / style"); changing its action to something else clears the style.
+Test button: plays the look being edited, saved or not, in the running y-snap (`ipc::request_finder_test`; disabled with a note when y-snap is not running). Not built: a shake sensitivity preset. A `find-mouse` hotkey or shortcut picks its style in the Target cell (header "Target / style"); changing its action to something else clears the style. Styles can be reordered (the Reorder toggle under the table, as on the other lists): the default style and the `style` of hotkeys and shortcuts follow their style (`move_style`, tested).
 
 ## Action overlay (`overlay/`)
 

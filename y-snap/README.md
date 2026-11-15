@@ -91,6 +91,15 @@ A modifier plus a button, a side button or a wheel tilt can fire any action: til
 the wheel to pin a window, or press `Win` and the middle button for the overlay.
 None are set by default.
 
+## Find a lost pointer
+
+Several monitors make a pointer easy to lose. Tap `Ctrl` twice, shake the mouse, or
+press a key of your choice, and a short animation shows where it is and on which
+monitor: rings closing in, a dimmed screen with a spotlight, a flash of the monitor's
+border with a map of the others. Each look is a *style*, with its own triggers, and
+the colour follows the backdrop so it shows on anything. It stays quiet in games and
+full-screen video, and nothing runs until you set it up.
+
 ## Set it up your way
 
 Use **y-snap-config**, the settings app, and y-snap applies what you save at once.

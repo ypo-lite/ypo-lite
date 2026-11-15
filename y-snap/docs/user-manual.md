@@ -20,6 +20,7 @@ page shows the ones you are likely to want. The design notes are in
 - [Virtual desktops](#virtual-desktops)
 - [Several monitors](#several-monitors)
 - [Mouse shortcuts](#mouse-shortcuts)
+- [Finding the pointer](#finding-the-pointer)
 - [Changing the configuration](#changing-the-configuration)
 - [Not there yet](#not-there-yet)
 - [Troubleshooting](#troubleshooting)
@@ -59,6 +60,8 @@ With the portable zip, put a shortcut to `y-snap.exe` in your Startup folder
 The menu lists, from the top:
 
 - **Hidden windows**, when there are any, with **Restore all hidden windows**;
+- **Find the mouse pointer**, which plays the [finder](#finding-the-pointer) around
+  the pointer, a way to try a look without any trigger set up;
 - how many hotkeys and overlay actions are loaded, or what is wrong with the
   configuration when it did not load;
 - **Configuration**, a submenu with **Settings…**, **Edit y-snap.xml**,
@@ -192,6 +195,7 @@ mouse shortcuts alike. Most are toggles: do it again to undo it.
 | `shade` | rolls the window up to its title bar | Its height is remembered for rolling back down |
 | `hide-taskbar` | removes the window's taskbar button | The window stays on screen, and it leaves `Alt+Tab` too. In a program with several windows the others can lose their buttons as well; `traynize` takes only the one |
 | `center-cursor` | puts the pointer in the middle of the window | Useful for finding a window on a wide desktop |
+| `find-mouse` | shows where the pointer is | Needs no window. See [Finding the pointer](#finding-the-pointer) |
 | `iconize` `traynize` | hide the window, see [Hidden windows](#hidden-windows) | |
 | `uniconize` `uniconize-all` | bring back the last hidden window, or all of them | Need no target window |
 | `monitor-move-next` `monitor-move-prev` `monitor-send-next` `monitor-send-prev` | send the window to another monitor | See [Several monitors](#several-monitors) |
@@ -335,11 +339,79 @@ The full rules are in the [configuration reference](configuration.md#shortcut).
 
 ---
 
+## Finding the pointer
+
+On a wide desktop, and above all with several monitors, a pointer can get lost. The
+mouse finder draws a short animation around it, and says which monitor it is on. It
+**does nothing until you set it up**, so a fresh install changes nothing.
+
+**Ask for it.** Bind the `find-mouse` action to a hotkey or a mouse shortcut, in the
+settings app or in the file, or choose **Find the mouse pointer** in the tray menu:
+
+```xml
+<hotkey key="Ctrl+Alt+F" action="find-mouse"/>
+```
+
+**Let it notice.** A *style* is a look plus the triggers that play it. Two kinds of
+trigger exist:
+
+* **Tap** a modifier key: `Ctrl` twice, quickly, for instance. Tap and release, tap
+  and release: holding the key, or pressing anything in between, does not count.
+* **Shake** the pointer, side to side, up and down or in circles, with or without a
+  modifier held. Without one you have to shake firmly, so that a quick sweep across
+  the screen is not mistaken for it. With `Ctrl` held, a gentle shake is enough.
+
+```xml
+<finder>
+	<style name="quick" shape="halo" auto-color="true" default="true">
+		<tap key="ctrl"/>
+		<shake mod="Ctrl"/>
+	</style>
+	<style name="radar" shape="beacon" size="220">
+		<shake shapes="horizontal"/>
+	</style>
+</finder>
+```
+
+You can have several styles, each with its own look and its own triggers. A hotkey
+or shortcut can pick one with `style="radar"`; otherwise `find-mouse` plays the
+first, or the one marked `default="true"`.
+
+**Looks.** `beacon` (rings closing in), `spotlight` (the screen dims around the
+pointer), `crosshair` (lines across the monitor), `monitor` (the monitor flashes and a
+map shows where the others are), and three that stay up and follow the pointer: `halo`,
+`negative` (a lens showing the screen as a negative) and `contrast` (a black or white
+ring). `auto-color` keeps the colour visible on a light or a dark backdrop. The effect
+cannot be clicked, takes no focus, and does not appear in screen recordings.
+
+**It stays quiet when you would not want it.**
+
+* In a **game** that holds the pointer in the window, all of y-snap is suspended, not
+  only the finder: you cannot drag a window from a game anyway, and a shortcut would
+  only get in the way. Hotkeys do nothing there, except `quit` and `reload`.
+* While a **full-screen video or a game's menus** cover the pointer's monitor, the
+  automatic triggers stay quiet. A video on another monitor does not stop them.
+* **Applications you list** with `<exclude process="name"/>` never set it off.
+
+Your own request, a hotkey or the tray item, always works outside a game, even over a
+full-screen window.
+
+**Moving the pointer too.** `recall="center"` on a style also brings the pointer to the
+middle of the focused window, for when seeing it is not enough.
+
+Windows has its own *show location of pointer when I press Ctrl*. If it is on and you
+tap `Ctrl` twice, you get both. Turn one off, or tap another key.
+
+Every attribute is in the [configuration reference](configuration.md#finder), and the
+settings app has a *Mouse finder* page with a Test button.
+
+---
+
 ## Changing the configuration
 
 **With the settings app.** Double-click the tray icon, or choose **Settings…**. It
-has a page each for *Hotkeys*, *Mouse gestures*, *Mouse shortcuts*, *Action overlay*
-and *Minimize button*, and y-snap applies what you save without being restarted.
+has a page each for *Hotkeys*, *Mouse gestures*, *Mouse shortcuts*, *Mouse finder*,
+*Action overlay* and *Minimize button*, and y-snap applies what you save without being restarted.
 Every page is described in the [settings app's manual](../../y-snap-config/docs/user-manual.md).
 
 **By hand.** Choose **Edit y-snap.xml**, save, then choose **Reload configuration**.
@@ -432,6 +504,16 @@ Change or remove them on the *Hotkeys* page.
 keeps y-snap from acting on it unless y-snap runs as administrator too. While such a
 window is in front, dragging, resizing and mouse shortcuts do not work at all, on
 any window. Only `iconize` and `traynize` tell you so.
+
+**The finder does nothing.** Only `find-mouse` works until a style declares a `<tap>`
+or a `<shake>`. If one does: the pointer may be confined (a game in play suspends all
+of y-snap), a full-screen window may be on its monitor (`guard="false"` turns that
+off), or the application may be listed in `<exclude>`. A shake without a modifier
+needs a firm movement; try `mod="Ctrl"`, or lower `speed`.
+
+**The finder fires when I do not want it.** Raise `speed` on the shake, or give it a
+`mod`. A tap is set off by a key tapped twice in under half a second: lower `gap`,
+or use `count="3"`.
 
 **The Fade tile does nothing.** That window handles its own transparency, and y-snap
 leaves those alone.

@@ -51,7 +51,7 @@ use y_core::{
 
 use crate::action::Action;
 use crate::actions::Status;
-use crate::config::Settings;
+use crate::config::{Recall, Settings};
 use crate::hidden::{Hidden, Mode};
 
 const APP: AppInfo = AppInfo::new("Y-Snap", ipc::CLASS).single_instance();
@@ -426,6 +426,14 @@ impl YSnap {
             Some(style) => style.clone(),
             None => finder.style(None),
         };
+        // `recall="center"`: bring the pointer to the active window first, so
+        // the indicator plays where the pointer now is. Nothing to go to (no
+        // focused application window) leaves it where it is.
+        if style.look.recall == Recall::Center
+            && let Some(window) = y_core::target::focused()
+        {
+            window::center_cursor(window);
+        }
         self.finder.play(&style);
     }
 

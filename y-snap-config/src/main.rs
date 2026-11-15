@@ -165,7 +165,7 @@ enum Editing {
 }
 
 /// A reorderable list — what [`Msg::ReorderToggled`] and [`Msg::Moved`] are
-/// about. Order is meaningful in all four: tiles and groups are laid out in
+/// about. Order is meaningful in all five: tiles and groups are laid out in
 /// file order in their popups; hotkeys only for reading the file, but
 /// that's still the user's to arrange.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -174,6 +174,7 @@ enum ListKind {
     OverlayGroups,
     OverlayTiles,
     PopupTiles,
+    FinderStyles,
 }
 
 /// One entry in the navigation pane, in the order shown.
@@ -487,6 +488,7 @@ impl Component for ConfigApp {
                 finder::finder_view(
                     &settings.finder,
                     open,
+                    self.reordering == Some(ListKind::FinderStyles),
                     self.finder_color_open,
                     &self.finder_exclude,
                     viewport,
@@ -1334,6 +1336,9 @@ impl ConfigApp {
                     ListKind::PopupTiles => {
                         swap_neighbour(&mut settings.min_button.items, index, up)
                     }
+                    // Keeps the default style and the bindings' `style`
+                    // pointing at the same style.
+                    ListKind::FinderStyles => finder::move_style(settings, index, up),
                 };
                 if swapped {
                     self.dirty = true;

@@ -26,6 +26,14 @@ cargo test -p y-snap config::tests::the_default_configuration_is_valid  # one te
 | `mouse/` | the low-level mouse hook: drag, resize (`gesture`), minimize-button hover (`hover`), mouse shortcuts (`shortcut`, a pure state machine) |
 | `min_overlay.rs` | the minimize-button popup, and turning a click into an action |
 | `overlay.rs` | the action overlay: tile grid, hover, click, key, focus-driven close |
+| `finder.rs` | the mouse finder's player: one style around the pointer, a timer only while it plays |
+| `finder_overlay.rs` | its drawing: the seven shapes, and reading what is behind (backdrop brightness, auto colour) |
+| `finder_detect.rs` | taps and shakes recognised from key and move events, pure and tested |
+| `finder_input.rs` | the hooks that feed it, and the message posted on a hit |
+| `guard.rs` | when y-snap stays out of the way: confined pointer, full-screen window, excluded application |
+| `config/finder.rs` | `<finder>`: styles, triggers, ranges, the writer |
+
+`examples/finder_probe.rs` logged the signals the guard was built from (see below).
 
 `action`, `config` and `ipc` are the `y_snap` library, so `y-snap-config` reads
 and writes the same `Settings` without linking the message loop or the hooks. The
@@ -78,6 +86,36 @@ back maximized. A purge runs every five seconds, only while something is hidden.
 If y-snap is killed, hidden windows stay hidden;
 [`design/iconize-traynize-plan.md`](design/iconize-traynize-plan.md) describes the
 opt-in cache file planned for that.
+
+**The mouse finder.** Design notes and the live measurements are in
+[`design/mouse-finder-plan.md`](design/mouse-finder-plan.md); the outline:
+
+* *Detection is in the hooks, drawing is not.* Shakes are fed from the mouse hook
+  that already runs (`finder_input::on_move`, a no-op unless a shake is declared);
+  taps need a `WH_KEYBOARD_LL` hook of their own, installed only when a `<tap>`
+  exists. Both are allocation- and lock-free (`thread_local!`, a fixed 320-sample
+  ring), swallow nothing, ignore injected events, and post `WM_FINDER_TRIGGER`; the
+  animation runs on the message loop. The keyboard hook has no watchdog yet.
+* *No window, bitmap or timer exists while idle.* `finder::Player` creates its
+  layered overlay when a style plays and destroys it when it ends. The surface is
+  fixed to one monitor and DPI, so it is rebuilt when the pointer crosses to another.
+* *Reading what is behind the effect* (auto colour, `negative`, `contrast`) is a
+  `BitBlt` from the screen, which works because the overlay sets
+  `WDA_EXCLUDEFROMCAPTURE`: it never sees itself.
+* *The real cursor is never resized*: `SetSystemCursor` is global state a crash
+  leaves behind, and applications that draw their own cursor ignore it.
+* *The guard* (`guard.rs`) uses two signals, from `examples/finder_probe.rs` run
+  against a game and a full-screen video: `GetClipCursor` smaller than the virtual
+  screen (confined), and a foreground window covering the pointer's monitor with no
+  `WS_CAPTION` and not the shell. `SHQueryUserNotificationState` was rejected (it
+  said "busy" for a whole game and seconds after, and "app" for the Start menu) and
+  so was "the cursor is hidden" (text fields flip it). A confined pointer is checked
+  in the mouse hook at most every 250 ms (`guard::confined_cached`).
+* *Tuning* is in physical pixels, from live use on one machine; `circle-speed` was
+  never tuned. Detection thresholds are all settings, ranges in `config::finder::range`.
+* *Test button.* `y-snap-config` plays an unsaved look through a second registered
+  message, `ipc::finder_test_message`, whose two parameters carry the look
+  (`ipc::pack_look`); y-snap checks the ranges, since any process can post it.
 
 **Talking to the running app.** `y-snap-config` asks for a reload with a registered
 window message broadcast to top-level windows, which is why y-snap's main window
