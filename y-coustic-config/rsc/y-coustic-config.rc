@@ -12,6 +12,10 @@
 // None, deliberately: the config apps ship without an `.ico` (the title bar has
 // no icon either). Explorer shows the generic one.
 
+#define IDI_APP_ICON 101
+
+IDI_APP_ICON ICON "y-coustic-config.ico"
+
 /////////////////////////////////////////////////////////////////////////////
 // Version information (Explorer's "Details" tab)
 
