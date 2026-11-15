@@ -173,7 +173,7 @@ trigger; does a borderless-fullscreen game show in any of the signals.
 ## Phase 2 — the action and the beacon
 
 - `y-snap/src/finder.rs` (logic: state machine, `allowed()`) and
-  `y-snap/src/finder_overlay.rs` (drawing), following `min_overlay.rs`'s shape.
+  `y-snap/src/finder/overlay.rs` (drawing), following `min_overlay.rs`'s shape.
 - Beacon: converging rings, halo, 4× cursor ghost; ~300 px canvas at the
   cursor, per-pixel alpha, anti-aliased circles drawn by hand into the
   `Canvas`.
@@ -452,7 +452,7 @@ Replaced (never released) by named styles, each with its own triggers:
 
 `finder.rs` (`Player`: the animation state, one `WM_TIMER` id 4 at 16 ms that
 exists only while playing, overlay created per animation and per monitor
-change) and `finder_overlay.rs` (pure drawing + `Capturer`). All seven shapes
+change) and `finder/overlay.rs` (pure drawing + `Capturer`). All seven shapes
 were ported from the probe at once (the plan's Phase 5 "more styles" is
 therefore done), including `auto-color`, backdrop sensing and
 `WDA_EXCLUDEFROMCAPTURE`.
@@ -481,7 +481,7 @@ in the tree until then, and must not be deleted early.
 
 ## Phase 4 built (2026-11-14)
 
-- `finder_detect.rs`: pure, tested detectors. `Taps` (hold ≤ `hold`, down-to-down
+- `finder/detect.rs`: pure, tested detectors. `Taps` (hold ≤ `hold`, down-to-down
   ≤ `gap`, `count` taps, any other key/mouse button/modifier or a different
   side resets, fires on the release of the last tap so a held key never
   fires, auto-repeat ignored, a press older than 1 s with no release is
@@ -489,7 +489,7 @@ in the tree until then, and must not be deleted early.
   within 5 ms, judged at most every 10 ms, no allocation in the hook; the probe's
   reversal/smooth-turn/dominance rules per trigger window; exact modifier match;
   a button down clears the history; per-trigger cooldown).
-- `finder_input.rs`: a `WH_KEYBOARD_LL` hook installed only if a `<tap>` is
+- `finder/input.rs`: a `WH_KEYBOARD_LL` hook installed only if a `<tap>` is
   declared; shakes are fed from the existing mouse hook (`on_move`/`on_button`).
   Injected events ignored. Posts `WM_FINDER_TRIGGER` (`WM_APP_FIRST + 10`,
   `wParam` = style index), handled by `find_mouse`.

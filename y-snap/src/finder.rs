@@ -10,11 +10,11 @@
 //! another monitor too: a surface is fixed to one monitor (and one scale), so
 //! crossing to another builds a new one there.
 //!
-//! The drawing is in [`crate::finder_overlay`].
+//! The drawing is in [`crate::finder::overlay`].
 
 use std::time::Instant;
 
-use windows::Win32::Foundation::{HWND, POINT};
+use windows::Win32::Foundation::{HWND, POINT, RECT};
 use windows::Win32::UI::WindowsAndMessaging::{
     KillTimer, SetTimer, SetWindowDisplayAffinity, WINDOW_DISPLAY_AFFINITY,
 };
@@ -22,7 +22,11 @@ use y_core::monitor::{self, Monitor};
 use y_core::overlay::{Color, Overlay, OverlaySpec};
 
 use crate::config::{Look, Shape, Style};
-use crate::finder_overlay::{self as paint, Capturer, Frame};
+use overlay::{self as paint, Capturer, Frame};
+
+pub mod detect;
+pub mod input;
+pub mod overlay;
 
 /// The `WM_TIMER` id of the animation, on the owner window.
 pub const TIMER_ID: usize = 4;
@@ -84,31 +88,105 @@ struct Run {
 
 /// A surface on a monitor the pointer is not on.
 struct Extra {
-    overlay: Overlay,
+    /// Made when first needed: a glow's strip depends on the side the pointer
+    /// is on.
+    overlay: Option<Overlay>,
     size: (i32, i32),
     scale: f32,
     origin: POINT,
     shown: u32,
+    /// For a glow: the monitor, its base radius and the side the strip is on.
+    bounds: RECT,
+    radius: f32,
+    edge: Option<paint::Edge>,
+}
+
+impl Extra {
+    /// One frame of the glow: aims at the pointer's monitor, moving the strip to the
+    /// side that faces it when that changes.
+    fn glow(&mut self, frame: &Frame<'_>) {
+        let aim = paint::facing(self.bounds, frame.bounds);
+        if self.overlay.is_none() || self.edge != Some(aim.edge) {
+            let (size, origin) =
+                paint::glow_strip(self.bounds, aim.edge, paint::glow_depth(self.radius));
+            let Some(overlay) = new_overlay(size) else {
+                return;
+            };
+            self.overlay = Some(overlay);
+            self.size = size;
+            self.origin = origin;
+            self.edge = Some(aim.edge);
+            self.shown = 0;
+        }
+        let Some(overlay) = self.overlay.as_mut() else {
+            return;
+        };
+        let frame = Frame {
+            scale: self.scale,
+            radius: self.radius,
+            ..*frame
+        };
+        let canvas = overlay.canvas_mut();
+        canvas.clear(Color::TRANSPARENT);
+        paint::draw_glow(canvas.pixels_mut(), self.size, aim, &frame);
+        let _ = if self.shown == 0 {
+            overlay.show_at(self.origin)
+        } else {
+            overlay.refresh()
+        };
+        self.shown += 1;
+    }
+
+    /// One frame of the map panel, the same as the pointer's monitor's.
+    fn map(&mut self, centre: (f32, f32), frame: &Frame<'_>) {
+        let Some(overlay) = self.overlay.as_mut() else {
+            return;
+        };
+        let frame = Frame {
+            scale: self.scale,
+            ..*frame
+        };
+        let canvas = overlay.canvas_mut();
+        canvas.clear(Color::TRANSPARENT);
+        paint::draw(canvas.pixels_mut(), self.size, centre, &frame);
+        let _ = if self.shown == 0 {
+            overlay.show_at(self.origin)
+        } else {
+            overlay.refresh()
+        };
+        self.shown += 1;
+    }
 }
 
 /// One surface on every monitor but `current`, when the look asks for it and
 /// its shape can.
 fn extras(look: &Look, current: &Monitor, monitors: &[Monitor]) -> Vec<Extra> {
-    if !docked(look) {
+    let spread = spread(look);
+    if spread == Spread::None {
         return Vec::new();
     }
     monitors
         .iter()
         .filter(|m| m.bounds != current.bounds)
         .filter_map(|m| {
-            let (overlay, size, _, scale) = surface(look, m, monitors)?;
-            Some(Extra {
-                overlay,
-                size,
+            let scale = m.dpi as f32 / 96.0;
+            let mut extra = Extra {
+                overlay: None,
+                size: (0, 0),
                 scale,
-                origin: paint::map_panel_origin(m.bounds, size, scale),
+                origin: POINT::default(),
                 shown: 0,
-            })
+                bounds: m.bounds,
+                radius: look.size as f32 * scale,
+                edge: None,
+            };
+            if spread == Spread::Map {
+                let (overlay, size, _, _) = surface(look, m, monitors)?;
+                extra.overlay = Some(overlay);
+                extra.size = size;
+                extra.origin = paint::map_panel_origin(m.bounds, size, scale);
+            }
+            Some(extra)
         })
         .collect()
 }
@@ -183,7 +261,33 @@ impl Drop for Player {
 /// Whether the look shows on every monitor, each with a small surface holding
 /// only the map panel: no border around the monitor, so little memory.
 fn docked(look: &Look) -> bool {
-    look.all_monitors && look.shape.spreads()
+    spread(look) == Spread::Map
+}
+
+/// What the monitors the pointer is not on show.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Spread {
+    /// Nothing: the look is for the pointer's monitor only.
+    None,
+    /// The map panel (the `monitor` shape).
+    Map,
+    /// A glow on the side that faces the pointer (the `spotlight` shape).
+    Glow,
+}
+
+fn spread(look: &Look) -> Spread {
+    match look.shape {
+        Shape::Monitor if look.all_monitors => Spread::Map,
+        Shape::Spotlight if look.all_monitors => Spread::Glow,
+        _ => Spread::None,
+    }
+}
+
+/// A layered overlay of `size`, kept out of screen captures.
+fn new_overlay(size: (i32, i32)) -> Option<Overlay> {
+    let overlay = Overlay::new(&OverlaySpec::new("YpoFinder", size)).ok()?;
+    let _ = unsafe { SetWindowDisplayAffinity(overlay.hwnd(), EXCLUDE_FROM_CAPTURE) };
+    Some(overlay)
 }
 
 /// A surface for `look` on `monitor`: small around the pointer, docked to the
@@ -207,9 +311,7 @@ fn surface(
             monitor.bounds.bottom - monitor.bounds.top,
         )
     };
-    let overlay = Overlay::new(&OverlaySpec::new("YpoFinder", size)).ok()?;
-    let _ = unsafe { SetWindowDisplayAffinity(overlay.hwnd(), EXCLUDE_FROM_CAPTURE) };
-    Some((overlay, size, radius, scale))
+    Some((new_overlay(size)?, size, radius, scale))
 }
 
 impl Run {
@@ -274,23 +376,15 @@ impl Run {
         canvas.clear(Color::TRANSPARENT);
         paint::draw(canvas.pixels_mut(), (w, h), centre, &frame);
 
-        // The same map panel on the other monitors, at their own scale (see
-        // `Shape::spreads`); the map does not use the pointer's position on
-        // the surface.
+        // The other monitors, at their own scale (see `Shape::spreads`): the
+        // same map panel, or a glow towards the pointer.
+        let glow = spread(&self.look) == Spread::Glow;
         for extra in &mut self.extras {
-            let other = Frame {
-                scale: extra.scale,
-                ..frame
-            };
-            let canvas = extra.overlay.canvas_mut();
-            canvas.clear(Color::TRANSPARENT);
-            paint::draw(canvas.pixels_mut(), extra.size, centre, &other);
-            let _ = if extra.shown == 0 {
-                extra.overlay.show_at(extra.origin)
+            if glow {
+                extra.glow(&frame);
             } else {
-                extra.overlay.refresh()
-            };
-            extra.shown += 1;
+                extra.map(centre, &frame);
+            }
         }
 
         // A small surface moves with the pointer, so it is placed every time;

@@ -13,8 +13,6 @@
 
 mod about;
 mod actions;
-mod finder_detect;
-mod finder_input;
 mod guard;
 mod hidden;
 mod min_overlay;
@@ -89,7 +87,7 @@ struct YSnap {
     /// The mouse finder's animation; its window exists only while it plays.
     finder: finder::Player,
     /// The hooks behind the finder's automatic triggers, when any is declared.
-    finder_input: Option<finder_input::FinderInput>,
+    finder_input: Option<finder::input::FinderInput>,
     settings: Option<Settings>,
     /// Why there is no configuration, when there is none. Shown in the menu,
     /// because a balloon at start-up is gone by the time the user looks.
@@ -213,7 +211,7 @@ impl YSnap {
             settings.min_button.columns,
         ));
         self.action_overlay = Some(overlay::ActionOverlay::new(hwnd, settings.overlay.clone()));
-        self.finder_input = finder_input::FinderInput::install(hwnd, &settings.finder);
+        self.finder_input = finder::input::FinderInput::install(hwnd, &settings.finder);
 
         self.report(&settings, &refused);
         self.hotkeys = Some(manager);
@@ -945,7 +943,7 @@ impl TrayApp for YSnap {
                 Some(LRESULT(0))
             }
 
-            finder_input::WM_FINDER_TRIGGER => {
+            finder::input::WM_FINDER_TRIGGER => {
                 self.on_finder_trigger(wparam.0 as u16);
                 Some(LRESULT(0))
             }

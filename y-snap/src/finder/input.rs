@@ -1,6 +1,6 @@
 //! The hooks behind the finder's automatic triggers.
 //!
-//! The recognition itself is in [`crate::finder_detect`]; this is the
+//! The recognition itself is in [`crate::finder::detect`]; this is the
 //! plumbing that feeds it, and the only part that touches the system:
 //!
 //! * **Taps** need to see the modifier keys, so a `WH_KEYBOARD_LL` hook of
@@ -36,7 +36,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use y_core::ids::WM_APP_FIRST;
 
 use crate::config::{Finder, TapKey};
-use crate::finder_detect::{Held, Shakes, Taps};
+use crate::finder::detect::{Held, Shakes, Taps};
 
 /// Posted to the owner window when an automatic trigger fires. `wParam` is the
 /// index of the style to play. Handled by `crate`'s own `find_mouse`.
@@ -165,7 +165,7 @@ fn sense() -> Held {
         (unsafe { GetAsyncKeyState(key.0 as i32) }) as u16 & 0x8000 != 0
     };
     Held {
-        modifiers: crate::mouse::modifiers_held().0,
+        modifiers: y_core::hotkey::modifiers_held().0,
         button: [VK_LBUTTON, VK_RBUTTON, VK_MBUTTON, VK_XBUTTON1, VK_XBUTTON2]
             .into_iter()
             .any(down),

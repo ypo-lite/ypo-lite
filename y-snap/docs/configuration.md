@@ -216,7 +216,7 @@ of the look attributes.
 | `size` | `160` | the radius in device-independent pixels (40–600) |
 | `color` | `#FFB000` | `#RRGGBB` |
 | `auto-color` | `false` | darken the colour on a light backdrop and lighten it on a dark one, so it never melts into what is behind |
-| `all-monitors` | `false` | show the indicator on every monitor, not only the pointer's, with one small overlay window per monitor while it plays. Only `monitor` honours it for now: each screen shows just the map panel (no border around the monitor, which keeps the surfaces small); the other shapes ignore it |
+| `all-monitors` | `false` | show the indicator on every monitor, not only the pointer's, with one small overlay window per monitor while it plays. `monitor` shows just the map panel on each screen (no border around the monitor); `spotlight` leaves the pointer's monitor as it is and lights, on each other monitor, the side that faces the monitor the pointer is on with a soft glow. The other shapes ignore it for now |
 | `dim` | `60` | how dark `spotlight` makes the screen, in percent (0–100) |
 | `recall` | `none` | `center` also moves the pointer to the middle of the focused application window before the indicator plays. With no such window the pointer stays where it is |
 | `guard` | `true` | automatic triggers stay quiet while a full-screen window is on the pointer's monitor, see [When it stays quiet](#when-it-stays-quiet). `<finder>` only, not a style |

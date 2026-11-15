@@ -25,8 +25,8 @@ use crate::{ConfigApp, EditorClose, ListKind, Msg};
 use windows::Win32::UI::Input::KeyboardAndMouse::HOT_KEY_MODIFIERS;
 use windows_reactor::*;
 use y_snap::config::{
-    Finder, Look, Recall, Settings, Shake, ShakeShape, Shape, Side, Style, Tap, TapKey, finder_range,
-    normalize_process,
+    Finder, Look, Recall, Settings, Shake, ShakeShape, Shape, Side, Style, Tap, TapKey,
+    finder_range, normalize_process,
 };
 
 // ---------------------------------------------------------------------------
@@ -342,7 +342,11 @@ pub fn style_combo(
 /// style, and the `style` of hotkeys and mouse shortcuts. `false`, and nothing
 /// changes, when there is no neighbour that way.
 pub fn move_style(settings: &mut Settings, index: usize, up: bool) -> bool {
-    let other = if up { index.checked_sub(1) } else { index.checked_add(1) };
+    let other = if up {
+        index.checked_sub(1)
+    } else {
+        index.checked_add(1)
+    };
     let styles = settings.finder.styles.len();
     let Some(other) = other.filter(|other| index < styles && *other < styles) else {
         return false;
@@ -361,7 +365,10 @@ pub fn move_style(settings: &mut Settings, index: usize, up: bool) -> bool {
         }
     };
     settings.hotkeys.iter_mut().for_each(|b| fix(&mut b.style));
-    settings.mouse_shortcuts.iter_mut().for_each(|s| fix(&mut s.style));
+    settings
+        .mouse_shortcuts
+        .iter_mut()
+        .for_each(|s| fix(&mut s.style));
     true
 }
 
@@ -1317,11 +1324,21 @@ mod tests {
             style,
             steal: false,
         };
-        settings.hotkeys = vec![binding(Some(0)), binding(Some(1)), binding(Some(2)), binding(None)];
+        settings.hotkeys = vec![
+            binding(Some(0)),
+            binding(Some(1)),
+            binding(Some(2)),
+            binding(None),
+        ];
 
         assert!(move_style(&mut settings, 1, true));
 
-        let names: Vec<_> = settings.finder.styles.iter().map(|s| s.name.as_str()).collect();
+        let names: Vec<_> = settings
+            .finder
+            .styles
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect();
         assert_eq!(names, ["b", "a", "c"]);
         // "b" is still the default and still what the second hotkey plays.
         assert_eq!(settings.finder.default_style, 0);

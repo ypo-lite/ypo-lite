@@ -3,7 +3,7 @@
 Status: **plan, 2026-11-15. Nothing built.** Extends the finder's `<tap>`
 trigger (a modifier tapped N times) to ordered sequences of modifiers and to a
 held modifier. Code today: `config/finder.rs` (`Tap`, `TapKey`, `Side`),
-`finder_detect.rs` (`Taps`), `finder_input.rs` (keyboard hook),
+`finder/detect.rs` (`Taps`), `finder/input.rs` (keyboard hook),
 `y-snap-config/src/finder.rs` (the trigger cards).
 
 ## Goal
@@ -25,7 +25,7 @@ A **pattern** replaces `Tap`'s `key` + `count`:
 
 The old `key` + `taps` is sugar for `steps` = the key repeated `taps` times.
 
-## Recognition (`finder_detect.rs`)
+## Recognition (`finder/detect.rs`)
 
 Same philosophy as `Taps`: pure logic, fixed size, nothing allocated in the
 hook, wrapping millisecond arithmetic.
@@ -100,7 +100,7 @@ The `<tap>` card becomes a pattern builder (built from `ui-kit`; read
 2. **Recognition**: new `Taps`, tests with scripted event sequences (fast, too
    slow, interrupted by a key, wrong modifier restart, held set kept and
    released early, prefix case).
-3. **Hook wiring**: `finder_input` unchanged in shape; check `STALE_MS`, the
+3. **Hook wiring**: `finder::input` unchanged in shape; check `STALE_MS`, the
    held-set bookkeeping and `other()` still behave.
 4. **Settings app**: chips, held toggles, speed presets, warnings.
 5. **Record mode** in the settings app.

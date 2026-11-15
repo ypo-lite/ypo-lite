@@ -84,12 +84,12 @@ impl Shape {
         matches!(self, Self::Halo | Self::Negative | Self::Contrast)
     }
 
-    /// Whether `all-monitors` does something for the shape. Only the monitor
-    /// map for now: it reads the same on every screen. Spotlight and
-    /// crosshair first need a "the pointer is over there" cue for the other
-    /// monitors, still to be designed.
+    /// Whether `all-monitors` does something for the shape: the monitor map
+    /// (the same panel on each screen) and the spotlight (a glow on the side
+    /// facing the pointer). Crosshair still needs its cue, an arrow
+    /// (`docs/design/finder-all-monitors-plan.md`).
     pub fn spreads(self) -> bool {
-        matches!(self, Self::Monitor)
+        matches!(self, Self::Monitor | Self::Spotlight)
     }
 }
 

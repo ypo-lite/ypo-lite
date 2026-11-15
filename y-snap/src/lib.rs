@@ -12,4 +12,3 @@ pub mod ipc;
 // The finder's player and its painter live here too, so that the
 // `finder_lab` example plays the very code the application plays.
 pub mod finder;
-pub mod finder_overlay;

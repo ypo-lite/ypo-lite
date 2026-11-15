@@ -2,42 +2,57 @@
 
 Idea (2026-11-15): spotlight, crosshair and monitor draw one overlay, on the
 pointer's monitor only. Let the user choose to have the indicator on every
-monitor, knowing it costs memory (one overlay surface, a full-monitor pixel
-buffer, per extra monitor while the animation plays).
+monitor, knowing it costs memory (one overlay surface per extra monitor while
+the animation plays).
 
 ## Built
 
 * `all-monitors="true|false"` in the look (`<finder>` and `<style>`, cascading
   like the rest), default `false`. Read, written, carried by the Test message
-  (`ipc::pack_look` bit 48) and a switch in `y-snap-config` (shown for the
-  shapes that honour it).
-* `Shape::spreads()` says which shapes honour it: **`monitor` only**. With
-  the option on the pulsing border is dropped (the map already highlights the
-  pointer's monitor) and every monitor gets a *docked* surface: just the map
-  panel, at the position the map has on a full-monitor surface, at that
-  monitor's scale (`finder.rs`, `docked`, `Extra`; `finder_overlay.rs`,
-  `map_panel_size`). The pointer's monitor uses the same layout; the extras
-  are the other monitors and are rebuilt when the pointer changes monitor.
-  With the option off nothing changed: border and map on a monitor-sized
-  surface.
+  (`ipc::pack_look` bit 48), a switch in `y-snap-config` (shown for the shapes
+  that honour it, `Shape::spreads`) and tried live with
+  `cargo run -p y-snap --example finder_lab`.
+* `Spread` in `finder.rs` says what the other monitors show. The pointer's
+  monitor is unchanged except for `monitor`.
+* **`monitor`** (`Spread::Map`): the pulsing border is dropped (the map
+  already highlights the pointer's monitor) and every monitor gets a *docked*
+  surface: just the map panel, where the map has always been, at that
+  monitor's scale (`finder::overlay::map_panel_size`).
+* **`spotlight`** (`Spread::Glow`): the pointer's monitor keeps its spotlight;
+  each other monitor gets a *strip* along the side that faces the pointer
+  (`glow_strip`, a monitor wide by `glow_depth` ≈ 0.6 × radius, about 1 MB on
+  a 2560×1440 screen instead of 14.7 MB) with a soft light in the style's
+  colour bleeding in from the edge, centred on the border point nearest the
+  pointer (`facing`). It is brighter and deeper the closer the pointer is,
+  pulses gently, and follows the pointer every frame. The side is kept until
+  another one is clearly better (48 px + 10 %), so a pointer near the
+  diagonal does not flicker; when it does change the strip is rebuilt on the
+  new side. The other monitors are not dimmed: the user may be working there,
+  and a dim would need a full-size surface.
 
-## Not built: spotlight and crosshair
+  To judge live: glow size and brightness (`size`, `color`), whether the
+  pulse is wanted, the hysteresis, and how it reads on diagonal layouts.
 
-On a monitor without the pointer, drawing the same thing is meaningless (a
-spotlight on nothing). They need a smooth "look that way" cue instead. Open
-questions, to settle before building:
+## Not built: crosshair
 
-* What is drawn: a soft glow along the screen edge facing the pointer, an
-  arrow, or a dim with a lit edge? Spotlight could dim the other monitors
-  lightly and light the edge nearest the pointer.
-* Direction: from the monitor's centre towards the pointer, snapped to the
-  nearest edge, or an exact angle (needs care with monitors arranged
-  diagonally)?
-* Animation: fade in with the main one, pulse towards the pointer's side, or
-  follow the pointer live (the pointer is read every frame, so the direction
-  can change while it moves)?
-* Memory: a glow on an edge only needs a strip, not a full-monitor surface.
-  Worth a smaller surface for the extras once the cue is chosen.
+Decided (2026-11-15): **an arrow** on each other monitor, pointing at the
+pointer. Continuing the lines was rejected: with the pointer at a monitor's
+edge the lines are hard to see, lines on every monitor would not say where
+the pointer is, and on some layouts they would not reach another monitor at
+all.
 
-Once settled, `spreads()` grows those shapes and `Run::frame` draws the cue
-with a separate function instead of the shared frame.
+Not designed yet:
+
+* Where the arrow sits: at the monitor's centre, or near the edge facing the
+  pointer (reusing `facing`, which already gives the side and the closest
+  point)?
+* Its direction: an exact angle from the monitor's centre (or the edge point)
+  to the pointer, so it is right on diagonal layouts too.
+* Its size and animation: grow in with the main crosshair, a slight pulse
+  along its direction; drawn on a small surface (a square a few radii wide)
+  rather than the whole monitor.
+
+## Later: declinations as styles
+
+More cues (a different glow, an arrow on a spotlight...) should be new
+*styles* (shapes) built from these pieces, not more options.

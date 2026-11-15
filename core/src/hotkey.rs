@@ -284,6 +284,26 @@ pub fn key_from_name(name: &str) -> Option<VIRTUAL_KEY> {
     })
 }
 
+/// The modifier keys held right now, in `RegisterHotKey`'s vocabulary.
+pub fn modifiers_held() -> HOT_KEY_MODIFIERS {
+    let held = |key: VIRTUAL_KEY| unsafe { GetAsyncKeyState(key.0 as i32) } as u16 & 0x8000 != 0;
+
+    let mut modifiers = 0;
+    if held(VK_LWIN) || held(VK_RWIN) {
+        modifiers |= MOD_WIN.0;
+    }
+    if held(VK_CONTROL) {
+        modifiers |= MOD_CONTROL.0;
+    }
+    if held(VK_MENU) {
+        modifiers |= MOD_ALT.0;
+    }
+    if held(VK_SHIFT) {
+        modifiers |= MOD_SHIFT.0;
+    }
+    HOT_KEY_MODIFIERS(modifiers)
+}
+
 /// The name [`key_from_name`] accepts for `key`, or its hexadecimal code —
 /// which [`key_from_name`] also accepts, so every key survives the round trip.
 pub fn key_name(key: VIRTUAL_KEY) -> String {

@@ -1,7 +1,7 @@
 //! Recognising the finder's automatic triggers: a modifier tapped quickly
 //! ([`Taps`]) and a shaken pointer ([`Shakes`]).
 //!
-//! Pure logic, no Win32: the hooks in [`crate::finder_input`] feed events in
+//! Pure logic, no Win32: the hooks in [`crate::finder::input`] feed events in
 //! and post a message when one of these says "fire". That keeps the part worth
 //! testing testable, and the hooks cheap — nothing here allocates once built,
 //! takes a lock, or calls the system, as a low-level hook has to stay under

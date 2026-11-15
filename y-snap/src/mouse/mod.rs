@@ -54,10 +54,7 @@ use std::cell::{Cell, RefCell};
 use windows::Win32::{
     Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
     System::LibraryLoader::GetModuleHandleW,
-    UI::Input::KeyboardAndMouse::{
-        GetAsyncKeyState, HOT_KEY_MODIFIERS, MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, VIRTUAL_KEY,
-        VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
-    },
+    UI::Input::KeyboardAndMouse::HOT_KEY_MODIFIERS,
     UI::WindowsAndMessaging::{
         CallNextHookEx, GetCursorPos, HC_ACTION, HHOOK, KillTimer, MSLLHOOKSTRUCT, PostMessageW,
         SWP_NOACTIVATE, SWP_NOZORDER, SetTimer, SetWindowPos, SetWindowsHookExW,
@@ -67,6 +64,7 @@ use windows::Win32::{
     },
 };
 use windows::core::Result;
+use y_core::hotkey::modifiers_held;
 use y_core::ids::WM_APP_FIRST;
 use y_core::monitor::Monitor;
 
@@ -492,13 +490,18 @@ unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) 
             message,
             WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN | WM_XBUTTONDOWN
         ) {
-            crate::finder_input::on_button();
+            y_snap::finder::input::on_button();
         }
 
         let consumed = match message {
             WM_MOUSEMOVE => {
                 LAST_POINT.with(|cell| cell.set(Some(info.pt)));
-                crate::finder_input::on_move(info.pt.x, info.pt.y, info.time, info.flags & 1 != 0);
+                y_snap::finder::input::on_move(
+                    info.pt.x,
+                    info.pt.y,
+                    info.time,
+                    info.flags & 1 != 0,
+                );
                 with_state(|state| state.on_move(info.pt));
                 false
             }
@@ -575,24 +578,4 @@ fn side_button(mouse_data: u32) -> Option<MouseTrigger> {
         2 => Some(MouseTrigger::X2),
         _ => None,
     }
-}
-
-/// The modifier keys held right now, in [`y_core::hotkey`]'s vocabulary.
-pub(crate) fn modifiers_held() -> HOT_KEY_MODIFIERS {
-    let held = |key: VIRTUAL_KEY| unsafe { GetAsyncKeyState(key.0 as i32) } as u16 & 0x8000 != 0;
-
-    let mut modifiers = 0;
-    if held(VK_LWIN) || held(VK_RWIN) {
-        modifiers |= MOD_WIN.0;
-    }
-    if held(VK_CONTROL) {
-        modifiers |= MOD_CONTROL.0;
-    }
-    if held(VK_MENU) {
-        modifiers |= MOD_ALT.0;
-    }
-    if held(VK_SHIFT) {
-        modifiers |= MOD_SHIFT.0;
-    }
-    HOT_KEY_MODIFIERS(modifiers)
 }

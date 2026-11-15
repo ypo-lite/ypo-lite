@@ -176,7 +176,7 @@ pub fn reads_backdrop(shape: Shape) -> bool {
 pub fn draw(pixels: &mut [u32], (w, h): (i32, i32), centre: (f32, f32), f: &Frame<'_>) {
     let mut s = Surface { p: pixels, w, h };
     let (r, t) = (f.radius, f.t);
-    let fade = smoothstep(0.0, 0.1, t) * (1.0 - smoothstep(0.78, 1.0, t));
+    let fade = envelope(t);
     // The persistent shapes ease in over 0.3 s and out over the last 0.3 s.
     let steady = smoothstep(0.0, 0.3, f.secs) * (1.0 - smoothstep(f.total - 0.3, f.total, f.secs));
     let (cx, cy) = centre;
@@ -495,6 +495,170 @@ fn draw_map(s: &mut Surface<'_>, f: &Frame<'_>, fade: f32, g: &MapGeometry, (mx,
     s.soft_disc(dot, 6.0 * f.scale, Color::rgb(255, 40, 40), fade);
 }
 
+/// The envelope of a one-shot animation: in over the first tenth, out over the
+/// last fifth.
+pub fn envelope(t: f32) -> f32 {
+    smoothstep(0.0, 0.1, t) * (1.0 - smoothstep(0.78, 1.0, t))
+}
+
+/// A side of a monitor.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Edge {
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
+
+/// Which monitor the pointer is on, seen from another one.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Aim {
+    /// The side of this monitor that faces the pointer's monitor.
+    pub edge: Edge,
+    /// Along that side, from the monitor's top or left, in pixels: the middle
+    /// of the stretch where the two monitors face each other.
+    pub along: f32,
+}
+
+/// The side of `bounds` that faces `pointer_monitor`, the monitor the pointer
+/// is on. It follows the monitors' arrangement, not the pointer's coordinates:
+/// a tall monitor beside a wide one reaches above it, but it is still *to the
+/// left*. Side by side monitors touch horizontally (and overlap vertically),
+/// stacked ones the other way round, so the axis with the larger gap, `0` when
+/// they touch, is the one they are arranged along.
+pub fn facing(bounds: RECT, pointer_monitor: RECT) -> Aim {
+    let gap_x = (bounds.left - pointer_monitor.right).max(pointer_monitor.left - bounds.right);
+    let gap_y = (bounds.top - pointer_monitor.bottom).max(pointer_monitor.top - bounds.bottom);
+    let centre = |r: RECT| {
+        (
+            (r.left + r.right) as f32 / 2.0,
+            (r.top + r.bottom) as f32 / 2.0,
+        )
+    };
+    let (mine, theirs) = (centre(bounds), centre(pointer_monitor));
+
+    let (edge, lo, hi, origin) = if gap_x >= gap_y {
+        let edge = if theirs.0 < mine.0 {
+            Edge::Left
+        } else {
+            Edge::Right
+        };
+        (
+            edge,
+            bounds.top.max(pointer_monitor.top),
+            bounds.bottom.min(pointer_monitor.bottom),
+            bounds.top,
+        )
+    } else {
+        let edge = if theirs.1 < mine.1 {
+            Edge::Top
+        } else {
+            Edge::Bottom
+        };
+        (
+            edge,
+            bounds.left.max(pointer_monitor.left),
+            bounds.right.min(pointer_monitor.right),
+            bounds.left,
+        )
+    };
+    // Where they overlap, the middle of the overlap; diagonal, their centres'
+    // projection, kept on the side.
+    let (length, mid) = if matches!(edge, Edge::Left | Edge::Right) {
+        ((bounds.bottom - bounds.top) as f32, theirs.1)
+    } else {
+        ((bounds.right - bounds.left) as f32, theirs.0)
+    };
+    let along = if lo < hi {
+        (lo + hi) as f32 / 2.0 - origin as f32
+    } else {
+        mid - origin as f32
+    };
+    Aim {
+        edge,
+        along: along.clamp(0.0, length),
+    }
+}
+
+/// How far the glow reaches into the monitor, in pixels, for a base `radius`.
+pub fn glow_depth(radius: f32) -> i32 {
+    ((0.8 * radius).ceil() as i32).max(64)
+}
+
+/// The strip of a monitor that holds the glow of `edge`: its size, and where
+/// its top left goes on the desktop. A strip, not the whole monitor, so that a
+/// monitor the pointer is not on costs a fraction of a full surface.
+pub fn glow_strip(bounds: RECT, edge: Edge, depth: i32) -> ((i32, i32), POINT) {
+    let (w, h) = (bounds.right - bounds.left, bounds.bottom - bounds.top);
+    match edge {
+        Edge::Left => (
+            (depth, h),
+            POINT {
+                x: bounds.left,
+                y: bounds.top,
+            },
+        ),
+        Edge::Right => (
+            (depth, h),
+            POINT {
+                x: bounds.right - depth,
+                y: bounds.top,
+            },
+        ),
+        Edge::Top => (
+            (w, depth),
+            POINT {
+                x: bounds.left,
+                y: bounds.top,
+            },
+        ),
+        Edge::Bottom => (
+            (w, depth),
+            POINT {
+                x: bounds.left,
+                y: bounds.bottom - depth,
+            },
+        ),
+    }
+}
+
+/// One frame of the glow into a strip made by [`glow_strip`] (`w` x `h`,
+/// already cleared): a soft light along the whole side that faces the pointer.
+/// It says *which side* the pointer is on, not where: monitors differ in DPI
+/// and are rarely aligned, so the position along the edge only tilts the
+/// brightness a little (the full length stays lit).
+pub fn draw_glow(pixels: &mut [u32], (w, h): (i32, i32), aim: Aim, f: &Frame<'_>) {
+    let (depth, span) = if matches!(aim.edge, Edge::Left | Edge::Right) {
+        (w as f32, h as f32)
+    } else {
+        (h as f32, w as f32)
+    };
+    let pulse = 0.85 + 0.15 * (f.secs * std::f32::consts::TAU * 1.5).cos();
+    let alpha = 0.9 * envelope(f.t) * pulse;
+
+    for y in 0..h {
+        for x in 0..w {
+            let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+            let (v, u) = match aim.edge {
+                Edge::Left => (px, py - aim.along),
+                Edge::Right => (w as f32 - px, py - aim.along),
+                Edge::Top => (py, px - aim.along),
+                Edge::Bottom => (h as f32 - py, px - aim.along),
+            };
+            let depthwise = (1.0 - v / depth).clamp(0.0, 1.0);
+            let tilt = 1.0 - 0.3 * (u.abs() / span).clamp(0.0, 1.0);
+            if depthwise > 0.0 {
+                blend(
+                    pixels,
+                    (y * w + x) as usize,
+                    f.color,
+                    alpha * tilt * depthwise * depthwise,
+                );
+            }
+        }
+    }
+}
+
 pub fn luminance(pixel: u32) -> f32 {
     let (r, g, b) = ((pixel >> 16) & 0xFF, (pixel >> 8) & 0xFF, pixel & 0xFF);
     (0.2126 * r as f32 + 0.7152 * g as f32 + 0.0722 * b as f32) / 255.0
@@ -673,6 +837,77 @@ mod tests {
         let origin = map_panel_origin(bounds, (400, 200), 1.0);
         assert_eq!(origin.x, 100 + (1000 - 400) / 2);
         assert_eq!(origin.y, 50 + (600.0f32 * 0.22 - 16.0) as i32);
+    }
+
+    #[test]
+    fn the_glow_faces_the_monitor_the_pointer_is_on() {
+        let rect = |left, top, right, bottom| RECT {
+            left,
+            top,
+            right,
+            bottom,
+        };
+        let wide = rect(1080, 400, 3000, 1480);
+        // A tall monitor to its left, reaching far above it: still the left.
+        let tall = rect(0, -800, 1080, 1120);
+        let aim = facing(wide, tall);
+        assert_eq!(aim.edge, Edge::Left);
+        // Where they face each other: the overlap, 400..1120, from `wide`'s top.
+        assert_eq!(aim.along, 360.0);
+        // From the tall one, the wide one is on its right.
+        assert_eq!(facing(tall, wide).edge, Edge::Right);
+        // Stacked: above and below.
+        let above = rect(1080, -680, 3000, 400);
+        assert_eq!(facing(wide, above).edge, Edge::Top);
+        assert_eq!(facing(above, wide).edge, Edge::Bottom);
+        // Diagonal: the larger gap decides.
+        let corner = rect(3200, 1500, 5120, 2580);
+        assert_eq!(facing(wide, corner).edge, Edge::Right);
+    }
+
+    #[test]
+    fn the_glow_strip_hugs_its_edge_and_is_brightest_at_the_aim() {
+        let screen = RECT {
+            left: 0,
+            top: 0,
+            right: 400,
+            bottom: 300,
+        };
+        let (size, origin) = glow_strip(screen, Edge::Right, 50);
+        assert_eq!((size, (origin.x, origin.y)), ((50, 300), (350, 0)));
+        let (size, origin) = glow_strip(screen, Edge::Bottom, 50);
+        assert_eq!((size, (origin.x, origin.y)), ((400, 50), (0, 250)));
+
+        let (w, h) = (50, 300);
+        let mut pixels = vec![0u32; (w * h) as usize];
+        let aim = Aim {
+            edge: Edge::Right,
+            along: 150.0,
+        };
+        let frame = Frame {
+            shape: Shape::Spotlight,
+            radius: 80.0,
+            scale: 1.0,
+            color: Color::rgb(255, 176, 0),
+            dim: 0.6,
+            monitors: &[],
+            bounds: RECT::default(),
+            docked: false,
+            pointer: POINT::default(),
+            backdrop: &[],
+            lum: 0.5,
+            t: 0.4,
+            secs: 0.4,
+            total: 1.0,
+        };
+        draw_glow(&mut pixels, (w, h), aim, &frame);
+        let at = |x: i32, y: i32| pixels[(y * w + x) as usize] >> 24;
+        // Strongest on the edge, nearest the aim; nothing on the far side.
+        assert!(at(w - 1, 150) > at(w - 1, 100));
+        assert!(at(w - 1, 150) > at(w - 30, 150));
+        // The whole edge is lit, only a little less far from the aim.
+        assert!(at(w - 1, 0) > 0 && at(w - 1, 0) < at(w - 1, 150));
+        assert!(at(0, 150) < 8);
     }
 
     #[test]

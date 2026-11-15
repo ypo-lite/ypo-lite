@@ -26,14 +26,14 @@ cargo test -p y-snap config::tests::the_default_configuration_is_valid  # one te
 | `mouse/` | the low-level mouse hook: drag, resize (`gesture`), minimize-button hover (`hover`), mouse shortcuts (`shortcut`, a pure state machine) |
 | `min_overlay.rs` | the minimize-button popup, and turning a click into an action |
 | `overlay.rs` | the action overlay: tile grid, hover, click, key, focus-driven close |
-| `finder.rs` | the mouse finder's player: one style around the pointer (or, with `all-monitors`, the map on each monitor), a timer only while it plays. In the library, like `finder_overlay.rs` |
-| `finder_overlay.rs` | its drawing: the seven shapes, and reading what is behind (backdrop brightness, auto colour) |
-| `finder_detect.rs` | taps and shakes recognised from key and move events, pure and tested |
-| `finder_input.rs` | the hooks that feed it, and the message posted on a hit |
+| `finder.rs` | the mouse finder's player: one style around the pointer (or, with `all-monitors`, the map on each monitor), a timer only while it plays. Its submodules (`detect`, `input`, `overlay`) are in `finder/`, all in the library |
+| `finder/overlay.rs` | its drawing: the seven shapes, and reading what is behind (backdrop brightness, auto colour) |
+| `finder/detect.rs` | taps and shakes recognised from key and move events, pure and tested |
+| `finder/input.rs` | the hooks that feed it, and the message posted on a hit |
 | `guard.rs` | when y-snap stays out of the way: confined pointer, full-screen window, excluded application |
 | `config/finder.rs` | `<finder>`: styles, triggers, ranges, the writer |
 
-`action`, `config`, `ipc`, `finder` and `finder_overlay` are the `y_snap` library, so `y-snap-config` reads
+`action`, `config`, `ipc`, `finder` (with its `detect`, `input` and `overlay`) are the `y_snap` library, so `y-snap-config` reads
 and writes the same `Settings` without linking the message loop or the hooks. The
 rest is the binary. Everything Win32 that is not specific to window management
 (the hidden message window, the tray icon, menus, hotkey registration, the XML
@@ -89,7 +89,7 @@ opt-in cache file planned for that.
 [`design/mouse-finder-plan.md`](design/mouse-finder-plan.md); the outline:
 
 * *Detection is in the hooks, drawing is not.* Shakes are fed from the mouse hook
-  that already runs (`finder_input::on_move`, a no-op unless a shake is declared);
+  that already runs (`finder::input::on_move`, a no-op unless a shake is declared);
   taps need a `WH_KEYBOARD_LL` hook of their own, installed only when a `<tap>`
   exists. Both are allocation- and lock-free (`thread_local!`, a fixed 320-sample
   ring), swallow nothing, ignore injected events, and post `WM_FINDER_TRIGGER`; the
