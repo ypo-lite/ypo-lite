@@ -10,7 +10,7 @@ use std::ffi::c_void;
 
 use windows::Win32::Foundation::{POINT, RECT};
 use windows::Win32::Graphics::Gdi::{
-    BITMAPINFO, BITMAPINFOHEADER, BI_RGB, BitBlt, CreateCompatibleDC, CreateDIBSection,
+    BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, CreateCompatibleDC, CreateDIBSection,
     DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC, HBITMAP, HDC, HGDIOBJ, ReleaseDC, SRCCOPY,
     SelectObject,
 };
@@ -56,22 +56,46 @@ struct Surface<'a> {
 impl Surface<'_> {
     /// A disc fading from full at the centre to nothing at `radius`.
     fn soft_disc(&mut self, (cx, cy): (f32, f32), radius: f32, color: Color, alpha: f32) {
-        let (x0, x1) = (((cx - radius).floor() as i32).max(0), ((cx + radius).ceil() as i32).min(self.w - 1));
-        let (y0, y1) = (((cy - radius).floor() as i32).max(0), ((cy + radius).ceil() as i32).min(self.h - 1));
+        let (x0, x1) = (
+            ((cx - radius).floor() as i32).max(0),
+            ((cx + radius).ceil() as i32).min(self.w - 1),
+        );
+        let (y0, y1) = (
+            ((cy - radius).floor() as i32).max(0),
+            ((cy + radius).ceil() as i32).min(self.h - 1),
+        );
         for y in y0..=y1 {
             for x in x0..=x1 {
                 let d = ((x as f32 + 0.5 - cx).powi(2) + (y as f32 + 0.5 - cy).powi(2)).sqrt();
                 let coverage = (1.0 - d / radius).clamp(0.0, 1.0);
-                blend(self.p, (y * self.w + x) as usize, color, alpha * coverage * coverage.sqrt());
+                blend(
+                    self.p,
+                    (y * self.w + x) as usize,
+                    color,
+                    alpha * coverage * coverage.sqrt(),
+                );
             }
         }
     }
 
     /// An antialiased ring.
-    fn ring(&mut self, (cx, cy): (f32, f32), radius: f32, thickness: f32, color: Color, alpha: f32) {
+    fn ring(
+        &mut self,
+        (cx, cy): (f32, f32),
+        radius: f32,
+        thickness: f32,
+        color: Color,
+        alpha: f32,
+    ) {
         let reach = radius + thickness;
-        let (x0, x1) = (((cx - reach).floor() as i32).max(0), ((cx + reach).ceil() as i32).min(self.w - 1));
-        let (y0, y1) = (((cy - reach).floor() as i32).max(0), ((cy + reach).ceil() as i32).min(self.h - 1));
+        let (x0, x1) = (
+            ((cx - reach).floor() as i32).max(0),
+            ((cx + reach).ceil() as i32).min(self.w - 1),
+        );
+        let (y0, y1) = (
+            ((cy - reach).floor() as i32).max(0),
+            ((cy + reach).ceil() as i32).min(self.h - 1),
+        );
         for y in y0..=y1 {
             for x in x0..=x1 {
                 let d = ((x as f32 + 0.5 - cx).powi(2) + (y as f32 + 0.5 - cy).powi(2)).sqrt();
@@ -93,8 +117,11 @@ impl Surface<'_> {
 
     /// Calls `f(index, distance)` for every pixel within `reach` of `centre`.
     fn around(&self, (cx, cy): (f32, f32), reach: f32, mut f: impl FnMut(usize, f32)) {
-        for y in ((cy - reach).floor() as i32).max(0)..=((cy + reach).ceil() as i32).min(self.h - 1) {
-            for x in ((cx - reach).floor() as i32).max(0)..=((cx + reach).ceil() as i32).min(self.w - 1) {
+        for y in ((cy - reach).floor() as i32).max(0)..=((cy + reach).ceil() as i32).min(self.h - 1)
+        {
+            for x in
+                ((cx - reach).floor() as i32).max(0)..=((cx + reach).ceil() as i32).min(self.w - 1)
+            {
                 let d = ((x as f32 + 0.5 - cx).powi(2) + (y as f32 + 0.5 - cy).powi(2)).sqrt();
                 f((y * self.w + x) as usize, d);
             }
@@ -130,7 +157,10 @@ pub struct Frame<'a> {
 /// Whether the shape is drawn on a small surface that follows the pointer
 /// (the others cover the pointer's whole monitor).
 pub fn is_small(shape: Shape) -> bool {
-    matches!(shape, Shape::Beacon | Shape::Halo | Shape::Negative | Shape::Contrast)
+    matches!(
+        shape,
+        Shape::Beacon | Shape::Halo | Shape::Negative | Shape::Contrast
+    )
 }
 
 /// Whether the shape reads the pixels behind it.
@@ -168,8 +198,11 @@ pub fn draw(pixels: &mut [u32], (w, h): (i32, i32), centre: (f32, f32), f: &Fram
             let hole = r * (0.9 + 3.0 * (1.0 - ease_out(t / 0.35)));
             let soft = 0.3 * r;
             let reach = hole + soft;
-            for y in ((cy - reach).floor() as i32).max(0)..=((cy + reach).ceil() as i32).min(h - 1) {
-                for x in ((cx - reach).floor() as i32).max(0)..=((cx + reach).ceil() as i32).min(w - 1) {
+            for y in ((cy - reach).floor() as i32).max(0)..=((cy + reach).ceil() as i32).min(h - 1)
+            {
+                for x in
+                    ((cx - reach).floor() as i32).max(0)..=((cx + reach).ceil() as i32).min(w - 1)
+                {
                     let d = ((x as f32 + 0.5 - cx).powi(2) + (y as f32 + 0.5 - cy).powi(2)).sqrt();
                     let alpha = dim * smoothstep(hole, hole + soft, d);
                     s.p[(y * w + x) as usize] = ((alpha * 255.0) as u32) << 24;
@@ -209,7 +242,13 @@ pub fn draw(pixels: &mut [u32], (w, h): (i32, i32), centre: (f32, f32), f: &Fram
         Shape::Halo => {
             s.soft_disc(centre, 0.55 * r, f.color, 0.40 * steady);
             s.ring(centre, 0.5 * r, 4.0 * f.scale, f.color, 0.95 * steady);
-            s.ring(centre, 0.5 * r + 3.5 * f.scale, 2.0 * f.scale, outline_for(f.lum), 0.8 * steady);
+            s.ring(
+                centre,
+                0.5 * r + 3.5 * f.scale,
+                2.0 * f.scale,
+                outline_for(f.lum),
+                0.8 * steady,
+            );
         }
         // A lens that shows the screen behind the pointer as a negative.
         Shape::Negative => {
@@ -233,7 +272,13 @@ pub fn draw(pixels: &mut [u32], (w, h): (i32, i32), centre: (f32, f32), f: &Fram
                     blend(s.p, index, inverted, coverage * steady);
                 }
             }
-            s.ring(centre, radius, 2.0 * f.scale, outline_for(f.lum), 0.7 * steady);
+            s.ring(
+                centre,
+                radius,
+                2.0 * f.scale,
+                outline_for(f.lum),
+                0.7 * steady,
+            );
         }
         // A ring painted black or white pixel by pixel, whichever contrasts
         // with the pixel behind it.
@@ -249,7 +294,11 @@ pub fn draw(pixels: &mut [u32], (w, h): (i32, i32), centre: (f32, f32), f: &Fram
                     }
                 });
                 for (index, coverage) in band {
-                    let colour = if luminance(f.backdrop[index]) > 0.5 { Color::BLACK } else { Color::WHITE };
+                    let colour = if luminance(f.backdrop[index]) > 0.5 {
+                        Color::BLACK
+                    } else {
+                        Color::WHITE
+                    };
                     blend(s.p, index, colour, 0.92 * coverage * steady);
                 }
             }
@@ -263,16 +312,41 @@ fn draw_monitor(s: &mut Surface<'_>, f: &Frame<'_>, fade: f32) {
     let b = (10.0 * f.scale) as i32;
     let alpha = fade * pulse;
     for rect in [
-        RECT { left: 0, top: 0, right: w, bottom: b },
-        RECT { left: 0, top: h - b, right: w, bottom: h },
-        RECT { left: 0, top: b, right: b, bottom: h - b },
-        RECT { left: w - b, top: b, right: w, bottom: h - b },
+        RECT {
+            left: 0,
+            top: 0,
+            right: w,
+            bottom: b,
+        },
+        RECT {
+            left: 0,
+            top: h - b,
+            right: w,
+            bottom: h,
+        },
+        RECT {
+            left: 0,
+            top: b,
+            right: b,
+            bottom: h - b,
+        },
+        RECT {
+            left: w - b,
+            top: b,
+            right: w,
+            bottom: h - b,
+        },
     ] {
         s.fill_rect(rect, f.color, alpha);
     }
 
     let union = f.monitors.iter().fold(
-        RECT { left: i32::MAX, top: i32::MAX, right: i32::MIN, bottom: i32::MIN },
+        RECT {
+            left: i32::MAX,
+            top: i32::MAX,
+            right: i32::MIN,
+            bottom: i32::MIN,
+        },
         |u, m| RECT {
             left: u.left.min(m.bounds.left),
             top: u.top.min(m.bounds.top),
@@ -283,7 +357,10 @@ fn draw_monitor(s: &mut Surface<'_>, f: &Frame<'_>, fade: f32) {
     if union.right <= union.left || union.bottom <= union.top {
         return;
     }
-    let (uw, uh) = ((union.right - union.left) as f32, (union.bottom - union.top) as f32);
+    let (uw, uh) = (
+        (union.right - union.left) as f32,
+        (union.bottom - union.top) as f32,
+    );
     let (box_w, box_h) = (380.0 * f.scale, 200.0 * f.scale);
     let k = (box_w / uw).min(box_h / uh);
     let (map_w, map_h) = (uw * k, uh * k);
@@ -304,13 +381,37 @@ fn draw_monitor(s: &mut Surface<'_>, f: &Frame<'_>, fade: f32) {
             bottom: (my + (m.bounds.bottom - union.top) as f32 * k) as i32 - 2,
         };
         let current = m.bounds.left == f.bounds.left && m.bounds.top == f.bounds.top;
-        let (colour, strength) = if current { (f.color, 0.55) } else { (Color::WHITE, 0.14) };
+        let (colour, strength) = if current {
+            (f.color, 0.55)
+        } else {
+            (Color::WHITE, 0.14)
+        };
         s.fill_rect(rect, colour, strength * fade);
         for edge in [
-            RECT { left: rect.left, top: rect.top, right: rect.right, bottom: rect.top + 2 },
-            RECT { left: rect.left, top: rect.bottom - 2, right: rect.right, bottom: rect.bottom },
-            RECT { left: rect.left, top: rect.top, right: rect.left + 2, bottom: rect.bottom },
-            RECT { left: rect.right - 2, top: rect.top, right: rect.right, bottom: rect.bottom },
+            RECT {
+                left: rect.left,
+                top: rect.top,
+                right: rect.right,
+                bottom: rect.top + 2,
+            },
+            RECT {
+                left: rect.left,
+                top: rect.bottom - 2,
+                right: rect.right,
+                bottom: rect.bottom,
+            },
+            RECT {
+                left: rect.left,
+                top: rect.top,
+                right: rect.left + 2,
+                bottom: rect.bottom,
+            },
+            RECT {
+                left: rect.right - 2,
+                top: rect.top,
+                right: rect.right,
+                bottom: rect.bottom,
+            },
         ] {
             s.fill_rect(edge, Color::WHITE, 0.85 * fade);
         }
@@ -351,12 +452,21 @@ pub fn auto_color(base: Color, lum: f32) -> Color {
         let for_light = c as f32 * 0.3;
         (for_dark + (for_light - for_dark) * light).round() as u8
     };
-    Color { r: mix(base.r), g: mix(base.g), b: mix(base.b), a: base.a }
+    Color {
+        r: mix(base.r),
+        g: mix(base.g),
+        b: mix(base.b),
+        a: base.a,
+    }
 }
 
 /// Black or white, whichever separates from the ring drawn for `lum`.
 fn outline_for(lum: f32) -> Color {
-    if lum > 0.5 { Color::WHITE } else { Color::BLACK }
+    if lum > 0.5 {
+        Color::WHITE
+    } else {
+        Color::BLACK
+    }
 }
 
 /// A reusable copy of a screen region. Layered windows (ours) are not part of
@@ -388,7 +498,8 @@ impl Capturer {
         };
         let dc = unsafe { CreateCompatibleDC(None) };
         let mut bits: *mut c_void = std::ptr::null_mut();
-        let bitmap = unsafe { CreateDIBSection(Some(dc), &bmi, DIB_RGB_COLORS, &mut bits, None, 0) };
+        let bitmap =
+            unsafe { CreateDIBSection(Some(dc), &bmi, DIB_RGB_COLORS, &mut bits, None, 0) };
         let Ok(bitmap) = bitmap else {
             let _ = unsafe { DeleteDC(dc) };
             return None;
@@ -399,7 +510,14 @@ impl Capturer {
             return None;
         }
         let previous = unsafe { SelectObject(dc, bitmap.into()) };
-        Some(Self { dc, bitmap, previous, bits: bits as *mut u32, w, h })
+        Some(Self {
+            dc,
+            bitmap,
+            previous,
+            bits: bits as *mut u32,
+            w,
+            h,
+        })
     }
 
     /// The `w`x`h` region of the screen whose top left is `(x, y)`, top row first.

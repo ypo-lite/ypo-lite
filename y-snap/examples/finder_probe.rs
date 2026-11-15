@@ -20,31 +20,33 @@ use std::collections::VecDeque;
 use std::ffi::c_void;
 use std::fs::File;
 use std::io::Write;
-use std::sync::{Mutex, mpsc};
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Mutex, mpsc};
 use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    BITMAP, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, CreateCompatibleDC, CreateDIBSection,
+    BI_RGB, BITMAP, BITMAPINFO, BITMAPINFOHEADER, CreateCompatibleDC, CreateDIBSection,
     DIB_RGB_COLORS, DeleteDC, DeleteObject, GetObjectW, SelectObject,
 };
+use windows::Win32::Graphics::Gdi::{BitBlt, GetDC, HBITMAP, HDC, HGDIOBJ, ReleaseDC, SRCCOPY};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::UI::HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext};
+use windows::Win32::UI::HiDpi::{
+    DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
+};
 use windows::Win32::UI::Shell::SHQueryUserNotificationState;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, CURSORINFO, DI_NORMAL, DispatchMessageW, DrawIconEx, GetClassNameW,
+    CURSORINFO, CallNextHookEx, DI_NORMAL, DispatchMessageW, DrawIconEx, GetClassNameW,
     GetClipCursor, GetCursorInfo, GetForegroundWindow, GetIconInfo, GetSystemMetrics, HC_ACTION,
-    HHOOK, ICONINFO, KBDLLHOOKSTRUCT, MSG, MSLLHOOKSTRUCT, PM_REMOVE, PeekMessageW,
+    HHOOK, HICON, ICONINFO, KBDLLHOOKSTRUCT, MSG, MSLLHOOKSTRUCT, PM_REMOVE, PeekMessageW,
     SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
-    SPI_GETMOUSESONAR, SetWindowsHookExW, SystemParametersInfoW, TranslateMessage,
-    WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN,
-    WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE, WM_RBUTTONDOWN, WM_RBUTTONUP,
-    WM_SYSKEYDOWN, WM_SYSKEYUP, HICON, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
+    SPI_GETMOUSESONAR, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetWindowsHookExW,
+    SystemParametersInfoW, TranslateMessage, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_KEYUP,
+    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE, WM_RBUTTONDOWN,
+    WM_RBUTTONUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
-use windows::core::BOOL;
-use windows::Win32::Graphics::Gdi::{BitBlt, GetDC, HBITMAP, HDC, HGDIOBJ, ReleaseDC, SRCCOPY};
 use windows::Win32::UI::WindowsAndMessaging::{SetWindowDisplayAffinity, WINDOW_DISPLAY_AFFINITY};
+use windows::core::BOOL;
 use y_core::monitor::Monitor;
 use y_core::overlay::{Color, Overlay, OverlaySpec};
 
@@ -71,9 +73,24 @@ fn say(text: impl AsRef<str>) {
 #[derive(Clone, Copy)]
 #[allow(dead_code)]
 enum Event {
-    Key { vk: u32, down: bool, injected: bool, time: u32 },
-    Move { x: i32, y: i32, injected: bool, time: u32 },
-    Button { name: &'static str, down: bool, injected: bool, time: u32 },
+    Key {
+        vk: u32,
+        down: bool,
+        injected: bool,
+        time: u32,
+    },
+    Move {
+        x: i32,
+        y: i32,
+        injected: bool,
+        time: u32,
+    },
+    Button {
+        name: &'static str,
+        down: bool,
+        injected: bool,
+        time: u32,
+    },
 }
 
 thread_local! {
@@ -114,21 +131,58 @@ unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) 
         let injected = info.flags & 0x01 != 0; // LLMHF_INJECTED
         let time = info.time;
         match wparam.0 as u32 {
-            WM_MOUSEMOVE => push(Event::Move { x: info.pt.x, y: info.pt.y, injected, time }),
-            WM_LBUTTONDOWN => push(Event::Button { name: "left", down: true, injected, time }),
-            WM_LBUTTONUP => push(Event::Button { name: "left", down: false, injected, time }),
-            WM_RBUTTONDOWN => push(Event::Button { name: "right", down: true, injected, time }),
-            WM_RBUTTONUP => push(Event::Button { name: "right", down: false, injected, time }),
-            WM_MBUTTONDOWN => push(Event::Button { name: "middle", down: true, injected, time }),
-            WM_MBUTTONUP => push(Event::Button { name: "middle", down: false, injected, time }),
+            WM_MOUSEMOVE => push(Event::Move {
+                x: info.pt.x,
+                y: info.pt.y,
+                injected,
+                time,
+            }),
+            WM_LBUTTONDOWN => push(Event::Button {
+                name: "left",
+                down: true,
+                injected,
+                time,
+            }),
+            WM_LBUTTONUP => push(Event::Button {
+                name: "left",
+                down: false,
+                injected,
+                time,
+            }),
+            WM_RBUTTONDOWN => push(Event::Button {
+                name: "right",
+                down: true,
+                injected,
+                time,
+            }),
+            WM_RBUTTONUP => push(Event::Button {
+                name: "right",
+                down: false,
+                injected,
+                time,
+            }),
+            WM_MBUTTONDOWN => push(Event::Button {
+                name: "middle",
+                down: true,
+                injected,
+                time,
+            }),
+            WM_MBUTTONUP => push(Event::Button {
+                name: "middle",
+                down: false,
+                injected,
+                time,
+            }),
             _ => {}
         }
     }
     unsafe { CallNextHookEx(None, code, wparam, lparam) }
 }
 
-fn install(kind: windows::Win32::UI::WindowsAndMessaging::WINDOWS_HOOK_ID,
-           procedure: unsafe extern "system" fn(i32, WPARAM, LPARAM) -> LRESULT) -> HHOOK {
+fn install(
+    kind: windows::Win32::UI::WindowsAndMessaging::WINDOWS_HOOK_ID,
+    procedure: unsafe extern "system" fn(i32, WPARAM, LPARAM) -> LRESULT,
+) -> HHOOK {
     let instance = unsafe { GetModuleHandleW(None) }.expect("module handle");
     unsafe { SetWindowsHookExW(kind, Some(procedure), Some(instance.into()), 0) }
         .expect("installing the hook")
@@ -167,7 +221,15 @@ fn keys() {
     loop {
         pump();
         for event in take_events() {
-            let Event::Key { vk, down, injected, time } = event else { continue };
+            let Event::Key {
+                vk,
+                down,
+                injected,
+                time,
+            } = event
+            else {
+                continue;
+            };
             let is_ctrl = vk == VK_LCONTROL || vk == VK_RCONTROL;
             let side = if vk == VK_LCONTROL { "L" } else { "R" };
             let inj = if injected { " INJECTED" } else { "" };
@@ -182,20 +244,26 @@ fn keys() {
                 } else if let Some(at) = ctrl_down_at.take() {
                     let held = time.wrapping_sub(at);
                     if dirty {
-                        say(format!("Ctrl{side} up   held {held} ms — DIRTY (a chord), not a tap"));
+                        say(format!(
+                            "Ctrl{side} up   held {held} ms — DIRTY (a chord), not a tap"
+                        ));
                         last_tap_down = None;
                     } else if held > TAP_MAX_HOLD {
                         // A press held too long is not a tap, and it also
                         // forgets the previous one: "press, hold, press" is
                         // the false positive to avoid.
-                        say(format!("Ctrl{side} up   held {held} ms — too long for a tap (max {TAP_MAX_HOLD})"));
+                        say(format!(
+                            "Ctrl{side} up   held {held} ms — too long for a tap (max {TAP_MAX_HOLD})"
+                        ));
                         last_tap_down = None;
                     } else {
                         say(format!("Ctrl{side} up   held {held} ms — clean TAP"));
                         match last_tap_down {
                             Some(previous) if at.wrapping_sub(previous) <= DOUBLE_MAX_GAP => {
                                 let gap = at.wrapping_sub(previous);
-                                say(format!("   >>> DOUBLE TAP: {gap} ms between the two presses"));
+                                say(format!(
+                                    "   >>> DOUBLE TAP: {gap} ms between the two presses"
+                                ));
                                 last_tap_down = None;
                             }
                             Some(previous) => {
@@ -215,7 +283,9 @@ fn keys() {
             } else if down {
                 // Another key between two taps cancels the pending double.
                 if last_tap_down.is_some() {
-                    say(format!("   key {vk:#04x} between taps — pending tap forgotten"));
+                    say(format!(
+                        "   key {vk:#04x} between taps — pending tap forgotten"
+                    ));
                     last_tap_down = None;
                 }
             }
@@ -313,11 +383,19 @@ fn shape(samples: &VecDeque<(i32, i32, u32)>) -> Shape {
     let mut points: Vec<(f32, f32)> = Vec::new();
     for s in samples {
         let p = (s.0 as f32, s.1 as f32);
-        if points.last().is_none_or(|l| ((p.0 - l.0).powi(2) + (p.1 - l.1).powi(2)).sqrt() >= 20.0) {
+        if points
+            .last()
+            .is_none_or(|l| ((p.0 - l.0).powi(2) + (p.1 - l.1).powi(2)).sqrt() >= 20.0)
+        {
             points.push(p);
         }
     }
-    let mut result = Shape { smooth_turn: 0.0, sharp: 0, path_x: 0.0, path_y: 0.0 };
+    let mut result = Shape {
+        smooth_turn: 0.0,
+        sharp: 0,
+        path_x: 0.0,
+        path_y: 0.0,
+    };
     let mut previous: Option<f32> = None;
     for pair in points.windows(2) {
         result.path_x += (pair[1].0 - pair[0].0).abs();
@@ -369,7 +447,6 @@ fn classify(rev_x: u32, rev_y: u32, shape: &Shape, speed: f32, ctrl: bool) -> Op
     }
     None
 }
-
 
 /// Direction reversals along one axis: a reversal counts once the pointer has
 /// travelled `p().segment` px back from the last extreme.
@@ -445,15 +522,30 @@ fn shake() {
         for event in take_events() {
             match event {
                 Event::Button { name, down, .. } => {
-                    buttons = if down { buttons + 1 } else { buttons.saturating_sub(1) };
-                    say(format!("   button {name} {}", if down { "down" } else { "up" }));
+                    buttons = if down {
+                        buttons + 1
+                    } else {
+                        buttons.saturating_sub(1)
+                    };
+                    say(format!(
+                        "   button {name} {}",
+                        if down { "down" } else { "up" }
+                    ));
                 }
-                Event::Move { x, y, injected, time } => {
+                Event::Move {
+                    x,
+                    y,
+                    injected,
+                    time,
+                } => {
                     if injected {
                         continue;
                     }
                     samples.push_back((x, y, time));
-                    while samples.front().is_some_and(|s| time.wrapping_sub(s.2) > p().window_ms) {
+                    while samples
+                        .front()
+                        .is_some_and(|s| time.wrapping_sub(s.2) > p().window_ms)
+                    {
                         samples.pop_front();
                     }
                     let rev_x = reversals(samples.iter().map(|s| s.0));
@@ -461,11 +553,15 @@ fn shake() {
                     let rev = rev_x.max(rev_y);
                     let mut path = 0.0f32;
                     for pair in samples.iter().collect::<Vec<_>>().windows(2) {
-                        let (dx, dy) = ((pair[1].0 - pair[0].0) as f32, (pair[1].1 - pair[0].1) as f32);
+                        let (dx, dy) = (
+                            (pair[1].0 - pair[0].0) as f32,
+                            (pair[1].1 - pair[0].1) as f32,
+                        );
                         path += (dx * dx + dy * dy).sqrt();
                     }
                     let (first, last) = (samples.front().unwrap(), samples.back().unwrap());
-                    let net = (((last.0 - first.0).pow(2) + (last.1 - first.1).pow(2)) as f32).sqrt();
+                    let net =
+                        (((last.0 - first.0).pow(2) + (last.1 - first.1).pow(2)) as f32).sqrt();
                     let ratio = path / net.max(1.0);
                     max_rev = max_rev.max(rev);
                     let duration = last.2.wrapping_sub(first.2).max(1) as f32;
@@ -476,7 +572,10 @@ fn shake() {
                     }
                     let metrics = format!(
                         "ctrl={ctrl_held} rev x/y={rev_x}/{rev_y} smooth-turn={:.0}deg sharp={} path x/y={:.0}/{:.0} speed={speed:.0}px/s net={net:.0}px ratio={ratio:.1}",
-                        shape.smooth_turn.to_degrees(), shape.sharp, shape.path_x, shape.path_y
+                        shape.smooth_turn.to_degrees(),
+                        shape.sharp,
+                        shape.path_x,
+                        shape.path_y
                     );
                     match classify(rev_x, rev_y, &shape, speed, ctrl_held) {
                         Some(kind) if buttons == 0 => {
@@ -547,7 +646,11 @@ fn render(handle: HICON) -> Option<Rendered> {
         )
     };
     let native = bitmap.bmWidth;
-    let native_height = if colour { bitmap.bmHeight } else { bitmap.bmHeight / 2 };
+    let native_height = if colour {
+        bitmap.bmHeight
+    } else {
+        bitmap.bmHeight / 2
+    };
     if !info.hbmColor.is_invalid() {
         let _ = unsafe { DeleteObject(info.hbmColor.into()) };
     }
@@ -557,7 +660,11 @@ fn render(handle: HICON) -> Option<Rendered> {
     say(format!(
         "cursor {:#x}: {} image, native {native}x{native_height}, hotspot ({}, {})",
         handle.0 as usize,
-        if colour { "colour" } else { "MONOCHROME (AND/XOR)" },
+        if colour {
+            "colour"
+        } else {
+            "MONOCHROME (AND/XOR)"
+        },
         info.xHotspot,
         info.yHotspot
     ));
@@ -577,7 +684,8 @@ fn render(handle: HICON) -> Option<Rendered> {
     };
     let dc = unsafe { CreateCompatibleDC(None) };
     let mut bits: *mut c_void = std::ptr::null_mut();
-    let dib = unsafe { CreateDIBSection(Some(dc), &bmi, DIB_RGB_COLORS, &mut bits, None, 0) }.ok()?;
+    let dib =
+        unsafe { CreateDIBSection(Some(dc), &bmi, DIB_RGB_COLORS, &mut bits, None, 0) }.ok()?;
     let previous = unsafe { SelectObject(dc, dib.into()) };
     let count = (size * size) as usize;
     let surface = unsafe { std::slice::from_raw_parts_mut(bits as *mut u32, count) };
@@ -638,7 +746,10 @@ fn cursor() {
 
     while started.elapsed() < Duration::from_secs(90) {
         pump();
-        let mut info = CURSORINFO { cbSize: size_of::<CURSORINFO>() as u32, ..Default::default() };
+        let mut info = CURSORINFO {
+            cbSize: size_of::<CURSORINFO>() as u32,
+            ..Default::default()
+        };
         if unsafe { GetCursorInfo(&mut info) }.is_ok() {
             let visible = info.flags.0 & 1 != 0; // CURSOR_SHOWING
             if !visible || info.hCursor.is_invalid() {
@@ -649,7 +760,10 @@ fn cursor() {
                 }
             } else {
                 let handle = HICON(info.hCursor.0);
-                if current.as_ref().is_none_or(|c| c.handle != handle.0 as isize) {
+                if current
+                    .as_ref()
+                    .is_none_or(|c| c.handle != handle.0 as isize)
+                {
                     current = render(handle);
                 }
                 if let Some(cursor) = &current {
@@ -703,7 +817,10 @@ fn guard() {
             SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
         )
     };
-    say(format!("Windows' own 'show pointer on Ctrl' (SPI_GETMOUSESONAR): {}", sonar.as_bool()));
+    say(format!(
+        "Windows' own 'show pointer on Ctrl' (SPI_GETMOUSESONAR): {}",
+        sonar.as_bool()
+    ));
 
     let mut previous = String::new();
     let mut ticks = 0u32;
@@ -714,7 +831,10 @@ fn guard() {
             .unwrap_or_else(|e| format!("error {e}"));
         let quns_cost = started.elapsed();
 
-        let mut info = CURSORINFO { cbSize: size_of::<CURSORINFO>() as u32, ..Default::default() };
+        let mut info = CURSORINFO {
+            cbSize: size_of::<CURSORINFO>() as u32,
+            ..Default::default()
+        };
         let showing = unsafe { GetCursorInfo(&mut info) }.is_ok() && info.flags.0 & 1 != 0;
 
         let mut clip = RECT::default();
@@ -722,8 +842,12 @@ fn guard() {
         let virtual_screen = RECT {
             left: unsafe { GetSystemMetrics(SM_XVIRTUALSCREEN) },
             top: unsafe { GetSystemMetrics(SM_YVIRTUALSCREEN) },
-            right: unsafe { GetSystemMetrics(SM_XVIRTUALSCREEN) + GetSystemMetrics(SM_CXVIRTUALSCREEN) },
-            bottom: unsafe { GetSystemMetrics(SM_YVIRTUALSCREEN) + GetSystemMetrics(SM_CYVIRTUALSCREEN) },
+            right: unsafe {
+                GetSystemMetrics(SM_XVIRTUALSCREEN) + GetSystemMetrics(SM_CXVIRTUALSCREEN)
+            },
+            bottom: unsafe {
+                GetSystemMetrics(SM_YVIRTUALSCREEN) + GetSystemMetrics(SM_CYVIRTUALSCREEN)
+            },
         };
         let confined = clip != virtual_screen;
 
@@ -737,7 +861,9 @@ fn guard() {
             let exe = y_core::process::executable_stem(y_core::process::window_process_id(window))
                 .unwrap_or_else(|| "?".into());
             let mut rect = RECT::default();
-            let _ = unsafe { windows::Win32::UI::WindowsAndMessaging::GetWindowRect(window, &mut rect) };
+            let _ = unsafe {
+                windows::Win32::UI::WindowsAndMessaging::GetWindowRect(window, &mut rect)
+            };
             let bounds = Monitor::from_window(window).bounds;
             let covers = rect.left <= bounds.left
                 && rect.top <= bounds.top
@@ -749,11 +875,18 @@ fn guard() {
         let line = format!(
             "QUNS={quns} ({} us) | cursor shown={showing} | clip {}..{} x {}..{} confined={confined} | fg {exe} [{class}] covers-monitor={covers}",
             quns_cost.as_micros(),
-            clip.left, clip.right, clip.top, clip.bottom
+            clip.left,
+            clip.right,
+            clip.top,
+            clip.bottom
         );
         let state = line.split(" us) ").nth(1).unwrap_or("").to_string();
         if state != previous || ticks.is_multiple_of(10) {
-            say(if state != previous { format!("CHANGED: {line}") } else { line });
+            say(if state != previous {
+                format!("CHANGED: {line}")
+            } else {
+                line
+            });
             previous = state;
         }
         ticks += 1;
@@ -839,24 +972,60 @@ fn blend(pixels: &mut [u32], index: usize, color: Color, alpha: f32) {
 
 /// A disc fading from full at the centre to nothing at `radius`.
 #[allow(clippy::too_many_arguments)]
-fn soft_disc(p: &mut [u32], w: i32, h: i32, cx: f32, cy: f32, radius: f32, color: Color, alpha: f32) {
-    let (x0, x1) = (((cx - radius).floor() as i32).max(0), ((cx + radius).ceil() as i32).min(w - 1));
-    let (y0, y1) = (((cy - radius).floor() as i32).max(0), ((cy + radius).ceil() as i32).min(h - 1));
+fn soft_disc(
+    p: &mut [u32],
+    w: i32,
+    h: i32,
+    cx: f32,
+    cy: f32,
+    radius: f32,
+    color: Color,
+    alpha: f32,
+) {
+    let (x0, x1) = (
+        ((cx - radius).floor() as i32).max(0),
+        ((cx + radius).ceil() as i32).min(w - 1),
+    );
+    let (y0, y1) = (
+        ((cy - radius).floor() as i32).max(0),
+        ((cy + radius).ceil() as i32).min(h - 1),
+    );
     for y in y0..=y1 {
         for x in x0..=x1 {
             let d = ((x as f32 + 0.5 - cx).powi(2) + (y as f32 + 0.5 - cy).powi(2)).sqrt();
             let coverage = (1.0 - d / radius).clamp(0.0, 1.0);
-            blend(p, (y * w + x) as usize, color, alpha * coverage * coverage.sqrt());
+            blend(
+                p,
+                (y * w + x) as usize,
+                color,
+                alpha * coverage * coverage.sqrt(),
+            );
         }
     }
 }
 
 /// An antialiased ring.
 #[allow(clippy::too_many_arguments)]
-fn ring(p: &mut [u32], w: i32, h: i32, cx: f32, cy: f32, radius: f32, thickness: f32, color: Color, alpha: f32) {
+fn ring(
+    p: &mut [u32],
+    w: i32,
+    h: i32,
+    cx: f32,
+    cy: f32,
+    radius: f32,
+    thickness: f32,
+    color: Color,
+    alpha: f32,
+) {
     let reach = radius + thickness;
-    let (x0, x1) = (((cx - reach).floor() as i32).max(0), ((cx + reach).ceil() as i32).min(w - 1));
-    let (y0, y1) = (((cy - reach).floor() as i32).max(0), ((cy + reach).ceil() as i32).min(h - 1));
+    let (x0, x1) = (
+        ((cx - reach).floor() as i32).max(0),
+        ((cx + reach).ceil() as i32).min(w - 1),
+    );
+    let (y0, y1) = (
+        ((cy - reach).floor() as i32).max(0),
+        ((cy + reach).ceil() as i32).min(h - 1),
+    );
     for y in y0..=y1 {
         for x in x0..=x1 {
             let d = ((x as f32 + 0.5 - cx).powi(2) + (y as f32 + 0.5 - cy).powi(2)).sqrt();
@@ -892,7 +1061,16 @@ struct Ctx {
 
 /// One frame. `t` is the progress 0..1, `secs` the elapsed seconds.
 #[allow(clippy::too_many_arguments)]
-fn draw(style: &str, p: &mut [u32], w: i32, h: i32, (cx, cy): (f32, f32), t: f32, secs: f32, c: &Ctx) {
+fn draw(
+    style: &str,
+    p: &mut [u32],
+    w: i32,
+    h: i32,
+    (cx, cy): (f32, f32),
+    t: f32,
+    secs: f32,
+    c: &Ctx,
+) {
     let fade = smoothstep(0.0, 0.1, t) * (1.0 - smoothstep(0.78, 1.0, t));
     let r = c.radius;
     match style {
@@ -915,8 +1093,11 @@ fn draw(style: &str, p: &mut [u32], w: i32, h: i32, (cx, cy): (f32, f32), t: f32
             let hole = r * (0.9 + 3.0 * (1.0 - ease_out(t / 0.35)));
             let soft = 0.3 * r;
             let reach = hole + soft;
-            for y in ((cy - reach).floor() as i32).max(0)..=((cy + reach).ceil() as i32).min(h - 1) {
-                for x in ((cx - reach).floor() as i32).max(0)..=((cx + reach).ceil() as i32).min(w - 1) {
+            for y in ((cy - reach).floor() as i32).max(0)..=((cy + reach).ceil() as i32).min(h - 1)
+            {
+                for x in
+                    ((cx - reach).floor() as i32).max(0)..=((cx + reach).ceil() as i32).min(w - 1)
+                {
                     let d = ((x as f32 + 0.5 - cx).powi(2) + (y as f32 + 0.5 - cy).powi(2)).sqrt();
                     let alpha = dim * smoothstep(hole, hole + soft, d);
                     p[(y * w + x) as usize] = ((alpha * 255.0) as u32) << 24;
@@ -947,7 +1128,17 @@ fn draw(style: &str, p: &mut [u32], w: i32, h: i32, (cx, cy): (f32, f32), t: f32
                     }
                 }
             }
-            ring(p, w, h, cx, cy, gap as f32, 3.0 * c.scale, c.color, 0.9 * fade);
+            ring(
+                p,
+                w,
+                h,
+                cx,
+                cy,
+                gap as f32,
+                3.0 * c.scale,
+                c.color,
+                0.9 * fade,
+            );
         }
         // Which monitor: a pulsing border, and a map of all the monitors.
         "monitor" => {
@@ -955,16 +1146,41 @@ fn draw(style: &str, p: &mut [u32], w: i32, h: i32, (cx, cy): (f32, f32), t: f32
             let b = (10.0 * c.scale) as i32;
             let alpha = fade * pulse;
             for rect in [
-                RECT { left: 0, top: 0, right: w, bottom: b },
-                RECT { left: 0, top: h - b, right: w, bottom: h },
-                RECT { left: 0, top: b, right: b, bottom: h - b },
-                RECT { left: w - b, top: b, right: w, bottom: h - b },
+                RECT {
+                    left: 0,
+                    top: 0,
+                    right: w,
+                    bottom: b,
+                },
+                RECT {
+                    left: 0,
+                    top: h - b,
+                    right: w,
+                    bottom: h,
+                },
+                RECT {
+                    left: 0,
+                    top: b,
+                    right: b,
+                    bottom: h - b,
+                },
+                RECT {
+                    left: w - b,
+                    top: b,
+                    right: w,
+                    bottom: h - b,
+                },
             ] {
                 fill_rect_blend(p, w, h, rect, c.color, alpha);
             }
 
             let union = c.monitors.iter().fold(
-                RECT { left: i32::MAX, top: i32::MAX, right: i32::MIN, bottom: i32::MIN },
+                RECT {
+                    left: i32::MAX,
+                    top: i32::MAX,
+                    right: i32::MIN,
+                    bottom: i32::MIN,
+                },
                 |u, m| RECT {
                     left: u.left.min(m.bounds.left),
                     top: u.top.min(m.bounds.top),
@@ -972,7 +1188,10 @@ fn draw(style: &str, p: &mut [u32], w: i32, h: i32, (cx, cy): (f32, f32), t: f32
                     bottom: u.bottom.max(m.bounds.bottom),
                 },
             );
-            let (uw, uh) = ((union.right - union.left) as f32, (union.bottom - union.top) as f32);
+            let (uw, uh) = (
+                (union.right - union.left) as f32,
+                (union.bottom - union.top) as f32,
+            );
             let (box_w, box_h) = (380.0 * c.scale, 200.0 * c.scale);
             let k = (box_w / uw).min(box_h / uh);
             let (map_w, map_h) = (uw * k, uh * k);
@@ -993,34 +1212,107 @@ fn draw(style: &str, p: &mut [u32], w: i32, h: i32, (cx, cy): (f32, f32), t: f32
                     bottom: (my + (m.bounds.bottom - union.top) as f32 * k) as i32 - 2,
                 };
                 let current = m.bounds.left == c.bounds.left && m.bounds.top == c.bounds.top;
-                let (colour, strength) = if current { (c.color, 0.55) } else { (Color::WHITE, 0.14) };
+                let (colour, strength) = if current {
+                    (c.color, 0.55)
+                } else {
+                    (Color::WHITE, 0.14)
+                };
                 fill_rect_blend(p, w, h, rect, colour, strength * fade);
                 let mut edge = |r: RECT| fill_rect_blend(p, w, h, r, Color::WHITE, 0.85 * fade);
-                edge(RECT { left: rect.left, top: rect.top, right: rect.right, bottom: rect.top + 2 });
-                edge(RECT { left: rect.left, top: rect.bottom - 2, right: rect.right, bottom: rect.bottom });
-                edge(RECT { left: rect.left, top: rect.top, right: rect.left + 2, bottom: rect.bottom });
-                edge(RECT { left: rect.right - 2, top: rect.top, right: rect.right, bottom: rect.bottom });
+                edge(RECT {
+                    left: rect.left,
+                    top: rect.top,
+                    right: rect.right,
+                    bottom: rect.top + 2,
+                });
+                edge(RECT {
+                    left: rect.left,
+                    top: rect.bottom - 2,
+                    right: rect.right,
+                    bottom: rect.bottom,
+                });
+                edge(RECT {
+                    left: rect.left,
+                    top: rect.top,
+                    right: rect.left + 2,
+                    bottom: rect.bottom,
+                });
+                edge(RECT {
+                    left: rect.right - 2,
+                    top: rect.top,
+                    right: rect.right,
+                    bottom: rect.bottom,
+                });
             }
             let (dot_x, dot_y) = (
                 mx + (c.pointer.x - union.left) as f32 * k,
                 my + (c.pointer.y - union.top) as f32 * k,
             );
-            ring(p, w, h, dot_x, dot_y, 7.0 * c.scale, 3.0 * c.scale, Color::WHITE, fade);
-            soft_disc(p, w, h, dot_x, dot_y, 6.0 * c.scale, Color::rgb(255, 40, 40), fade);
+            ring(
+                p,
+                w,
+                h,
+                dot_x,
+                dot_y,
+                7.0 * c.scale,
+                3.0 * c.scale,
+                Color::WHITE,
+                fade,
+            );
+            soft_disc(
+                p,
+                w,
+                h,
+                dot_x,
+                dot_y,
+                6.0 * c.scale,
+                Color::rgb(255, 40, 40),
+                fade,
+            );
         }
         // A persistent ring and glow that follow the pointer.
         "halo" => {
             let fade = smoothstep(0.0, 0.3, secs);
             soft_disc(p, w, h, cx, cy, 0.55 * r, c.color, 0.35 * fade);
-            ring(p, w, h, cx, cy, 0.5 * r, 3.0 * c.scale, c.color, 0.85 * fade);
+            ring(
+                p,
+                w,
+                h,
+                cx,
+                cy,
+                0.5 * r,
+                3.0 * c.scale,
+                c.color,
+                0.85 * fade,
+            );
         }
         // A halo whose colour follows the backdrop (see `play`), with a thin
         // outline of the opposite tone so it reads on mixed backgrounds too.
         "autohalo" => {
             let fade = smoothstep(0.0, 0.3, secs);
             soft_disc(p, w, h, cx, cy, 0.55 * r, c.color, 0.40 * fade);
-            ring(p, w, h, cx, cy, 0.5 * r, 4.0 * c.scale, c.color, 0.95 * fade);
-            ring(p, w, h, cx, cy, 0.5 * r + 3.5 * c.scale, 2.0 * c.scale, outline_for(c.lum), 0.8 * fade);
+            ring(
+                p,
+                w,
+                h,
+                cx,
+                cy,
+                0.5 * r,
+                4.0 * c.scale,
+                c.color,
+                0.95 * fade,
+            );
+            ring(
+                p,
+                w,
+                h,
+                cx,
+                cy,
+                0.5 * r + 3.5 * c.scale,
+                2.0 * c.scale,
+                outline_for(c.lum),
+                0.8 * fade,
+            );
         }
         // A lens that shows the screen behind the pointer as a negative.
         "negative" => {
@@ -1029,9 +1321,14 @@ fn draw(style: &str, p: &mut [u32], w: i32, h: i32, (cx, cy): (f32, f32), t: f32
             let soft = 0.12 * r;
             if c.backdrop.len() >= (w * h) as usize {
                 let reach = radius + 1.0;
-                for y in ((cy - reach).floor() as i32).max(0)..=((cy + reach).ceil() as i32).min(h - 1) {
-                    for x in ((cx - reach).floor() as i32).max(0)..=((cx + reach).ceil() as i32).min(w - 1) {
-                        let d = ((x as f32 + 0.5 - cx).powi(2) + (y as f32 + 0.5 - cy).powi(2)).sqrt();
+                for y in
+                    ((cy - reach).floor() as i32).max(0)..=((cy + reach).ceil() as i32).min(h - 1)
+                {
+                    for x in ((cx - reach).floor() as i32).max(0)
+                        ..=((cx + reach).ceil() as i32).min(w - 1)
+                    {
+                        let d =
+                            ((x as f32 + 0.5 - cx).powi(2) + (y as f32 + 0.5 - cy).powi(2)).sqrt();
                         let coverage = 1.0 - smoothstep(radius - soft, radius, d);
                         if coverage > 0.0 {
                             let index = (y * w + x) as usize;
@@ -1046,7 +1343,17 @@ fn draw(style: &str, p: &mut [u32], w: i32, h: i32, (cx, cy): (f32, f32), t: f32
                     }
                 }
             }
-            ring(p, w, h, cx, cy, radius, 2.0 * c.scale, outline_for(c.lum), 0.7 * fade);
+            ring(
+                p,
+                w,
+                h,
+                cx,
+                cy,
+                radius,
+                2.0 * c.scale,
+                outline_for(c.lum),
+                0.7 * fade,
+            );
         }
         // A ring painted black or white pixel by pixel, whichever contrasts
         // with the pixel behind it.
@@ -1056,13 +1363,22 @@ fn draw(style: &str, p: &mut [u32], w: i32, h: i32, (cx, cy): (f32, f32), t: f32
             let thickness = 8.0 * c.scale;
             if c.backdrop.len() >= (w * h) as usize {
                 let reach = radius + thickness;
-                for y in ((cy - reach).floor() as i32).max(0)..=((cy + reach).ceil() as i32).min(h - 1) {
-                    for x in ((cx - reach).floor() as i32).max(0)..=((cx + reach).ceil() as i32).min(w - 1) {
-                        let d = ((x as f32 + 0.5 - cx).powi(2) + (y as f32 + 0.5 - cy).powi(2)).sqrt();
+                for y in
+                    ((cy - reach).floor() as i32).max(0)..=((cy + reach).ceil() as i32).min(h - 1)
+                {
+                    for x in ((cx - reach).floor() as i32).max(0)
+                        ..=((cx + reach).ceil() as i32).min(w - 1)
+                    {
+                        let d =
+                            ((x as f32 + 0.5 - cx).powi(2) + (y as f32 + 0.5 - cy).powi(2)).sqrt();
                         let coverage = (thickness / 2.0 + 0.5 - (d - radius).abs()).clamp(0.0, 1.0);
                         if coverage > 0.0 {
                             let index = (y * w + x) as usize;
-                            let colour = if luminance(c.backdrop[index]) > 0.5 { Color::BLACK } else { Color::WHITE };
+                            let colour = if luminance(c.backdrop[index]) > 0.5 {
+                                Color::BLACK
+                            } else {
+                                Color::WHITE
+                            };
                             blend(p, index, colour, 0.92 * coverage * fade);
                         }
                     }
@@ -1078,15 +1394,22 @@ fn guard_snapshot() -> String {
     let quns = unsafe { SHQueryUserNotificationState() }
         .map(|state| format!("{state:?}"))
         .unwrap_or_else(|e| format!("error {e}"));
-    let mut info = CURSORINFO { cbSize: size_of::<CURSORINFO>() as u32, ..Default::default() };
+    let mut info = CURSORINFO {
+        cbSize: size_of::<CURSORINFO>() as u32,
+        ..Default::default()
+    };
     let showing = unsafe { GetCursorInfo(&mut info) }.is_ok() && info.flags.0 & 1 != 0;
     let mut clip = RECT::default();
     let _ = unsafe { GetClipCursor(&mut clip) };
     let virtual_screen = RECT {
         left: unsafe { GetSystemMetrics(SM_XVIRTUALSCREEN) },
         top: unsafe { GetSystemMetrics(SM_YVIRTUALSCREEN) },
-        right: unsafe { GetSystemMetrics(SM_XVIRTUALSCREEN) + GetSystemMetrics(SM_CXVIRTUALSCREEN) },
-        bottom: unsafe { GetSystemMetrics(SM_YVIRTUALSCREEN) + GetSystemMetrics(SM_CYVIRTUALSCREEN) },
+        right: unsafe {
+            GetSystemMetrics(SM_XVIRTUALSCREEN) + GetSystemMetrics(SM_CXVIRTUALSCREEN)
+        },
+        bottom: unsafe {
+            GetSystemMetrics(SM_YVIRTUALSCREEN) + GetSystemMetrics(SM_CYVIRTUALSCREEN)
+        },
     };
     let window: HWND = unsafe { GetForegroundWindow() };
     let (class, exe, covers) = if window.is_invalid() {
@@ -1097,7 +1420,8 @@ fn guard_snapshot() -> String {
         let exe = y_core::process::executable_stem(y_core::process::window_process_id(window))
             .unwrap_or_else(|| "?".into());
         let mut rect = RECT::default();
-        let _ = unsafe { windows::Win32::UI::WindowsAndMessaging::GetWindowRect(window, &mut rect) };
+        let _ =
+            unsafe { windows::Win32::UI::WindowsAndMessaging::GetWindowRect(window, &mut rect) };
         let bounds = Monitor::from_window(window).bounds;
         let covers = rect.left <= bounds.left
             && rect.top <= bounds.top
@@ -1145,7 +1469,14 @@ impl Capturer {
             return None;
         }
         let previous = unsafe { SelectObject(dc, bitmap.into()) };
-        Some(Self { dc, bitmap, previous, bits: bits as *mut u32, w, h })
+        Some(Self {
+            dc,
+            bitmap,
+            previous,
+            bits: bits as *mut u32,
+            w,
+            h,
+        })
     }
 
     /// The `w`x`h` region of the screen whose top left is `(x, y)`, top row first.
@@ -1197,12 +1528,21 @@ fn auto_color(base: Color, lum: f32) -> Color {
         let for_light = c as f32 * 0.3;
         (for_dark + (for_light - for_dark) * light).round() as u8
     };
-    Color { r: mix(base.r), g: mix(base.g), b: mix(base.b), a: base.a }
+    Color {
+        r: mix(base.r),
+        g: mix(base.g),
+        b: mix(base.b),
+        a: base.a,
+    }
 }
 
 /// Black or white, whichever separates from the ring drawn for `lum`.
 fn outline_for(lum: f32) -> Color {
-    if lum > 0.5 { Color::WHITE } else { Color::BLACK }
+    if lum > 0.5 {
+        Color::WHITE
+    } else {
+        Color::BLACK
+    }
 }
 
 fn make_surface(
@@ -1216,12 +1556,16 @@ fn make_surface(
         let side = (radius * 2.6).ceil() as i32;
         (side, side)
     } else {
-        (monitor.bounds.right - monitor.bounds.left, monitor.bounds.bottom - monitor.bounds.top)
+        (
+            monitor.bounds.right - monitor.bounds.left,
+            monitor.bounds.bottom - monitor.bounds.top,
+        )
     };
     match Overlay::new(&OverlaySpec::new("YpoFinderStyles", (w, h))) {
         Ok(overlay) => {
             // WDA_EXCLUDEFROMCAPTURE: our own pixels never come back in a grab.
-            let _ = unsafe { SetWindowDisplayAffinity(overlay.hwnd(), WINDOW_DISPLAY_AFFINITY(0x11)) };
+            let _ =
+                unsafe { SetWindowDisplayAffinity(overlay.hwnd(), WINDOW_DISPLAY_AFFINITY(0x11)) };
             Some((overlay, w, h, radius, scale))
         }
         Err(error) => {
@@ -1232,15 +1576,21 @@ fn make_surface(
 }
 
 fn play(style: &str, params: &StyleParams, commands: &mpsc::Receiver<String>) {
-    let Ok(mut monitor) = Monitor::from_cursor() else { return };
-    let small = matches!(style, "beacon" | "halo" | "autohalo" | "negative" | "contrast");
+    let Ok(mut monitor) = Monitor::from_cursor() else {
+        return;
+    };
+    let small = matches!(
+        style,
+        "beacon" | "halo" | "autohalo" | "negative" | "contrast"
+    );
     let persistent = matches!(style, "halo" | "autohalo" | "negative" | "contrast");
     let wants_backdrop = matches!(style, "negative" | "contrast");
     let auto = params.auto || style == "autohalo";
     let mut monitors = Monitor::all();
     y_core::monitor::sort_spatially(&mut monitors);
 
-    let Some((mut overlay, mut w, mut h, radius, scale)) = make_surface(small, &monitor, params) else {
+    let Some((mut overlay, mut w, mut h, radius, scale)) = make_surface(small, &monitor, params)
+    else {
         return;
     };
     let mut ctx = Ctx {
@@ -1254,7 +1604,11 @@ fn play(style: &str, params: &StyleParams, commands: &mpsc::Receiver<String>) {
         backdrop: Vec::new(),
         lum: 0.5,
     };
-    let duration = if persistent { params.halo_seconds * 1000.0 } else { params.duration_ms };
+    let duration = if persistent {
+        params.halo_seconds * 1000.0
+    } else {
+        params.duration_ms
+    };
 
     let mut capture: Option<Capturer> = None;
     let mut sampler: Option<Capturer> = None;
@@ -1279,18 +1633,24 @@ fn play(style: &str, params: &StyleParams, commands: &mpsc::Receiver<String>) {
         if (current.bounds != monitor.bounds || current.dpi != monitor.dpi)
             && let Some(surface) = make_surface(small, &current, params)
         {
-                (overlay, w, h, ctx.radius, ctx.scale) = surface;
-                monitor = current;
-                ctx.bounds = monitor.bounds;
-                surface_frames = 0;
-                capture = None;
-                switches += 1;
+            (overlay, w, h, ctx.radius, ctx.scale) = surface;
+            monitor = current;
+            ctx.bounds = monitor.bounds;
+            surface_frames = 0;
+            capture = None;
+            switches += 1;
         }
 
         let origin = if small {
-            POINT { x: pointer.x - w / 2, y: pointer.y - h / 2 }
+            POINT {
+                x: pointer.x - w / 2,
+                y: pointer.y - h / 2,
+            }
         } else {
-            POINT { x: monitor.bounds.left, y: monitor.bounds.top }
+            POINT {
+                x: monitor.bounds.left,
+                y: monitor.bounds.top,
+            }
         };
         let centre = ((pointer.x - origin.x) as f32, (pointer.y - origin.y) as f32);
 
@@ -1328,7 +1688,11 @@ fn play(style: &str, params: &StyleParams, commands: &mpsc::Receiver<String>) {
             canvas.clear(Color::TRANSPARENT);
             draw(style, canvas.pixels_mut(), w, h, centre, t, elapsed, &ctx);
         }
-        let _ = if small || surface_frames == 0 { overlay.show_at(origin) } else { overlay.refresh() };
+        let _ = if small || surface_frames == 0 {
+            overlay.show_at(origin)
+        } else {
+            overlay.refresh()
+        };
         surface_frames += 1;
 
         let cost = frame_start.elapsed().as_secs_f32() * 1000.0;
@@ -1362,7 +1726,13 @@ fn styles() {
     say("  g            print the do-not-disturb signals now");
     say(format!(
         "values: size={} dips, duration={} ms, color=#{:02X}{:02X}{:02X}, dim={}, halo-seconds={}",
-        params.size, params.duration_ms, params.color.r, params.color.g, params.color.b, params.dim, params.halo_seconds
+        params.size,
+        params.duration_ms,
+        params.color.r,
+        params.color.g,
+        params.color.b,
+        params.dim,
+        params.halo_seconds
     ));
 
     let (sender, commands) = mpsc::channel::<String>();
@@ -1423,7 +1793,15 @@ fn main() {
         let q = p();
         say(format!(
             "parameters: window={}ms segment={}px speed={} reversals={} dominance={} circle={}deg cooldown={}ms ctrl-speed={} ctrl-reversals={}",
-            q.window_ms, q.segment, q.speed, q.reversals, q.dominance, q.circle, q.cooldown, q.ctrl_speed, q.ctrl_reversals
+            q.window_ms,
+            q.segment,
+            q.speed,
+            q.reversals,
+            q.dominance,
+            q.circle,
+            q.cooldown,
+            q.ctrl_speed,
+            q.ctrl_reversals
         ));
     }
 

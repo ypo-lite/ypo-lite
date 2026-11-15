@@ -31,8 +31,8 @@ use std::cell::Cell;
 use windows::Win32::Foundation::{HWND, POINT, RECT};
 use windows::Win32::UI::WindowsAndMessaging::{
     GWL_STYLE, GetClassNameW, GetClipCursor, GetForegroundWindow, GetSystemMetrics,
-    GetWindowLongPtrW, GetWindowRect, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
-    SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, WS_CAPTION,
+    GetWindowLongPtrW, GetWindowRect, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN,
+    SM_YVIRTUALSCREEN, WS_CAPTION,
 };
 use y_core::monitor::Monitor;
 
@@ -79,7 +79,10 @@ pub fn blocks(signals: &Signals, exclude: &[String], fullscreen_check: bool) -> 
 pub fn read(pointer: POINT) -> Signals {
     let window = unsafe { GetForegroundWindow() };
     if window.is_invalid() {
-        return Signals { confined: confined(), ..Signals::default() };
+        return Signals {
+            confined: confined(),
+            ..Signals::default()
+        };
     }
     let process = y_core::process::executable_stem(y_core::process::window_process_id(window))
         .map(|name| normalize_process(&name));
@@ -96,9 +99,27 @@ pub fn confined() -> bool {
     if unsafe { GetClipCursor(&mut clip) }.is_err() {
         return false;
     }
-    let (x, y) = unsafe { (GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN)) };
-    let (w, h) = unsafe { (GetSystemMetrics(SM_CXVIRTUALSCREEN), GetSystemMetrics(SM_CYVIRTUALSCREEN)) };
-    is_confined(clip, RECT { left: x, top: y, right: x + w, bottom: y + h })
+    let (x, y) = unsafe {
+        (
+            GetSystemMetrics(SM_XVIRTUALSCREEN),
+            GetSystemMetrics(SM_YVIRTUALSCREEN),
+        )
+    };
+    let (w, h) = unsafe {
+        (
+            GetSystemMetrics(SM_CXVIRTUALSCREEN),
+            GetSystemMetrics(SM_CYVIRTUALSCREEN),
+        )
+    };
+    is_confined(
+        clip,
+        RECT {
+            left: x,
+            top: y,
+            right: x + w,
+            bottom: y + h,
+        },
+    )
 }
 
 fn is_confined(clip: RECT, virtual_screen: RECT) -> bool {
@@ -147,7 +168,12 @@ fn is_fullscreen_on(window: HWND, pointer: POINT) -> bool {
 /// maximised window has one, and can cover a monitor whose taskbar hides) and
 /// is not the desktop or the taskbar, which cover it too.
 fn covers_screen(rect: RECT, bounds: RECT, class: &str, style: u32) -> bool {
-    const SHELL: [&str; 4] = ["Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd"];
+    const SHELL: [&str; 4] = [
+        "Progman",
+        "WorkerW",
+        "Shell_TrayWnd",
+        "Shell_SecondaryTrayWnd",
+    ];
     let covers = rect.left <= bounds.left
         && rect.top <= bounds.top
         && rect.right >= bounds.right
@@ -160,7 +186,12 @@ mod tests {
     use super::*;
     use windows::Win32::UI::WindowsAndMessaging::{WS_OVERLAPPEDWINDOW, WS_POPUP, WS_VISIBLE};
 
-    const SCREEN: RECT = RECT { left: 0, top: 0, right: 1920, bottom: 1200 };
+    const SCREEN: RECT = RECT {
+        left: 0,
+        top: 0,
+        right: 1920,
+        bottom: 1200,
+    };
     const POPUP: u32 = WS_POPUP.0 | WS_VISIBLE.0;
 
     fn names(list: &[&str]) -> Vec<String> {
@@ -169,20 +200,32 @@ mod tests {
 
     #[test]
     fn a_confined_pointer_blocks_whatever_the_settings() {
-        let signals = Signals { confined: true, ..Signals::default() };
+        let signals = Signals {
+            confined: true,
+            ..Signals::default()
+        };
         assert_eq!(blocks(&signals, &[], false), Some(Reason::Confined));
     }
 
     #[test]
     fn an_excluded_application_always_blocks() {
-        let signals = Signals { process: Some("game".into()), ..Signals::default() };
-        assert_eq!(blocks(&signals, &names(&["game"]), false), Some(Reason::Excluded));
+        let signals = Signals {
+            process: Some("game".into()),
+            ..Signals::default()
+        };
+        assert_eq!(
+            blocks(&signals, &names(&["game"]), false),
+            Some(Reason::Excluded)
+        );
         assert_eq!(blocks(&signals, &names(&["other"]), true), None);
     }
 
     #[test]
     fn full_screen_blocks_only_while_the_guard_is_on() {
-        let signals = Signals { fullscreen: true, ..Signals::default() };
+        let signals = Signals {
+            fullscreen: true,
+            ..Signals::default()
+        };
         assert_eq!(blocks(&signals, &[], true), Some(Reason::Fullscreen));
         assert_eq!(blocks(&signals, &[], false), None);
         assert_eq!(blocks(&Signals::default(), &[], true), None);
@@ -190,7 +233,12 @@ mod tests {
 
     #[test]
     fn the_pointer_is_confined_when_the_clip_is_smaller_than_the_desktop() {
-        let game = RECT { left: 1, top: 1, right: 1919, bottom: 1199 };
+        let game = RECT {
+            left: 1,
+            top: 1,
+            right: 1919,
+            bottom: 1199,
+        };
         assert!(is_confined(game, SCREEN));
         assert!(!is_confined(SCREEN, SCREEN));
     }
@@ -204,8 +252,18 @@ mod tests {
 
     #[test]
     fn a_maximised_window_with_a_title_bar_is_not() {
-        let big = RECT { left: -8, top: -8, right: 1928, bottom: 1208 };
-        assert!(!covers_screen(big, SCREEN, "Notepad", WS_OVERLAPPEDWINDOW.0));
+        let big = RECT {
+            left: -8,
+            top: -8,
+            right: 1928,
+            bottom: 1208,
+        };
+        assert!(!covers_screen(
+            big,
+            SCREEN,
+            "Notepad",
+            WS_OVERLAPPEDWINDOW.0
+        ));
     }
 
     #[test]
@@ -217,7 +275,12 @@ mod tests {
 
     #[test]
     fn a_window_that_does_not_reach_the_edges_is_not() {
-        let small = RECT { left: 0, top: 0, right: 1900, bottom: 1200 };
+        let small = RECT {
+            left: 0,
+            top: 0,
+            right: 1900,
+            bottom: 1200,
+        };
         assert!(!covers_screen(small, SCREEN, "Qt5QWindowIcon", POPUP));
     }
 }

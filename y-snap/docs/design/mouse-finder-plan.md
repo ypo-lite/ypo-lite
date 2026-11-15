@@ -582,7 +582,7 @@ y-snap installs whatever the configuration. Not specified or started.
   `add_style`, `delete_style`, `add_exclude`, `style_problem`) that says whether
   it changed anything, with tests. Same editing model as the other screens
   (snapshot, Cancel reverts, Done keeps).
-- **Not built, on purpose:** a Test button (no way to ask a running y-snap to
+- **Not built, on purpose:** (the Test button came after, see below) (no way to ask a running y-snap to
   play an unsaved style; the tray entry plays the saved default), a shake
   sensitivity preset, the `recall` choice (Phase 6),
   a warning for
@@ -595,3 +595,23 @@ demand; a `find-mouse` hotkey or mouse shortcut picks its style in the Target
 cell (header "Target / style", `finder::style_combo`: "(default style)" then the
 styles; disabled with no style). Changing such a row's action to another clears
 its style, since y-snap warns about a style anywhere else.
+
+**Test button (2026-11-15).** Each look editor (default look and styles) has a
+Test button that plays the look as it is on screen, saved or not, in the
+running y-snap, around the pointer (which is on the settings window).
+
+- A second registered message, `ipc::finder_test_message()`, broadcast like the
+  reload one. The look travels in the two message parameters (`ipc::pack_look`:
+  shape, auto colour, dimming, duration, size in `wParam`, the colour in
+  `lParam`; `recall` is left out, a test never moves the pointer). No shared
+  memory, no pipe. `y_core::single_instance::notify_running_instance_with` is
+  the broadcast with parameters.
+- y-snap plays it as `Style::new("test", look)` through the same `Player`. It
+  does not go through the guard: the user asked, like an explicit `find-mouse`.
+- Any process can post this message, so `ipc::unpack_look` refuses an unknown
+  shape or a number outside the ranges the file itself obeys (tested, with the
+  round trip).
+- The button is disabled, with a line saying why, when y-snap is not running
+  (checked when the screen is drawn).
+- **Not looked at live.** To try: with y-snap running, open a style, change the
+  shape or colour without saving, press Test.

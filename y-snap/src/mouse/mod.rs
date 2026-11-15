@@ -458,13 +458,18 @@ unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) 
         // The pointer is confined (a game in play, a remote desktop...): y-snap
         // stays out of it, unless a drag it started is still going on. The
         // watchdog still needs to see the pointer move.
-        if crate::guard::confined_cached(info.time) && !with_state_bool(|state| state.gesture.active()) {
+        if crate::guard::confined_cached(info.time)
+            && !with_state_bool(|state| state.gesture.active())
+        {
             if message == WM_MOUSEMOVE {
                 LAST_POINT.with(|cell| cell.set(Some(info.pt)));
             }
             return unsafe { CallNextHookEx(None, code, wparam, lparam) };
         }
-        if matches!(message, WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN | WM_XBUTTONDOWN) {
+        if matches!(
+            message,
+            WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN | WM_XBUTTONDOWN
+        ) {
             crate::finder_input::on_button();
         }
 

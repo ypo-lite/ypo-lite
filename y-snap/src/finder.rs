@@ -170,23 +170,29 @@ impl Run {
         // has to follow it, so build a new one there.
         let current = Monitor::from_point(pointer);
         if (current.bounds != self.monitor.bounds || current.dpi != self.monitor.dpi)
-        && let Some((overlay, size, radius, scale)) = surface(&self.look, &current)
-    {
+            && let Some((overlay, size, radius, scale)) = surface(&self.look, &current)
+        {
             self.overlay = overlay;
             self.size = size;
             self.radius = radius;
             self.scale = scale;
             self.monitor = current;
-                self.capture = None;
-                self.shown = 0;
+            self.capture = None;
+            self.shown = 0;
         }
 
         let small = paint::is_small(self.look.shape);
         let (w, h) = self.size;
         let origin = if small {
-            POINT { x: pointer.x - w / 2, y: pointer.y - h / 2 }
+            POINT {
+                x: pointer.x - w / 2,
+                y: pointer.y - h / 2,
+            }
         } else {
-            POINT { x: self.monitor.bounds.left, y: self.monitor.bounds.top }
+            POINT {
+                x: self.monitor.bounds.left,
+                y: self.monitor.bounds.top,
+            }
         };
         let centre = ((pointer.x - origin.x) as f32, (pointer.y - origin.y) as f32);
 
@@ -252,7 +258,9 @@ impl Run {
             }
             self.sampler
                 .as_mut()
-                .map(|sampler| paint::average_luminance(sampler.grab(pointer.x - 24, pointer.y - 24)))
+                .map(|sampler| {
+                    paint::average_luminance(sampler.grab(pointer.x - 24, pointer.y - 24))
+                })
                 .unwrap_or(0.5)
         };
         self.lum += (target - self.lum) * 0.3;
@@ -269,7 +277,10 @@ mod tests {
 
     #[test]
     fn persistent_shapes_play_longer_but_not_forever() {
-        let mut look = Look { shape: Shape::Beacon, ..Look::default() };
+        let mut look = Look {
+            shape: Shape::Beacon,
+            ..Look::default()
+        };
         assert_eq!(play_time_ms(&look), 1000);
         look.shape = Shape::Halo;
         assert_eq!(play_time_ms(&look), 4000);

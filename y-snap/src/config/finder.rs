@@ -73,7 +73,9 @@ impl Shape {
     }
 
     pub fn from_name(name: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|shape| shape.name() == name.trim())
+        Self::ALL
+            .into_iter()
+            .find(|shape| shape.name() == name.trim())
     }
 
     /// Whether the shape stays until dismissed or timed out, instead of
@@ -255,7 +257,9 @@ impl ShakeShape {
     }
 
     pub fn from_name(name: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|shape| shape.name() == name.trim())
+        Self::ALL
+            .into_iter()
+            .find(|shape| shape.name() == name.trim())
     }
 }
 
@@ -401,14 +405,39 @@ pub mod range {
     pub const SHAKE_COOLDOWN_MS: RangeInclusive<u32> = 300..=3000;
 }
 
-const FINDER: &[&str] = &["shape", "duration", "size", "color", "auto-color", "dim", "recall", "guard"];
+const FINDER: &[&str] = &[
+    "shape",
+    "duration",
+    "size",
+    "color",
+    "auto-color",
+    "dim",
+    "recall",
+    "guard",
+];
 const STYLE: &[&str] = &[
-    "shape", "duration", "size", "color", "auto-color", "dim", "recall", "name", "default",
+    "shape",
+    "duration",
+    "size",
+    "color",
+    "auto-color",
+    "dim",
+    "recall",
+    "name",
+    "default",
 ];
 const TAP: &[&str] = &["key", "side", "count", "hold", "gap"];
 const SHAKE: &[&str] = &[
-    "mod", "shapes", "window", "segment", "speed", "reversals", "dominance", "degrees",
-    "circle-speed", "cooldown",
+    "mod",
+    "shapes",
+    "window",
+    "segment",
+    "speed",
+    "reversals",
+    "dominance",
+    "degrees",
+    "circle-speed",
+    "cooldown",
 ];
 
 /// `Name.EXE` → `name`: how `<exclude process="…">` and the running process
@@ -516,11 +545,19 @@ impl Reader {
                 Some(shape) => look.shape = shape,
                 None => {
                     let known: Vec<_> = Shape::ALL.iter().map(|s| s.name()).collect();
-                    self.warn(element, format!("unknown shape {text:?} ({})", known.join(", ")));
+                    self.warn(
+                        element,
+                        format!("unknown shape {text:?} ({})", known.join(", ")),
+                    );
                 }
             }
         }
-        self.ranged(element, "duration", &mut look.duration_ms, range::DURATION_MS);
+        self.ranged(
+            element,
+            "duration",
+            &mut look.duration_ms,
+            range::DURATION_MS,
+        );
         self.ranged(element, "size", &mut look.size, range::SIZE);
         self.ranged(element, "dim", &mut look.dim, range::DIM);
         self.flag(element, "auto-color", &mut look.auto_color);
@@ -545,7 +582,10 @@ impl Reader {
             return None;
         };
         let Some(key) = TapKey::from_name(text) else {
-            self.warn(element, format!("unknown tap key {text:?} (ctrl, shift, alt or win)"));
+            self.warn(
+                element,
+                format!("unknown tap key {text:?} (ctrl, shift, alt or win)"),
+            );
             return None;
         };
 
@@ -553,7 +593,10 @@ impl Reader {
         if let Some(text) = element.attr("side") {
             match Side::from_name(text) {
                 Some(side) => tap.side = side,
-                None => self.warn(element, format!("unknown side {text:?} (any, left or right)")),
+                None => self.warn(
+                    element,
+                    format!("unknown side {text:?} (any, left or right)"),
+                ),
             }
         }
         self.ranged(element, "count", &mut tap.count, range::TAP_COUNT);
@@ -562,7 +605,10 @@ impl Reader {
 
         let id = (tap.key, tap.side, tap.count);
         if taken.taps.contains(&id) {
-            self.warn(element, "this tap is already used by another trigger; ignored");
+            self.warn(
+                element,
+                "this tap is already used by another trigger; ignored",
+            );
             return None;
         }
         taken.taps.push(id);
@@ -593,14 +639,44 @@ impl Reader {
                 ),
             }
         }
-        self.ranged(element, "window", &mut shake.window_ms, range::SHAKE_WINDOW_MS);
+        self.ranged(
+            element,
+            "window",
+            &mut shake.window_ms,
+            range::SHAKE_WINDOW_MS,
+        );
         self.ranged(element, "segment", &mut shake.segment, range::SHAKE_SEGMENT);
         self.ranged(element, "speed", &mut shake.speed, range::SHAKE_SPEED);
-        self.ranged(element, "reversals", &mut shake.reversals, range::SHAKE_REVERSALS);
-        self.real(element, "dominance", &mut shake.dominance, range::SHAKE_DOMINANCE);
-        self.ranged(element, "degrees", &mut shake.circle_degrees, range::SHAKE_CIRCLE_DEGREES);
-        self.ranged(element, "circle-speed", &mut shake.circle_speed, range::SHAKE_CIRCLE_SPEED);
-        self.ranged(element, "cooldown", &mut shake.cooldown_ms, range::SHAKE_COOLDOWN_MS);
+        self.ranged(
+            element,
+            "reversals",
+            &mut shake.reversals,
+            range::SHAKE_REVERSALS,
+        );
+        self.real(
+            element,
+            "dominance",
+            &mut shake.dominance,
+            range::SHAKE_DOMINANCE,
+        );
+        self.ranged(
+            element,
+            "degrees",
+            &mut shake.circle_degrees,
+            range::SHAKE_CIRCLE_DEGREES,
+        );
+        self.ranged(
+            element,
+            "circle-speed",
+            &mut shake.circle_speed,
+            range::SHAKE_CIRCLE_SPEED,
+        );
+        self.ranged(
+            element,
+            "cooldown",
+            &mut shake.cooldown_ms,
+            range::SHAKE_COOLDOWN_MS,
+        );
 
         // A kind of shake with the same modifiers belongs to one trigger only.
         let mut clashed = false;
@@ -615,7 +691,10 @@ impl Reader {
             }
         }
         if clashed {
-            self.warn(element, "a shape already used by another trigger with the same modifiers is ignored");
+            self.warn(
+                element,
+                "a shape already used by another trigger with the same modifiers is ignored",
+            );
         }
         if shake.shapes == [false; 3] {
             return None;
@@ -625,7 +704,13 @@ impl Reader {
 
     /// A number that has to fall inside `allowed`; otherwise a warning and
     /// `slot` keeps its default.
-    fn ranged(&mut self, element: Element<'_>, name: &str, slot: &mut u32, allowed: RangeInclusive<u32>) {
+    fn ranged(
+        &mut self,
+        element: Element<'_>,
+        name: &str,
+        slot: &mut u32,
+        allowed: RangeInclusive<u32>,
+    ) {
         let Some(text) = element.attr(name) else {
             return;
         };
@@ -633,13 +718,26 @@ impl Reader {
             Some(value) if allowed.contains(&value) => *slot = value,
             Some(value) => self.warn(
                 element,
-                format!("{name} is {value}, which is outside {}..{}", allowed.start(), allowed.end()),
+                format!(
+                    "{name} is {value}, which is outside {}..{}",
+                    allowed.start(),
+                    allowed.end()
+                ),
             ),
-            None => self.warn(element, format!("{name} is {text:?}, which is not a number")),
+            None => self.warn(
+                element,
+                format!("{name} is {text:?}, which is not a number"),
+            ),
         }
     }
 
-    fn real(&mut self, element: Element<'_>, name: &str, slot: &mut f32, allowed: RangeInclusive<f32>) {
+    fn real(
+        &mut self,
+        element: Element<'_>,
+        name: &str,
+        slot: &mut f32,
+        allowed: RangeInclusive<f32>,
+    ) {
         let Some(text) = element.attr(name) else {
             return;
         };
@@ -647,9 +745,16 @@ impl Reader {
             Ok(value) if allowed.contains(&value) => *slot = value,
             Ok(value) => self.warn(
                 element,
-                format!("{name} is {value}, which is outside {}..{}", allowed.start(), allowed.end()),
+                format!(
+                    "{name} is {value}, which is outside {}..{}",
+                    allowed.start(),
+                    allowed.end()
+                ),
             ),
-            Err(_) => self.warn(element, format!("{name} is {text:?}, which is not a number")),
+            Err(_) => self.warn(
+                element,
+                format!("{name} is {text:?}, which is not a number"),
+            ),
         }
     }
 
@@ -831,7 +936,10 @@ mod tests {
     #[test]
     fn the_defaults_are_the_tuned_values() {
         let strict = Shake::new(HOT_KEY_MODIFIERS(0));
-        assert_eq!((strict.speed, strict.reversals, strict.segment), (3000, 3, 120));
+        assert_eq!(
+            (strict.speed, strict.reversals, strict.segment),
+            (3000, 3, 120)
+        );
         let held = Shake::new(MOD_CONTROL);
         assert_eq!((held.speed, held.reversals), (1200, 2));
         let tap = Tap::new(TapKey::Ctrl);
@@ -895,14 +1003,20 @@ mod tests {
         assert_eq!(shake.shapes, [true, true, false]);
         assert_eq!((shake.speed, shake.dominance), (2500, 2.0));
         let tap = radar.taps[0];
-        assert_eq!((tap.key, tap.side, tap.count), (TapKey::Shift, Side::Right, 3));
+        assert_eq!(
+            (tap.key, tap.side, tap.count),
+            (TapKey::Shift, Side::Right, 3)
+        );
 
         let circle = finder.styles[2].shakes[0];
         assert_eq!(circle.shapes, [false, false, true]);
         assert_eq!((circle.circle_degrees, circle.circle_speed), (540, 1800));
         assert_eq!((circle.window_ms, circle.segment), (800, 100));
         assert_eq!((circle.reversals, circle.cooldown_ms), (4, 1200));
-        assert_eq!(finder.styles[2].shakes[1].modifiers, MOD_CONTROL | MOD_SHIFT);
+        assert_eq!(
+            finder.styles[2].shakes[1].modifiers,
+            MOD_CONTROL | MOD_SHIFT
+        );
 
         // The action can ask for a style by name, or take the default one.
         assert_eq!(finder.style(Some("screens")).look.shape, Shape::Monitor);
@@ -933,7 +1047,10 @@ mod tests {
         let style = &finder.styles[0];
         assert_eq!(style.look, default);
         assert_eq!(style.taps[0], Tap::new(TapKey::Ctrl));
-        assert_eq!(style.shakes[0].dominance, Shake::new(HOT_KEY_MODIFIERS(0)).dominance);
+        assert_eq!(
+            style.shakes[0].dominance,
+            Shake::new(HOT_KEY_MODIFIERS(0)).dominance
+        );
         assert!(style.shakes[0].all_shapes());
 
         let all = settings.warnings.join("\n");
@@ -1050,7 +1167,10 @@ mod tests {
         finder.default_style = 1;
 
         let xml = settings.to_xml();
-        assert!(xml.contains("<style name=\"quick\" shape=\"halo\" auto-color=\"true\">"), "{xml}");
+        assert!(
+            xml.contains("<style name=\"quick\" shape=\"halo\" auto-color=\"true\">"),
+            "{xml}"
+        );
         assert!(xml.contains("speed=\"900\""), "{xml}");
         assert!(xml.contains("shapes=\"circle\""), "{xml}");
         assert!(xml.contains("default=\"true\""), "{xml}");
@@ -1124,8 +1244,14 @@ mod binding_tests {
         assert_eq!(settings.mouse_shortcuts[0].style, Some(0));
 
         let xml = settings.to_xml();
-        assert!(xml.contains("action=\"find-mouse\" style=\"radar\""), "{xml}");
-        assert!(xml.contains("action=\"find-mouse\" style=\"quick\""), "{xml}");
+        assert!(
+            xml.contains("action=\"find-mouse\" style=\"radar\""),
+            "{xml}"
+        );
+        assert!(
+            xml.contains("action=\"find-mouse\" style=\"quick\""),
+            "{xml}"
+        );
     }
 
     #[test]

@@ -227,7 +227,13 @@ impl Shakes {
     /// The pointer moved to `(x, y)`. `sense` reads the modifiers and buttons,
     /// and is only called when the path is actually judged. The style to play
     /// when this completes a shake.
-    pub fn on_move(&mut self, x: i32, y: i32, time: u32, sense: impl FnOnce() -> Held) -> Option<u16> {
+    pub fn on_move(
+        &mut self,
+        x: i32,
+        y: i32,
+        time: u32,
+        sense: impl FnOnce() -> Held,
+    ) -> Option<u16> {
         if let Some((since, length)) = self.quiet {
             if elapsed(time, since) < length {
                 return None;
@@ -280,7 +286,9 @@ impl Shakes {
         let duration = elapsed(window[count - 1].time, window[0].time).max(1) as f32;
         let path: f32 = window
             .windows(2)
-            .map(|p| (((p[1].x - p[0].x) as f32).powi(2) + ((p[1].y - p[0].y) as f32).powi(2)).sqrt())
+            .map(|p| {
+                (((p[1].x - p[0].x) as f32).powi(2) + ((p[1].y - p[0].y) as f32).powi(2)).sqrt()
+            })
             .sum();
         let speed = path * 1000.0 / duration;
         let turns = Turns::of(window);
@@ -337,7 +345,12 @@ impl Turns {
             }
         }
 
-        let mut result = Self { smooth: 0.0, sharp: 0, path_x: 0.0, path_y: 0.0 };
+        let mut result = Self {
+            smooth: 0.0,
+            sharp: 0,
+            path_x: 0.0,
+            path_y: 0.0,
+        };
         let mut previous: Option<f32> = None;
         for pair in points[..count].windows(2) {
             result.path_x += (pair[1].0 - pair[0].0).abs();
@@ -412,7 +425,10 @@ mod tests {
     use super::*;
 
     fn held(modifiers: HOT_KEY_MODIFIERS) -> Held {
-        Held { modifiers: modifiers.0, button: false }
+        Held {
+            modifiers: modifiers.0,
+            button: false,
+        }
     }
 
     use windows::Win32::UI::Input::KeyboardAndMouse::{HOT_KEY_MODIFIERS, MOD_CONTROL};
@@ -531,7 +547,11 @@ mod tests {
     /// Back and forth: 6 half-periods of 300 px in 0.4 s (4500 px/s).
     fn back_and_forth(t: f32) -> (f32, f32) {
         let phase = (t * 7.5).fract();
-        let x = if phase < 0.5 { phase * 2.0 } else { 2.0 - phase * 2.0 };
+        let x = if phase < 0.5 {
+            phase * 2.0
+        } else {
+            2.0 - phase * 2.0
+        };
         (500.0 + x * 300.0, 400.0)
     }
 
@@ -574,10 +594,16 @@ mod tests {
         let mut shakes = Shakes::new(vec![(1, Shake::new(MOD_CONTROL))]);
         assert_eq!(path(&mut shakes, NONE, 10_000, 90, back_and_forth), None);
         let mut shakes = Shakes::new(vec![(1, Shake::new(MOD_CONTROL))]);
-        assert_eq!(path(&mut shakes, MOD_CONTROL, 10_000, 90, back_and_forth), Some(1));
+        assert_eq!(
+            path(&mut shakes, MOD_CONTROL, 10_000, 90, back_and_forth),
+            Some(1)
+        );
         // Strict without a modifier: Ctrl held means the other trigger's.
         let mut shakes = Shakes::new(vec![(2, Shake::new(NONE))]);
-        assert_eq!(path(&mut shakes, MOD_CONTROL, 10_000, 90, back_and_forth), None);
+        assert_eq!(
+            path(&mut shakes, MOD_CONTROL, 10_000, 90, back_and_forth),
+            None
+        );
     }
 
     #[test]
@@ -587,7 +613,10 @@ mod tests {
         for i in 0..90u32 {
             let t = 10_000 + i * 8;
             let (x, y) = back_and_forth((t - 10_000) as f32 / 1000.0);
-            let down = Held { modifiers: 0, button: true };
+            let down = Held {
+                modifiers: 0,
+                button: true,
+            };
             fired = fired.or(shakes.on_move(x as i32, y as i32, t, || down));
         }
         assert_eq!(fired, None);
@@ -601,7 +630,10 @@ mod tests {
         for i in 0..250u32 {
             let t = 10_000 + i * 8;
             let (x, y) = back_and_forth((t - 10_000) as f32 / 1000.0);
-            if shakes.on_move(x as i32, y as i32, t, || held(NONE)).is_some() {
+            if shakes
+                .on_move(x as i32, y as i32, t, || held(NONE))
+                .is_some()
+            {
                 count += 1;
             }
         }

@@ -90,7 +90,13 @@ impl FinderInput {
         let hook = if wants_keys {
             let installed = unsafe {
                 GetModuleHandleW(None).ok().and_then(|instance| {
-                    SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_hook), Some(instance.into()), 0).ok()
+                    SetWindowsHookExW(
+                        WH_KEYBOARD_LL,
+                        Some(keyboard_hook),
+                        Some(instance.into()),
+                        0,
+                    )
+                    .ok()
                 })
             };
             if installed.is_none() && !wants_shakes {
@@ -126,7 +132,14 @@ fn with_input(body: impl FnOnce(&mut Input)) {
 }
 
 fn post(owner: HWND, style: u16) {
-    let _ = unsafe { PostMessageW(Some(owner), WM_FINDER_TRIGGER, WPARAM(style as usize), LPARAM(0)) };
+    let _ = unsafe {
+        PostMessageW(
+            Some(owner),
+            WM_FINDER_TRIGGER,
+            WPARAM(style as usize),
+            LPARAM(0),
+        )
+    };
 }
 
 /// The pointer moved. Called by the mouse hook for every move.

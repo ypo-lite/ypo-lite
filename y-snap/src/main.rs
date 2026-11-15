@@ -98,6 +98,8 @@ struct YSnap {
     /// [`ipc::reload_message`]'s id, looked up once: `y-snap-config` sends
     /// it after saving, so a change applies without the tray menu.
     reload_message: u32,
+    /// [`ipc::finder_test_message`]'s id: the settings app's Test button.
+    finder_test_message: u32,
     /// The windows `iconize` and `traynize` took off the screen.
     hidden: Hidden,
     /// y-snap's own window: where the tray callbacks of hidden windows and
@@ -133,6 +135,7 @@ impl YSnap {
             settings: None,
             problem: None,
             reload_message: ipc::reload_message(),
+            finder_test_message: ipc::finder_test_message(),
         }
     }
 
@@ -321,7 +324,14 @@ impl YSnap {
             .then(|| y_core::target::resolve(binding.target))
             .flatten();
 
-        self.fire(hwnd, binding.action, window, binding.desktop, binding.style, false);
+        self.fire(
+            hwnd,
+            binding.action,
+            window,
+            binding.desktop,
+            binding.style,
+            false,
+        );
     }
 
     /// A mouse shortcut fired. The hook already chose the window, at the
@@ -346,7 +356,14 @@ impl YSnap {
         } else {
             None
         };
-        self.fire(hwnd, binding.action, window, binding.desktop, binding.style, true);
+        self.fire(
+            hwnd,
+            binding.action,
+            window,
+            binding.desktop,
+            binding.style,
+            true,
+        );
     }
 
     /// Does `action`, whichever way it was triggered. `window` is the
@@ -958,6 +975,14 @@ impl TrayApp for YSnap {
             // 0 means registration failed, and 0 is also `WM_NULL`.
             msg if msg != 0 && msg == self.reload_message => {
                 self.load(hwnd);
+                Some(LRESULT(0))
+            }
+            // A look from the settings app, saved or not: plays it once. Any
+            // process can send this, so `unpack_look` checks what it gets.
+            msg if msg != 0 && msg == self.finder_test_message => {
+                if let Some(look) = ipc::unpack_look(wparam.0, lparam.0) {
+                    self.finder.play(&config::Style::new("test", look));
+                }
                 Some(LRESULT(0))
             }
 

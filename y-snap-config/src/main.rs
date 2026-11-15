@@ -48,7 +48,7 @@ use y_core::overlay::Color as CoreColor;
 use y_core::single_instance;
 use y_snap::action::{Action, Target};
 use y_snap::config::{
-    Binding, Button as MouseButton, Gesture, Group, Item, Look, LoadError, MouseShortcut,
+    Binding, Button as MouseButton, Gesture, Group, Item, LoadError, Look, MouseShortcut,
     MouseTrigger, QuickAction, Settings, Shake, Style, Tap, TapKey, Theme,
 };
 use y_snap::ipc;
@@ -303,6 +303,8 @@ enum Msg {
     EditFinderBase,
     EditFinderStyle(usize),
     FinderColorToggled,
+    /// Plays a look in the running y-snap, as it is now.
+    FinderTest(LookTarget),
     FinderGuardToggled(bool),
     FinderExcludeDraft(String),
     FinderExcludeAdded,
@@ -937,6 +939,13 @@ impl ConfigApp {
             }
 
             Msg::FinderColorToggled => self.finder_color_open = !self.finder_color_open,
+            Msg::FinderTest(target) => {
+                let look = match target {
+                    LookTarget::Base => settings.finder.look,
+                    LookTarget::Style(index) => settings.finder.styles[index].look,
+                };
+                ipc::request_finder_test(&look);
+            }
             Msg::EditFinderBase => {
                 self.finder_color_open = false;
                 self.reordering = None;
@@ -1010,7 +1019,9 @@ impl ConfigApp {
                 }
             }
             Msg::FinderTapAdded(index) => {
-                settings.finder.styles[index].taps.push(Tap::new(TapKey::Ctrl));
+                settings.finder.styles[index]
+                    .taps
+                    .push(Tap::new(TapKey::Ctrl));
                 self.dirty = true;
             }
             Msg::FinderTapDeleted(index, tap) => {
@@ -1341,9 +1352,8 @@ impl ConfigApp {
                 if matches!(self.editing, Some(Editing::FinderStyle { index, .. })
                     if finder::style_problem(&settings.finder, index).is_some()) =>
             {
-                self.save_error = Some(
-                    "the open finder style has a problem — fix or cancel it first".to_owned(),
-                );
+                self.save_error =
+                    Some("the open finder style has a problem — fix or cancel it first".to_owned());
             }
             Msg::Save => match settings.save() {
                 Ok(()) => {

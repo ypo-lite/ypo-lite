@@ -221,7 +221,11 @@ pub fn apply_shake(shake: &mut Shake, edit: ShakeEdit) -> bool {
             set_number(&mut shake.reversals, value, finder_range::SHAKE_REVERSALS);
         }
         ShakeEdit::Cooldown(value) => {
-            set_number(&mut shake.cooldown_ms, value, finder_range::SHAKE_COOLDOWN_MS);
+            set_number(
+                &mut shake.cooldown_ms,
+                value,
+                finder_range::SHAKE_COOLDOWN_MS,
+            );
         }
         ShakeEdit::Window(value) => {
             set_number(&mut shake.window_ms, value, finder_range::SHAKE_WINDOW_MS);
@@ -235,10 +239,18 @@ pub fn apply_shake(shake: &mut Shake, edit: ShakeEdit) -> bool {
         }
         ShakeEdit::Dominance(None) => {}
         ShakeEdit::Degrees(value) => {
-            set_number(&mut shake.circle_degrees, value, finder_range::SHAKE_CIRCLE_DEGREES);
+            set_number(
+                &mut shake.circle_degrees,
+                value,
+                finder_range::SHAKE_CIRCLE_DEGREES,
+            );
         }
         ShakeEdit::CircleSpeed(value) => {
-            set_number(&mut shake.circle_speed, value, finder_range::SHAKE_CIRCLE_SPEED);
+            set_number(
+                &mut shake.circle_speed,
+                value,
+                finder_range::SHAKE_CIRCLE_SPEED,
+            );
         }
     }
     *shake != before
@@ -274,19 +286,28 @@ pub fn delete_style(settings: &mut Settings, index: usize) {
         _ => {}
     };
     settings.hotkeys.iter_mut().for_each(|b| fix(&mut b.style));
-    settings.mouse_shortcuts.iter_mut().for_each(|s| fix(&mut s.style));
+    settings
+        .mouse_shortcuts
+        .iter_mut()
+        .for_each(|s| fix(&mut s.style));
 }
 
 /// The `style` of a binding for a choice in [`style_combo`]: choice 0 is the
 /// default style (`None`), the others are the styles in order.
 pub fn style_from_choice(choice: usize) -> Option<u16> {
-    choice.checked_sub(1).and_then(|style| u16::try_from(style).ok())
+    choice
+        .checked_sub(1)
+        .and_then(|style| u16::try_from(style).ok())
 }
 
 /// The dropdown that picks which style a `find-mouse` hotkey or shortcut
 /// plays. `current` is its `style`; a hand-edited one naming no style reads as
 /// the default.
-pub fn style_combo(finder: &Finder, current: Option<u16>, on_change: Callback<Option<usize>>) -> View {
+pub fn style_combo(
+    finder: &Finder,
+    current: Option<u16>,
+    on_change: Callback<Option<usize>>,
+) -> View {
     let names = std::iter::once("(default style)".to_owned())
         .chain(finder.styles.iter().map(|style| style.name.clone()));
     let selected = current
@@ -388,11 +409,7 @@ pub fn finder_view(
                 context.callback(|()| Msg::EditorClosed(EditorClose::Keep)),
             )
         });
-        Row::new(
-            index.to_string(),
-            cells(finder, index, style, context),
-        )
-        .detail(detail)
+        Row::new(index.to_string(), cells(finder, index, style, context)).detail(detail)
     });
 
     let base_editor = (open == Open::Base).then(|| {
@@ -605,7 +622,10 @@ fn style_editor(
     let add = Stack::horizontal(space::S)
         .child(
             "tap",
-            add_button("Add a tap", context.callback(move |()| Msg::FinderTapAdded(index))),
+            add_button(
+                "Add a tap",
+                context.callback(move |()| Msg::FinderTapAdded(index)),
+            ),
         )
         .child(
             "shake",
@@ -686,7 +706,11 @@ fn look_editor(
             "duration",
             field(
                 "Duration (ms)",
-                number(look.duration_ms, finder_range::DURATION_MS, LookEdit::Duration),
+                number(
+                    look.duration_ms,
+                    finder_range::DURATION_MS,
+                    LookEdit::Duration,
+                ),
             ),
         ),
         (
@@ -727,14 +751,10 @@ fn look_editor(
         })
         .horizontal_alignment(HorizontalAlignment::Left)
         .on_click(context.callback(|()| Msg::FinderColorToggled))
-        .content(
-            Stack::horizontal(space::S)
-                .child("swatch", swatch)
-                .child(
-                    "hex",
-                    text::body(hex).vertical_alignment(VerticalAlignment::Center),
-                ),
-        )
+        .content(Stack::horizontal(space::S).child("swatch", swatch).child(
+            "hex",
+            text::body(hex).vertical_alignment(VerticalAlignment::Center),
+        ))
         .tooltip(if color_open {
             "Close the colour picker"
         } else {
@@ -750,9 +770,10 @@ fn look_editor(
             .into()
     });
 
-    let persistent = look.shape.is_persistent().then(|| {
-        note("This shape stays up, for four times the duration (ten seconds at most).")
-    });
+    let persistent = look
+        .shape
+        .is_persistent()
+        .then(|| note("This shape stays up, for four times the duration (ten seconds at most)."));
 
     Stack::vertical(space::M)
         .child("fields", fields.build(viewport))
@@ -767,6 +788,33 @@ fn look_editor(
         )
         .child("color", field("Colour", color_button))
         .maybe("picker", picker)
+        .child("test", test_row(target, context))
+        .into()
+}
+
+/// The Test button: plays this look, as it is now, saved or not, in the running
+/// y-snap — around the pointer, which is on this window.
+fn test_row(target: LookTarget, context: &ViewContext<ConfigApp>) -> View {
+    let running = y_snap::ipc::is_running();
+    let words = if running {
+        "Plays this look once around the pointer, without saving."
+    } else {
+        "y-snap isn't running: start it to try a look."
+    };
+    Stack::horizontal(space::M)
+        .child(
+            "button",
+            button(
+                "Test",
+                false,
+                running,
+                context.callback(move |()| Msg::FinderTest(target)),
+            ),
+        )
+        .child(
+            "words",
+            text::caption(words).vertical_alignment(VerticalAlignment::Center),
+        )
         .into()
 }
 
@@ -785,7 +833,11 @@ fn trigger_card(title: &str, on_delete: Callback<()>, body: impl Into<View>) -> 
             ),
             (
                 "delete",
-                cell(icon_button(Symbol::Delete, "Delete this trigger", on_delete), 0, 1),
+                cell(
+                    icon_button(Symbol::Delete, "Delete this trigger", on_delete),
+                    0,
+                    1,
+                ),
             ),
         ]);
     card().content(
@@ -813,9 +865,7 @@ fn tap_card(
                 combo(
                     TapKey::ALL.map(key_title),
                     TapKey::ALL.iter().position(|k| *k == tap.key),
-                    context.callback(move |c| {
-                        Msg::FinderTap(style, tap_index, TapEdit::Key(c))
-                    }),
+                    context.callback(move |c| Msg::FinderTap(style, tap_index, TapEdit::Key(c))),
                 ),
             ),
         ),
@@ -826,9 +876,7 @@ fn tap_card(
                 combo(
                     SIDES.map(side_title),
                     SIDES.iter().position(|s| *s == tap.side),
-                    context.callback(move |c| {
-                        Msg::FinderTap(style, tap_index, TapEdit::Side(c))
-                    }),
+                    context.callback(move |c| Msg::FinderTap(style, tap_index, TapEdit::Side(c))),
                 ),
             ),
         ),
@@ -917,17 +965,18 @@ fn shake_card(
             )
         }));
 
-    let number = |label: &str, value: f64, range: (u32, u32), make: fn(Option<f64>) -> ShakeEdit| {
-        field(
-            label,
-            number_box(
-                Some(value),
-                f64::from(range.0),
-                f64::from(range.1),
-                context.callback(move |v| Msg::FinderShake(style, shake_index, make(v))),
-            ),
-        )
-    };
+    let number =
+        |label: &str, value: f64, range: (u32, u32), make: fn(Option<f64>) -> ShakeEdit| {
+            field(
+                label,
+                number_box(
+                    Some(value),
+                    f64::from(range.0),
+                    f64::from(range.1),
+                    context.callback(move |v| Msg::FinderShake(style, shake_index, make(v))),
+                ),
+            )
+        };
     let bounds = |range: RangeInclusive<u32>| (*range.start(), *range.end());
     let dominance = finder_range::SHAKE_DOMINANCE;
     let tuning = AutoGrid::new(130.0).max_columns(4).items([
@@ -1017,7 +1066,10 @@ fn shake_card(
     };
 
     let body = Stack::vertical(space::M)
-        .child("modifiers", field("Keys held while shaking", modifiers.build(inner)))
+        .child(
+            "modifiers",
+            field("Keys held while shaking", modifiers.build(inner)),
+        )
         .child("shapes", field("Kinds of shake", shapes.build(inner)))
         .child("tuning", tuning.build(inner))
         .child("hint", text::caption(hint));
@@ -1037,7 +1089,10 @@ mod tests {
     fn settings_with_styles(names: &[&str]) -> Settings {
         let mut settings = Settings::empty(std::path::PathBuf::from("y-snap.xml"));
         for name in names {
-            settings.finder.styles.push(Style::new(*name, Look::default()));
+            settings
+                .finder
+                .styles
+                .push(Style::new(*name, Look::default()));
         }
         settings
     }
@@ -1055,16 +1110,31 @@ mod tests {
     #[test]
     fn the_colour_is_always_opaque() {
         let mut look = Look::default();
-        assert!(apply_look(&mut look, LookEdit::Color(Color::argb(10, 1, 2, 3))));
-        assert_eq!((look.color.r, look.color.g, look.color.b, look.color.a), (1, 2, 3, 255));
+        assert!(apply_look(
+            &mut look,
+            LookEdit::Color(Color::argb(10, 1, 2, 3))
+        ));
+        assert_eq!(
+            (look.color.r, look.color.g, look.color.b, look.color.a),
+            (1, 2, 3, 255)
+        );
     }
 
     #[test]
     fn a_shake_keeps_at_least_one_shape() {
         let mut shake = Shake::new(HOT_KEY_MODIFIERS(0));
-        assert!(apply_shake(&mut shake, ShakeEdit::Shape(ShakeShape::Circle, false)));
-        assert!(apply_shake(&mut shake, ShakeEdit::Shape(ShakeShape::Vertical, false)));
-        assert!(!apply_shake(&mut shake, ShakeEdit::Shape(ShakeShape::Horizontal, false)));
+        assert!(apply_shake(
+            &mut shake,
+            ShakeEdit::Shape(ShakeShape::Circle, false)
+        ));
+        assert!(apply_shake(
+            &mut shake,
+            ShakeEdit::Shape(ShakeShape::Vertical, false)
+        ));
+        assert!(!apply_shake(
+            &mut shake,
+            ShakeEdit::Shape(ShakeShape::Horizontal, false)
+        ));
         assert_eq!(shake.shapes, [true, false, false]);
     }
 
@@ -1113,11 +1183,21 @@ mod tests {
             style,
             steal: false,
         };
-        settings.hotkeys = vec![binding(Some(0)), binding(Some(1)), binding(Some(2)), binding(None)];
+        settings.hotkeys = vec![
+            binding(Some(0)),
+            binding(Some(1)),
+            binding(Some(2)),
+            binding(None),
+        ];
 
         delete_style(&mut settings, 1);
 
-        let names: Vec<_> = settings.finder.styles.iter().map(|s| s.name.as_str()).collect();
+        let names: Vec<_> = settings
+            .finder
+            .styles
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect();
         assert_eq!(names, ["a", "c"]);
         assert_eq!(settings.finder.default_style, 1);
         let styles: Vec<_> = settings.hotkeys.iter().map(|b| b.style).collect();

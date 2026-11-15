@@ -26,11 +26,11 @@ use y_core::xml::{self, Document, Element};
 use crate::action::{Action, Target};
 
 mod finder;
+use finder::write_finder;
 pub use finder::{
     Finder, Look, Recall, Shake, ShakeShape, Shape, Side, Style, Tap, TapKey, normalize_process,
     range as finder_range,
 };
-use finder::write_finder;
 
 /// The file y-snap looks for.
 pub const FILE_NAME: &str = "y-snap.xml";
@@ -525,7 +525,11 @@ impl Settings {
 
         // First: bindings may name a finder style, which has to be known.
         let finder = reader.finder(root);
-        reader.styles = finder.styles.iter().map(|style| style.name.clone()).collect();
+        reader.styles = finder
+            .styles
+            .iter()
+            .map(|style| style.name.clone())
+            .collect();
 
         let hotkeys = reader.hotkeys(root);
         let mouse = reader.mouse(root);
@@ -1026,7 +1030,14 @@ impl Reader {
             }
             self.check(
                 element,
-                &["key", "action", "target", "desktop", "style", "steal-from-shell"],
+                &[
+                    "key",
+                    "action",
+                    "target",
+                    "desktop",
+                    "style",
+                    "steal-from-shell",
+                ],
             );
 
             let Some(action) = self.action(element) else {
@@ -1152,7 +1163,10 @@ impl Reader {
         let mut shortcuts: Vec<MouseShortcut> = Vec::new();
 
         for element in section.children().filter(|e| e.name() == "shortcut") {
-            self.check(element, &["button", "mod", "action", "target", "desktop", "style"]);
+            self.check(
+                element,
+                &["button", "mod", "action", "target", "desktop", "style"],
+            );
 
             let Some(name) = element.attr("button") else {
                 self.warn(element, "a <shortcut> needs a button attribute");

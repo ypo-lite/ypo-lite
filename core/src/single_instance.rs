@@ -103,6 +103,20 @@ pub fn notify_running_instance(message: u32) {
     let _ = unsafe { PostMessageW(Some(HWND_BROADCAST), message, WPARAM(0), LPARAM(0)) };
 }
 
+/// [`notify_running_instance`] with the message's two parameters, for a request
+/// that carries a little data. Plain integers only: a pointer would mean
+/// nothing in the other process.
+pub fn notify_running_instance_with(message: u32, wparam: usize, lparam: isize) {
+    let _ = unsafe {
+        PostMessageW(
+            Some(HWND_BROADCAST),
+            message,
+            WPARAM(wparam),
+            LPARAM(lparam),
+        )
+    };
+}
+
 /// Registers (and on later calls, looks up) a broadcast message id by name.
 ///
 /// Both instances call this with the same name and get the same id back.

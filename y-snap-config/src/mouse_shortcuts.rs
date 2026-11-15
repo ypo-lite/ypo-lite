@@ -131,7 +131,11 @@ pub fn mouse_shortcuts_view(
                 context.callback(|()| Msg::EditorClosed(EditorClose::Keep)),
             )
         });
-        Row::new(index.to_string(), cells(index, shortcut, &settings.finder, context)).detail(detail)
+        Row::new(
+            index.to_string(),
+            cells(index, shortcut, &settings.finder, context),
+        )
+        .detail(detail)
     });
 
     // A clash can come from the Mouse gestures screen too: Drag changed to a
