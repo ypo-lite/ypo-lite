@@ -1,6 +1,6 @@
 //! When y-snap should stay out of the way.
 //!
-//! Two signals, both measured live with `examples/finder_probe.rs` against a
+//! Two signals, both measured live with a probe program (since removed) against a
 //! real game and a full-screen video (see `docs/design/mouse-finder-plan.md`):
 //!
 //! * **Confined pointer** (`GetClipCursor` smaller than the virtual screen).

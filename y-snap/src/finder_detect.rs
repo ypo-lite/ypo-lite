@@ -7,7 +7,7 @@
 //! takes a lock, or calls the system, as a low-level hook has to stay under
 //! `LowLevelHooksTimeout`.
 //!
-//! The rules and numbers were tuned live with `examples/finder_probe.rs`
+//! The rules and numbers were tuned live with a probe program (since removed)
 //! (see `docs/design/mouse-finder-plan.md`). Times are the millisecond ticks
 //! of the hook events, compared with wrapping arithmetic; distances are in
 //! physical pixels.

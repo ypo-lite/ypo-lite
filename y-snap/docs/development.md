@@ -33,8 +33,6 @@ cargo test -p y-snap config::tests::the_default_configuration_is_valid  # one te
 | `guard.rs` | when y-snap stays out of the way: confined pointer, full-screen window, excluded application |
 | `config/finder.rs` | `<finder>`: styles, triggers, ranges, the writer |
 
-`examples/finder_probe.rs` logged the signals the guard was built from (see below).
-
 `action`, `config` and `ipc` are the `y_snap` library, so `y-snap-config` reads
 and writes the same `Settings` without linking the message loop or the hooks. The
 rest is the binary. Everything Win32 that is not specific to window management
@@ -104,7 +102,7 @@ opt-in cache file planned for that.
   `WDA_EXCLUDEFROMCAPTURE`: it never sees itself.
 * *The real cursor is never resized*: `SetSystemCursor` is global state a crash
   leaves behind, and applications that draw their own cursor ignore it.
-* *The guard* (`guard.rs`) uses two signals, from `examples/finder_probe.rs` run
+* *The guard* (`guard.rs`) uses two signals, from a probe program (since removed) run
   against a game and a full-screen video: `GetClipCursor` smaller than the virtual
   screen (confined), and a foreground window covering the pointer's monitor with no
   `WS_CAPTION` and not the shell. `SHQueryUserNotificationState` was rejected (it

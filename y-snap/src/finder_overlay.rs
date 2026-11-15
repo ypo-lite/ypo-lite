@@ -3,7 +3,7 @@
 //!
 //! Everything here is pure pixel work on a premultiplied `0xAARRGGBB` buffer
 //! (the [`y_core::overlay::Canvas`]'s), apart from [`Capturer`], the one
-//! piece of GDI. The shapes were prototyped in `examples/finder_probe.rs`
+//! piece of GDI. The shapes were prototyped in a probe program (since removed)
 //! and tuned live; the numbers below come from there.
 
 use std::ffi::c_void;

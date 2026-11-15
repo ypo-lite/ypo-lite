@@ -534,7 +534,7 @@ Decisions (the user's, from these):
 - Possible later setting: switching the confined suspension off.
 - **Not checked live** (running with the game: automatic triggers quiet, hotkeys
   ignored in play, VLC full-screen quiet, VLC on another monitor not).
-- `examples/finder_probe.rs` can go once the user is done with the style tests.
+- `examples/finder_probe.rs` was removed (2026-11-15); the measurements are above.
 
 ## Notes for later: idle cost of the mouse hook (2026-11-15)
 
@@ -660,5 +660,7 @@ binding's `style` with them (tested): a hotkey keeps playing the same style.
 - Not done: screenshots of the new page (there is none yet), and the Windows
   Mouse Sonar overlap is only documented, not detected (the plan's risk table
   suggested reading `SPI_GETMOUSESONAR` to warn in the screen).
-- `development.md` mentions `examples/finder_probe.rs`; remove the line when
-  the probe is deleted.
+
+`examples/finder_probe.rs` was removed (2026-11-15) once the guard, the shapes and
+the triggers were built from it. Its measurements are in this plan (Phase 0, the
+guard table); the code is in git history, in the commit that added it.
