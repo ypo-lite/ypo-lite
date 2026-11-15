@@ -209,6 +209,7 @@ pub fn suggestions(action: Action) -> &'static [&'static str] {
         Action::Overlay => &["🎛️", "🗂️", "✨"],
         Action::Reload => &["🔄", "🔃", "♻️"],
         Action::Quit => &["⛔", "🚪", "❌"],
+        Action::FindMouse => &["🔍", "🖱️", "🎯"],
         Action::Minimize => &["➖", "🔽", "⬇️"],
         Action::Maximize => &["🔲", "⬜", "↗️"],
         Action::Close => &["❌", "✖️", "🗑️"],

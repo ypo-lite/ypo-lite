@@ -455,10 +455,23 @@ unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) 
     if code == HC_ACTION as i32 {
         let info = unsafe { &*(lparam.0 as *const MSLLHOOKSTRUCT) };
         let message = wparam.0 as u32;
+        // The pointer is confined (a game in play, a remote desktop...): y-snap
+        // stays out of it, unless a drag it started is still going on. The
+        // watchdog still needs to see the pointer move.
+        if crate::guard::confined_cached(info.time) && !with_state_bool(|state| state.gesture.active()) {
+            if message == WM_MOUSEMOVE {
+                LAST_POINT.with(|cell| cell.set(Some(info.pt)));
+            }
+            return unsafe { CallNextHookEx(None, code, wparam, lparam) };
+        }
+        if matches!(message, WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN | WM_XBUTTONDOWN) {
+            crate::finder_input::on_button();
+        }
 
         let consumed = match message {
             WM_MOUSEMOVE => {
                 LAST_POINT.with(|cell| cell.set(Some(info.pt)));
+                crate::finder_input::on_move(info.pt.x, info.pt.y, info.time, info.flags & 1 != 0);
                 with_state(|state| state.on_move(info.pt));
                 false
             }
@@ -538,7 +551,7 @@ fn side_button(mouse_data: u32) -> Option<MouseTrigger> {
 }
 
 /// The modifier keys held right now, in [`y_core::hotkey`]'s vocabulary.
-fn modifiers_held() -> HOT_KEY_MODIFIERS {
+pub(crate) fn modifiers_held() -> HOT_KEY_MODIFIERS {
     let held = |key: VIRTUAL_KEY| unsafe { GetAsyncKeyState(key.0 as i32) } as u16 & 0x8000 != 0;
 
     let mut modifiers = 0;

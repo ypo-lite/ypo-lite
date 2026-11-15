@@ -128,4 +128,50 @@
 		<action action="always-on-top" label="On top"      icon="🔝"/>
 	</minbutton>
 
+	<!--
+		The mouse finder: shows where the pointer is. The find-mouse action
+		(bind it in <hotkeys> or as a <shortcut>) always works; the automatic
+		triggers exist only in the styles that declare them. Leave the whole
+		section out for the defaults. Every attribute is optional.
+
+		<finder> holds what is global (guard, <exclude>) and the defaults every
+		<style> inherits:
+
+		shape       beacon, spotlight, crosshair, monitor, halo, negative or contrast
+		duration    how long it plays, in ms (300-5000)
+		size        radius in dips (40-600)       color  #RRGGBB
+		auto-color  darken/lighten the colour to stay visible on any backdrop
+		dim         how dark the spotlight makes the screen, in % (0-100)
+		recall      "center" also moves the pointer to the active window
+		guard       automatic triggers stay quiet while a full-screen window is on the
+		            pointer's monitor (true). While the pointer is confined (a game
+		            in play) all of y-snap is suspended, whatever this says
+
+		A <style> has a name, may override any of the above, and lists the
+		triggers that play it. find-mouse plays the first style, or the one
+		with default="true".
+
+		<tap>    key ctrl|shift|alt|win, side any|left|right, count 2-4,
+		         hold and gap in ms (a fast tap, not a held key)
+		<shake>  mod none or Ctrl, Ctrl+Shift...; shapes any or a list of
+		         horizontal, vertical, circle; speed, reversals, segment,
+		         window, dominance, degrees, circle-speed, cooldown tune it.
+		         With a modifier held the defaults are more permissive.
+		         See docs/configuration.md.
+
+		To play a given style from a binding: <hotkey key="Ctrl+Alt+F" action="find-mouse" style="radar"/>
+		(also on a <shortcut>).
+
+		<finder guard="true">
+			<exclude process="game"/>
+			<style name="quick" shape="halo" auto-color="true">
+				<tap key="ctrl"/>
+				<shake mod="Ctrl"/>
+			</style>
+			<style name="radar" shape="beacon" size="220">
+				<shake shapes="horizontal"/>
+			</style>
+		</finder>
+	-->
+
 </y-snap>

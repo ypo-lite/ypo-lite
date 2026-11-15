@@ -230,6 +230,7 @@ pub fn is_implemented(action: Action) -> bool {
             | Action::Traynize
             | Action::Uniconize
             | Action::UniconizeAll
+            | Action::FindMouse
     )
 }
 

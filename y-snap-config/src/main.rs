@@ -27,6 +27,7 @@
 
 #![windows_subsystem = "windows"]
 
+mod finder;
 mod hotkeys;
 mod icon_picker;
 mod icons;
@@ -47,10 +48,12 @@ use y_core::overlay::Color as CoreColor;
 use y_core::single_instance;
 use y_snap::action::{Action, Target};
 use y_snap::config::{
-    Binding, Button as MouseButton, Gesture, Group, Item, LoadError, MouseShortcut, MouseTrigger,
-    QuickAction, Settings, Theme,
+    Binding, Button as MouseButton, Gesture, Group, Item, Look, LoadError, MouseShortcut,
+    MouseTrigger, QuickAction, Settings, Shake, Style, Tap, TapKey, Theme,
 };
 use y_snap::ipc;
+
+use finder::{LookEdit, LookTarget, ShakeEdit, TapEdit};
 
 use icon_picker::IconPickerUi;
 use icons::IconCategory;
@@ -115,6 +118,11 @@ struct ConfigApp {
     /// button) — closed whenever a new editor opens.
     icon_picker: IconPickerUi,
     overlay_section: OverlaySection,
+    /// The application name typed in the finder's exclude box, not added yet.
+    finder_exclude: String,
+    /// Whether the open finder editor shows its colour picker (closed by
+    /// default: it is tall).
+    finder_color_open: bool,
     /// Renders what is copied while the window is alive — see
     /// `y_core::shell::ClipboardFlusher`. Held only for its `Drop`.
     _clipboard: Option<y_core::shell::ClipboardFlusher>,
@@ -146,6 +154,14 @@ enum Editing {
         index: usize,
         original: MouseShortcut,
     },
+    /// The finder's default look.
+    FinderBase {
+        original: Look,
+    },
+    FinderStyle {
+        index: usize,
+        original: Style,
+    },
 }
 
 /// A reorderable list — what [`Msg::ReorderToggled`] and [`Msg::Moved`] are
@@ -166,15 +182,17 @@ enum Section {
     Hotkeys,
     Mouse,
     MouseShortcuts,
+    Finder,
     Overlay,
     MinButton,
 }
 
 impl Section {
-    const ALL: [Self; 5] = [
+    const ALL: [Self; 6] = [
         Self::Hotkeys,
         Self::Mouse,
         Self::MouseShortcuts,
+        Self::Finder,
         Self::Overlay,
         Self::MinButton,
     ];
@@ -185,6 +203,7 @@ impl Section {
             Self::Hotkeys => "hotkeys",
             Self::Mouse => "mouse",
             Self::MouseShortcuts => "mouse-shortcuts",
+            Self::Finder => "finder",
             Self::Overlay => "overlay",
             Self::MinButton => "minbutton",
         }
@@ -199,6 +218,7 @@ impl Section {
             Self::Hotkeys => "Hotkeys",
             Self::Mouse => "Mouse gestures",
             Self::MouseShortcuts => "Mouse shortcuts",
+            Self::Finder => "Mouse finder",
             Self::Overlay => "Action overlay",
             Self::MinButton => "Minimize button",
         }
@@ -209,6 +229,7 @@ impl Section {
             Self::Hotkeys => Symbol::Keyboard,
             Self::Mouse => Symbol::TouchPointer,
             Self::MouseShortcuts => Symbol::Switch,
+            Self::Finder => Symbol::Find,
             Self::Overlay => Symbol::ViewAll,
             Self::MinButton => Symbol::BackToWindow,
         }
@@ -255,6 +276,8 @@ enum Msg {
     IconPicked(&'static str),
 
     HotkeyActionChanged(usize, Option<usize>),
+    /// A choice of `finder::style_combo`.
+    HotkeyStyleChanged(usize, Option<usize>),
     HotkeyTargetChanged(usize, Option<usize>),
     HotkeyDesktopChanged(usize, Option<f64>),
     HotkeyStealToggled(usize, bool),
@@ -272,8 +295,29 @@ enum Msg {
     MouseShortcutTriggerChanged(usize, MouseTrigger),
     MouseShortcutModifierToggled(usize, HOT_KEY_MODIFIERS),
     MouseShortcutActionChanged(usize, Option<usize>),
+    MouseShortcutStyleChanged(usize, Option<usize>),
     MouseShortcutTargetChanged(usize, Option<usize>),
     MouseShortcutDesktopChanged(usize, Option<f64>),
+
+    // The mouse finder: its look, styles and triggers.
+    EditFinderBase,
+    EditFinderStyle(usize),
+    FinderColorToggled,
+    FinderGuardToggled(bool),
+    FinderExcludeDraft(String),
+    FinderExcludeAdded,
+    FinderExcludeRemoved(usize),
+    FinderStyleAdded,
+    FinderStyleDeleted(usize),
+    FinderStyleDefault(usize),
+    FinderStyleName(usize, String),
+    FinderLook(LookTarget, LookEdit),
+    FinderTapAdded(usize),
+    FinderTapDeleted(usize, usize),
+    FinderTap(usize, usize, TapEdit),
+    FinderShakeAdded(usize),
+    FinderShakeDeleted(usize, usize),
+    FinderShake(usize, usize, ShakeEdit),
 
     OverlayColumnsChanged(Option<f64>),
     OverlayTileWidthChanged(Option<f64>),
@@ -337,6 +381,8 @@ impl Component for ConfigApp {
             key_picker: KeyPickerUi::default(),
             icon_picker: IconPickerUi::default(),
             overlay_section: OverlaySection::Layout,
+            finder_exclude: String::new(),
+            finder_color_open: false,
             _clipboard: y_core::shell::ClipboardFlusher::start(),
             window_width: shell::INITIAL_WINDOW.0,
         }
@@ -414,6 +460,7 @@ impl Component for ConfigApp {
                 let reordering = self.reordering == Some(ListKind::Hotkeys);
                 hotkeys::hotkeys_view(
                     &settings.hotkeys,
+                    &settings.finder,
                     editing,
                     reordering,
                     &self.key_picker,
@@ -428,6 +475,21 @@ impl Component for ConfigApp {
                     _ => None,
                 };
                 mouse_shortcuts::mouse_shortcuts_view(settings, editing, viewport, context)
+            }
+            Section::Finder => {
+                let open = match self.editing {
+                    Some(Editing::FinderBase { .. }) => finder::Open::Base,
+                    Some(Editing::FinderStyle { index, .. }) => finder::Open::Style(index),
+                    _ => finder::Open::Nothing,
+                };
+                finder::finder_view(
+                    &settings.finder,
+                    open,
+                    self.finder_color_open,
+                    &self.finder_exclude,
+                    viewport,
+                    context,
+                )
             }
             Section::Overlay => {
                 let (tile, palette) = match self.editing {
@@ -666,6 +728,13 @@ impl ConfigApp {
                 {
                     return;
                 }
+                // Same for a style with no name, or one another already has.
+                if close == EditorClose::Keep
+                    && let Some(Editing::FinderStyle { index, .. }) = self.editing
+                    && finder::style_problem(&settings.finder, index).is_some()
+                {
+                    return;
+                }
                 if let (Some(editing), EditorClose::Revert) = (self.editing.take(), close) {
                     match editing {
                         Editing::MouseShortcut { index, original } => {
@@ -682,6 +751,10 @@ impl ConfigApp {
                         }
                         Editing::Palette { field, original } => {
                             *field.get_mut(&mut settings.overlay.palette) = original
+                        }
+                        Editing::FinderBase { original } => settings.finder.look = original,
+                        Editing::FinderStyle { index, original } => {
+                            settings.finder.styles[index] = original
                         }
                     }
                 }
@@ -712,8 +785,21 @@ impl ConfigApp {
             }
 
             Msg::HotkeyActionChanged(index, Some(choice)) => {
-                settings.hotkeys[index].action = hotkeys::ACTIONS[choice];
+                let binding = &mut settings.hotkeys[index];
+                binding.action = hotkeys::ACTIONS[choice];
+                // Only `find-mouse` has a style; y-snap warns about one
+                // anywhere else.
+                if binding.action != Action::FindMouse {
+                    binding.style = None;
+                }
                 self.dirty = true;
+            }
+            Msg::HotkeyStyleChanged(index, Some(choice)) => {
+                let style = finder::style_from_choice(choice);
+                if settings.hotkeys[index].style != style {
+                    settings.hotkeys[index].style = style;
+                    self.dirty = true;
+                }
             }
             Msg::HotkeyTargetChanged(index, Some(choice)) => {
                 settings.hotkeys[index].target = hotkeys::TARGETS[choice];
@@ -743,6 +829,7 @@ impl ConfigApp {
                     action: Action::Minimize,
                     target: Target::Focused,
                     desktop: 0,
+                    style: None,
                     steal: false,
                 });
                 self.dirty = true;
@@ -819,6 +906,16 @@ impl ConfigApp {
                 let shortcut = &mut settings.mouse_shortcuts[index];
                 if shortcut.action != action {
                     shortcut.action = action;
+                    if action != Action::FindMouse {
+                        shortcut.style = None;
+                    }
+                    self.dirty = true;
+                }
+            }
+            Msg::MouseShortcutStyleChanged(index, Some(choice)) => {
+                let style = finder::style_from_choice(choice);
+                if settings.mouse_shortcuts[index].style != style {
+                    settings.mouse_shortcuts[index].style = style;
                     self.dirty = true;
                 }
             }
@@ -835,6 +932,117 @@ impl ConfigApp {
                 let shortcut = &mut settings.mouse_shortcuts[index];
                 if shortcut.desktop != desktop {
                     shortcut.desktop = desktop;
+                    self.dirty = true;
+                }
+            }
+
+            Msg::FinderColorToggled => self.finder_color_open = !self.finder_color_open,
+            Msg::EditFinderBase => {
+                self.finder_color_open = false;
+                self.reordering = None;
+                let reopen = !matches!(self.editing, Some(Editing::FinderBase { .. }));
+                self.editing = None;
+                if reopen {
+                    let original = settings.finder.look;
+                    self.editing = Some(Editing::FinderBase { original });
+                }
+            }
+            Msg::EditFinderStyle(index) => {
+                self.finder_color_open = false;
+                self.reordering = None;
+                let reopen = !matches!(self.editing, Some(Editing::FinderStyle { index: open, .. }) if open == index);
+                self.editing = None;
+                if reopen {
+                    let original = settings.finder.styles[index].clone();
+                    self.editing = Some(Editing::FinderStyle { index, original });
+                }
+            }
+            Msg::FinderGuardToggled(on) => {
+                if settings.finder.guard != on {
+                    settings.finder.guard = on;
+                    self.dirty = true;
+                }
+            }
+            Msg::FinderExcludeDraft(text) => self.finder_exclude = text,
+            Msg::FinderExcludeAdded => {
+                if finder::add_exclude(&mut settings.finder, &self.finder_exclude) {
+                    self.finder_exclude.clear();
+                    self.dirty = true;
+                }
+            }
+            Msg::FinderExcludeRemoved(index) => {
+                if index < settings.finder.exclude.len() {
+                    settings.finder.exclude.remove(index);
+                    self.dirty = true;
+                }
+            }
+            Msg::FinderStyleAdded => {
+                let index = finder::add_style(&mut settings.finder);
+                self.dirty = true;
+                self.editing = None;
+                self.edit(Msg::EditFinderStyle(index));
+            }
+            Msg::FinderStyleDeleted(index) => {
+                self.editing = None;
+                finder::delete_style(settings, index);
+                self.dirty = true;
+            }
+            Msg::FinderStyleDefault(index) => {
+                if settings.finder.default_style != index {
+                    settings.finder.default_style = index;
+                    self.dirty = true;
+                }
+            }
+            Msg::FinderStyleName(index, name) => {
+                let style = &mut settings.finder.styles[index];
+                if style.name != name {
+                    style.name = name;
+                    self.dirty = true;
+                }
+            }
+            Msg::FinderLook(target, edit) => {
+                let look = match target {
+                    LookTarget::Base => &mut settings.finder.look,
+                    LookTarget::Style(index) => &mut settings.finder.styles[index].look,
+                };
+                if finder::apply_look(look, edit) {
+                    self.dirty = true;
+                }
+            }
+            Msg::FinderTapAdded(index) => {
+                settings.finder.styles[index].taps.push(Tap::new(TapKey::Ctrl));
+                self.dirty = true;
+            }
+            Msg::FinderTapDeleted(index, tap) => {
+                let taps = &mut settings.finder.styles[index].taps;
+                if tap < taps.len() {
+                    taps.remove(tap);
+                    self.dirty = true;
+                }
+            }
+            Msg::FinderTap(index, tap, edit) => {
+                if let Some(tap) = settings.finder.styles[index].taps.get_mut(tap)
+                    && finder::apply_tap(tap, edit)
+                {
+                    self.dirty = true;
+                }
+            }
+            Msg::FinderShakeAdded(index) => {
+                let shake = Shake::new(HOT_KEY_MODIFIERS(0));
+                settings.finder.styles[index].shakes.push(shake);
+                self.dirty = true;
+            }
+            Msg::FinderShakeDeleted(index, shake) => {
+                let shakes = &mut settings.finder.styles[index].shakes;
+                if shake < shakes.len() {
+                    shakes.remove(shake);
+                    self.dirty = true;
+                }
+            }
+            Msg::FinderShake(index, shake, edit) => {
+                if let Some(shake) = settings.finder.styles[index].shakes.get_mut(shake)
+                    && finder::apply_shake(shake, edit)
+                {
                     self.dirty = true;
                 }
             }
@@ -1129,6 +1337,14 @@ impl ConfigApp {
                     "the open mouse shortcut has a problem — fix or cancel it first".to_owned(),
                 );
             }
+            Msg::Save
+                if matches!(self.editing, Some(Editing::FinderStyle { index, .. })
+                    if finder::style_problem(&settings.finder, index).is_some()) =>
+            {
+                self.save_error = Some(
+                    "the open finder style has a problem — fix or cancel it first".to_owned(),
+                );
+            }
             Msg::Save => match settings.save() {
                 Ok(()) => {
                     self.dirty = false;
@@ -1146,6 +1362,8 @@ impl ConfigApp {
             // A control reporting "nothing selected"/"empty" leaves the
             // value as it was.
             Msg::HotkeyActionChanged(_, None)
+            | Msg::HotkeyStyleChanged(_, None)
+            | Msg::MouseShortcutStyleChanged(_, None)
             | Msg::HotkeyTargetChanged(_, None)
             | Msg::HotkeyDesktopChanged(_, None)
             | Msg::GestureButtonChanged(_, None)

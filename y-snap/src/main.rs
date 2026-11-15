@@ -13,6 +13,11 @@
 
 mod about;
 mod actions;
+mod finder;
+mod finder_detect;
+mod finder_input;
+mod finder_overlay;
+mod guard;
 mod hidden;
 mod min_overlay;
 mod mouse;
@@ -62,6 +67,7 @@ const IDM_RESTORE_ALL: u32 = IDM_FIRST + 5;
 const IDM_ENTRY_OPEN: u32 = IDM_FIRST + 6;
 const IDM_ENTRY_CLOSE: u32 = IDM_FIRST + 7;
 const IDM_STARTUP: u32 = IDM_FIRST + 8;
+const IDM_FIND_MOUSE: u32 = IDM_FIRST + 9;
 
 /// How many warnings a balloon shows before giving up and pointing at the
 /// file. A notification the user cannot read is a notification wasted.
@@ -81,6 +87,10 @@ struct YSnap {
     /// The keyboard-driven action overlay. Same reason: its grid is laid
     /// out from `settings.overlay` once, at construction.
     action_overlay: Option<overlay::ActionOverlay>,
+    /// The mouse finder's animation; its window exists only while it plays.
+    finder: finder::Player,
+    /// The hooks behind the finder's automatic triggers, when any is declared.
+    finder_input: Option<finder_input::FinderInput>,
     settings: Option<Settings>,
     /// Why there is no configuration, when there is none. Shown in the menu,
     /// because a balloon at start-up is gone by the time the user looks.
@@ -118,6 +128,8 @@ impl YSnap {
             mouse_hook: None,
             min_overlay: None,
             action_overlay: None,
+            finder: finder::Player::new(HWND::default()),
+            finder_input: None,
             settings: None,
             problem: None,
             reload_message: ipc::reload_message(),
@@ -133,6 +145,8 @@ impl YSnap {
         self.mouse_hook = None;
         self.min_overlay = None;
         self.action_overlay = None;
+        self.finder.stop();
+        self.finder_input = None;
         self.settings = None;
         self.problem = None;
         // Icons, fonts and colours may all be about to change.
@@ -185,6 +199,7 @@ impl YSnap {
             settings.min_button.columns,
         ));
         self.action_overlay = Some(overlay::ActionOverlay::new(hwnd, settings.overlay.clone()));
+        self.finder_input = finder_input::FinderInput::install(hwnd, &settings.finder);
 
         self.report(&settings, &refused);
         self.hotkeys = Some(manager);
@@ -294,13 +309,19 @@ impl YSnap {
             return;
         };
 
+        // A confined pointer (a game in play): y-snap is suspended. Leaving
+        // and reloading stay possible.
+        if guard::confined() && !matches!(binding.action, Action::Quit | Action::Reload) {
+            return;
+        }
+
         let window = binding
             .action
             .needs_window()
             .then(|| y_core::target::resolve(binding.target))
             .flatten();
 
-        self.fire(hwnd, binding.action, window, binding.desktop, false);
+        self.fire(hwnd, binding.action, window, binding.desktop, binding.style, false);
     }
 
     /// A mouse shortcut fired. The hook already chose the window, at the
@@ -325,7 +346,7 @@ impl YSnap {
         } else {
             None
         };
-        self.fire(hwnd, binding.action, window, binding.desktop, true);
+        self.fire(hwnd, binding.action, window, binding.desktop, binding.style, true);
     }
 
     /// Does `action`, whichever way it was triggered. `window` is the
@@ -338,11 +359,13 @@ impl YSnap {
         action: Action,
         window: Option<HWND>,
         desktop: u32,
+        style: Option<u16>,
         from_mouse: bool,
     ) {
         match action {
             Action::Quit => self.quit(hwnd),
             Action::Reload => self.load(hwnd),
+            Action::FindMouse => self.find_mouse(style),
 
             // Needs the owner window and the overlay's own state, not just
             // a target — same reason Quit/Reload are handled here rather
@@ -360,6 +383,35 @@ impl YSnap {
         }
     }
 
+    /// An automatic trigger fired: plays the style unless the guard says the
+    /// user is busy with something else, see [`guard`].
+    fn on_finder_trigger(&mut self, style: u16) {
+        let Some(settings) = self.settings.as_ref() else {
+            return;
+        };
+        let pointer = monitor::cursor_position().unwrap_or_default();
+        let signals = guard::read(pointer);
+        if guard::blocks(&signals, &settings.finder.exclude, settings.finder.guard).is_some() {
+            return;
+        }
+        self.find_mouse(Some(style));
+    }
+
+    /// Plays a finder style around the pointer: the one a binding named, the
+    /// default one otherwise, the built-in look when there are no styles. An
+    /// explicit request always shows, whatever the guard says.
+    fn find_mouse(&mut self, style: Option<u16>) {
+        let Some(settings) = self.settings.as_ref() else {
+            return;
+        };
+        let finder = &settings.finder;
+        let style = match style.and_then(|index| finder.styles.get(index as usize)) {
+            Some(style) => style.clone(),
+            None => finder.style(None),
+        };
+        self.finder.play(&style);
+    }
+
     /// Runs `action` on `target` and tells the user when it is not written
     /// yet — the one thing a hotkey and a minimize-button tile both need.
     /// `desktop` is the 1-based `desktop` attribute, `0` for a caller with
@@ -370,6 +422,7 @@ impl YSnap {
         match action {
             Action::Iconize => return self.hide(target, Mode::Iconized),
             Action::Traynize => return self.hide(target, Mode::Traynized),
+            Action::FindMouse => return self.find_mouse(None),
             Action::Uniconize => return self.hidden.restore_last(),
             Action::UniconizeAll => return self.hidden.restore_all(),
             _ => {}
@@ -561,6 +614,9 @@ impl YSnap {
             (None, None) => {}
         }
 
+        let _ = menu.add_item(IDM_FIND_MOUSE, "Find the mouse pointer");
+        let _ = menu.add_separator();
+
         // Kept in a submenu so the tray menu itself stays short.
         if let Ok(configuration) = PopupMenu::new() {
             let _ = configuration.add_item(IDM_SETTINGS, "Settings…");
@@ -576,6 +632,7 @@ impl YSnap {
         let _ = menu.add_item(IDM_EXIT, "Exit");
 
         match menu.track(hwnd, position) {
+            Some(IDM_FIND_MOUSE) => self.find_mouse(None),
             Some(IDM_SETTINGS) => self.open_settings(),
             Some(IDM_RELOAD) => self.load(hwnd),
             Some(IDM_OPEN_CONFIG) => self.open_config(),
@@ -745,6 +802,7 @@ fn shell_open(path: &std::path::Path) {
 impl TrayApp for YSnap {
     fn on_create(&mut self, hwnd: HWND) -> Result<()> {
         self.owner = hwnd;
+        self.finder = finder::Player::new(hwnd);
         self.tray = Some(TrayIcon::new(
             hwnd,
             TRAY_ICON_ID,
@@ -851,6 +909,16 @@ impl TrayApp for YSnap {
                 Some(LRESULT(0))
             }
 
+            finder_input::WM_FINDER_TRIGGER => {
+                self.on_finder_trigger(wparam.0 as u16);
+                Some(LRESULT(0))
+            }
+
+            WM_TIMER if wparam.0 == finder::TIMER_ID => {
+                self.finder.tick();
+                Some(LRESULT(0))
+            }
+
             WM_TIMER if wparam.0 == hidden::PURGE_TIMER_ID => {
                 self.hidden.purge();
                 Some(LRESULT(0))
@@ -912,6 +980,8 @@ impl TrayApp for YSnap {
         self.mouse_hook = None;
         self.min_overlay = None;
         self.action_overlay = None;
+        self.finder.stop();
+        self.finder_input = None;
         // A paint may have run since the last close. Left to process exit,
         // tearing Direct2D/DirectWrite down takes seconds once anything has
         // been drawn.

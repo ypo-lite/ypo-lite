@@ -18,6 +18,8 @@ pub enum Action {
     Reload,
     /// Quit y-snap.
     Quit,
+    /// Show where the mouse pointer is, with the `<finder>` indicator.
+    FindMouse,
 
     // The target window.
     Minimize,
@@ -95,6 +97,7 @@ impl Action {
             "overlay" => Self::Overlay,
             "reload" => Self::Reload,
             "quit" => Self::Quit,
+            "find-mouse" => Self::FindMouse,
 
             "minimize" => Self::Minimize,
             "maximize" => Self::Maximize,
@@ -139,6 +142,7 @@ impl Action {
             Self::Overlay => "overlay",
             Self::Reload => "reload",
             Self::Quit => "quit",
+            Self::FindMouse => "find-mouse",
             Self::Minimize => "minimize",
             Self::Maximize => "maximize",
             Self::Close => "close",
@@ -179,6 +183,7 @@ impl Action {
             self,
             Self::Reload
                 | Self::Quit
+                | Self::FindMouse
                 | Self::Uniconize
                 | Self::UniconizeAll
                 | Self::DesktopNext
@@ -218,6 +223,7 @@ mod tests {
             Action::Overlay,
             Action::Reload,
             Action::Quit,
+            Action::FindMouse,
             Action::Minimize,
             Action::Maximize,
             Action::Close,

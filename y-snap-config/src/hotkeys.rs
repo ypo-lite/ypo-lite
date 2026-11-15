@@ -2,6 +2,7 @@
 //! to one [`Action`]. A row's Key cell opens the key picker right under
 //! that row ([`Row::detail`]).
 
+use crate::finder::style_combo;
 use crate::key_events;
 use crate::reorder::{list_footer, row_actions};
 use crate::ui::key_picker::{KeyPickerUi, combo_labels, key_picker};
@@ -9,14 +10,15 @@ use crate::ui::prelude::*;
 use crate::{ConfigApp, EditorClose, ListKind, Msg};
 use windows_reactor::*;
 use y_snap::action::{Action, Target};
-use y_snap::config::Binding;
+use y_snap::config::{Binding, Finder};
 
 /// Every [`Action`] a hotkey (or gesture) can be bound to, in combo-box
 /// order. Not [`Action::DesktopList`] — see [`crate::overlay::OVERLAY_ACTIONS`].
-pub const ACTIONS: [Action; 30] = [
+pub const ACTIONS: [Action; 31] = [
     Action::Overlay,
     Action::Reload,
     Action::Quit,
+    Action::FindMouse,
     Action::Minimize,
     Action::Maximize,
     Action::Close,
@@ -51,7 +53,7 @@ pub const TARGETS: [Target; 2] = [Target::Focused, Target::Pointed];
 const COLUMNS: [Column; 6] = [
     Column::flex("Key", 150.0),
     Column::flex("Action", 150.0),
-    Column::flex("Target", 100.0),
+    Column::flex("Target / style", 100.0),
     Column::fixed("Desktop", 96.0),
     Column::fixed("Steal from shell", 72.0),
     // Room for the ↑/↓ pair while reordering; one delete button otherwise.
@@ -60,6 +62,7 @@ const COLUMNS: [Column; 6] = [
 
 pub fn hotkeys_view(
     hotkeys: &[Binding],
+    finder: &Finder,
     editing: Option<usize>,
     reordering: bool,
     picker: &KeyPickerUi,
@@ -86,7 +89,7 @@ pub fn hotkeys_view(
         });
         Row::new(
             index.to_string(),
-            cells(index, binding, hotkeys.len(), reordering, context),
+            cells(index, binding, finder, hotkeys.len(), reordering, context),
         )
         .detail(detail)
     });
@@ -121,6 +124,7 @@ pub fn hotkeys_view(
 fn cells(
     index: usize,
     binding: &Binding,
+    finder: &Finder,
     count: usize,
     reordering: bool,
     context: &ViewContext<ConfigApp>,
@@ -137,6 +141,23 @@ fn cells(
             false,
         ))
         .tooltip("Change the key combination");
+
+    // `find-mouse` acts on no window, so Target means nothing to it: that cell
+    // picks the finder style instead.
+    let target_or_style: View = if binding.action == Action::FindMouse {
+        style_combo(
+            finder,
+            binding.style,
+            context.callback(move |c| Msg::HotkeyStyleChanged(index, c)),
+        )
+    } else {
+        combo(
+            TARGETS.map(Target::name),
+            target,
+            context.callback(move |c| Msg::HotkeyTargetChanged(index, c)),
+        )
+        .into()
+    };
 
     let desktop: View = if binding.action.takes_desktop() {
         number_box(
@@ -158,12 +179,7 @@ fn cells(
             context.callback(move |c| Msg::HotkeyActionChanged(index, c)),
         )
         .into(),
-        combo(
-            TARGETS.map(Target::name),
-            target,
-            context.callback(move |c| Msg::HotkeyTargetChanged(index, c)),
-        )
-        .into(),
+        target_or_style,
         desktop,
         switch(
             binding.steal,
