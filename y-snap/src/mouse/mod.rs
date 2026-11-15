@@ -216,11 +216,30 @@ pub struct MouseHook {
 }
 
 impl MouseHook {
+    /// Whether the configuration uses the mouse at all: a drag or resize
+    /// gesture, a shortcut, the minimize-button popup or right-click, or a
+    /// finder shake (`shakes`, fed by this hook). When none is, y-snap installs
+    /// no `WH_MOUSE_LL` hook and arms no watchdog, so it costs the system
+    /// nothing per mouse event.
+    pub fn needed(
+        mouse: &Mouse,
+        shortcuts: &[MouseShortcut],
+        min_button: &crate::config::MinButton,
+        shakes: bool,
+    ) -> bool {
+        mouse.drag.is_some()
+            || mouse.resize.is_some()
+            || !shortcuts.is_empty()
+            || !min_button.items.is_empty()
+            || min_button.right_click_action.is_some()
+            || shakes
+    }
+
     /// Installs the hook. `owner` is where [`WM_MIN_HOVER`] is posted, and
     /// where [`REHOOK_TIMER_ID`] and [`MIN_HOVER_TIMER_ID`] are armed.
     ///
-    /// Installs even when every gesture in `mouse` is unset: hovering the
-    /// minimize button works on its own, independent of drag/resize.
+    /// Callers check [`MouseHook::needed`] first: with nothing to watch, no
+    /// hook (and no watchdog timer) should exist at all.
     pub fn install(
         owner: HWND,
         mouse: Mouse,
@@ -446,7 +465,10 @@ impl HookState {
             gesture::Step::Monitor(window, pt) => queue_monitor(self.owner, window, pt),
             // A pinned gesture owns the pointer too: no popup meanwhile.
             gesture::Step::Claimed => {}
-            gesture::Step::Idle => self.hover.update(pt),
+            // Hit-testing every move is the costly part: skipped when neither
+            // the popup nor the right-click action is configured.
+            gesture::Step::Idle if self.hover.enabled() => self.hover.update(pt),
+            gesture::Step::Idle => {}
         }
     }
 }

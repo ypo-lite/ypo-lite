@@ -80,6 +80,12 @@ impl Hover {
         }
     }
 
+    /// Whether any minimize-button feature is configured. When not, the hook
+    /// skips [`Hover::update`] and its per-move hit test.
+    pub fn enabled(&self) -> bool {
+        self.show_popup || self.right_click_enabled
+    }
+
     /// The window currently hovered, or a null `HWND` if none is — read by
     /// [`super::take_min_hover_target`] when the dwell timer fires.
     pub fn hovered(&self) -> HWND {

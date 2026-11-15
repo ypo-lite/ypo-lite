@@ -543,7 +543,12 @@ is fine (no `<tap>`/`<shake>` means no keyboard hook, `on_move` returns at
 once, no overlay or timer). Two points remain on the **mouse hook**, which
 y-snap installs whatever the configuration. Not specified or started.
 
-- **P1: no hook when nothing needs it.**
+- **P1: no hook when nothing needs it.** *Built 2026-11-15:*
+  `MouseHook::needed` (drag, resize, shortcuts, min-button tiles or
+  right-click, finder shakes) gates the install in `YSnap::load`, which also
+  covers reload; the hover hit test is skipped per move when neither min-button
+  feature is on (`Hover::enabled`). Live check pending: an empty `y-snap.xml`
+  leaves no `WH_MOUSE_LL` hook and no timer 1.
   - If there is no finder trigger (`<shake>`) and no min-button (min overlay)
     — and, by the same reasoning, no mouse gesture and no mouse shortcut —
     the `WH_MOUSE_LL` hook (and its watchdog timer) should not be installed.

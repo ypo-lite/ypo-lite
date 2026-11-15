@@ -183,18 +183,30 @@ impl YSnap {
             }
         }
 
-        self.mouse_hook = match mouse::MouseHook::install(
-            hwnd,
-            settings.mouse,
+        // No hook, no watchdog timer, when no feature needs the mouse: an
+        // unused y-snap must not sit in the path of every pointer event.
+        let wants_shakes = settings.finder.styles.iter().any(|s| !s.shakes.is_empty());
+        self.mouse_hook = if mouse::MouseHook::needed(
+            &settings.mouse,
             &settings.mouse_shortcuts,
             &settings.min_button,
+            wants_shakes,
         ) {
-            Ok(hook) => Some(hook),
-            Err(error) => {
-                let message = format!("Could not install the mouse hook: {error}");
-                self.notify(APP.name, &message, Notify::Error);
-                None
+            match mouse::MouseHook::install(
+                hwnd,
+                settings.mouse,
+                &settings.mouse_shortcuts,
+                &settings.min_button,
+            ) {
+                Ok(hook) => Some(hook),
+                Err(error) => {
+                    let message = format!("Could not install the mouse hook: {error}");
+                    self.notify(APP.name, &message, Notify::Error);
+                    None
+                }
             }
+        } else {
+            None
         };
         self.min_overlay = Some(min_overlay::MinOverlay::new(
             hwnd,
