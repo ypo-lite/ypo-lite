@@ -143,6 +143,7 @@
 		auto-color  darken/lighten the colour to stay visible on any backdrop
 		dim         how dark the spotlight makes the screen, in % (0-100)
 		recall      "center" also moves the pointer to the active window
+		all-monitors  show it on every monitor (only the "monitor" shape for now)
 		guard       automatic triggers stay quiet while a full-screen window is on the
 		            pointer's monitor (true). While the pointer is confined (a game
 		            in play) all of y-snap is suspended, whatever this says

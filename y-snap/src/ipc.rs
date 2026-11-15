@@ -84,7 +84,7 @@ pub fn request_finder_test(look: &Look) -> bool {
 /// never moves the pointer).
 ///
 /// `wParam`: shape (bits 0–7), auto colour (8), dimming (9–15), duration in
-/// ms (16–31), size (32–47). `lParam`: the colour as `0xRRGGBB`.
+/// ms (16–31), size (32–47), all monitors (48). `lParam`: the colour as `0xRRGGBB`.
 pub fn pack_look(look: &Look) -> (usize, isize) {
     let shape = Shape::ALL
         .iter()
@@ -94,7 +94,8 @@ pub fn pack_look(look: &Look) -> (usize, isize) {
         | u64::from(look.auto_color) << 8
         | u64::from(look.dim.min(100)) << 9
         | u64::from(look.duration_ms.min(u32::from(u16::MAX))) << 16
-        | u64::from(look.size.min(u32::from(u16::MAX))) << 32;
+        | u64::from(look.size.min(u32::from(u16::MAX))) << 32
+        | u64::from(look.all_monitors) << 48;
     let color =
         u32::from(look.color.r) << 16 | u32::from(look.color.g) << 8 | u32::from(look.color.b);
     (wparam as usize, color as isize)
@@ -116,6 +117,7 @@ pub fn unpack_look(wparam: usize, lparam: isize) -> Option<Look> {
         dim: in_range(wparam >> 9 & 0x7F, finder_range::DIM)?,
         duration_ms: in_range(wparam >> 16 & 0xFFFF, finder_range::DURATION_MS)?,
         size: in_range(wparam >> 32 & 0xFFFF, finder_range::SIZE)?,
+        all_monitors: wparam >> 48 & 1 == 1,
         color: Color::rgb((color >> 16) as u8, (color >> 8) as u8, color as u8),
         ..Look::default()
     })
@@ -134,6 +136,7 @@ mod tests {
             color: Color::rgb(1, 2, 3),
             auto_color: true,
             dim: 80,
+            all_monitors: true,
             ..Look::default()
         };
         let (w, l) = pack_look(&look);

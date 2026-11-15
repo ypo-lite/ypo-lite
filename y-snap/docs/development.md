@@ -26,14 +26,14 @@ cargo test -p y-snap config::tests::the_default_configuration_is_valid  # one te
 | `mouse/` | the low-level mouse hook: drag, resize (`gesture`), minimize-button hover (`hover`), mouse shortcuts (`shortcut`, a pure state machine) |
 | `min_overlay.rs` | the minimize-button popup, and turning a click into an action |
 | `overlay.rs` | the action overlay: tile grid, hover, click, key, focus-driven close |
-| `finder.rs` | the mouse finder's player: one style around the pointer, a timer only while it plays |
+| `finder.rs` | the mouse finder's player: one style around the pointer (or, with `all-monitors`, the map on each monitor), a timer only while it plays. In the library, like `finder_overlay.rs` |
 | `finder_overlay.rs` | its drawing: the seven shapes, and reading what is behind (backdrop brightness, auto colour) |
 | `finder_detect.rs` | taps and shakes recognised from key and move events, pure and tested |
 | `finder_input.rs` | the hooks that feed it, and the message posted on a hit |
 | `guard.rs` | when y-snap stays out of the way: confined pointer, full-screen window, excluded application |
 | `config/finder.rs` | `<finder>`: styles, triggers, ranges, the writer |
 
-`action`, `config` and `ipc` are the `y_snap` library, so `y-snap-config` reads
+`action`, `config`, `ipc`, `finder` and `finder_overlay` are the `y_snap` library, so `y-snap-config` reads
 and writes the same `Settings` without linking the message loop or the hooks. The
 rest is the binary. Everything Win32 that is not specific to window management
 (the hidden message window, the tray icon, menus, hotkey registration, the XML
@@ -118,3 +118,10 @@ opt-in cache file planned for that.
 **Talking to the running app.** `y-snap-config` asks for a reload with a registered
 window message broadcast to top-level windows, which is why y-snap's main window
 is a hidden top-level window rather than a message-only one. See `ipc.rs`.
+
+**Trying a finder look.** `cargo run -p y-snap --example finder_lab` plays the real
+`finder::Player` from a console: take a style of `y-snap.xml` (`style <name>`,
+`reload` after editing the file), change it (`set shape=monitor all-monitors=true`),
+play it (empty line, or `in 3` to move the pointer first) and print the attributes to
+paste back (`show`). `help` lists the commands. It plays looks only: taps, shakes and
+`recall` are tried in the application.

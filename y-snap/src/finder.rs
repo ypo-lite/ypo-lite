@@ -76,6 +76,41 @@ struct Run {
     /// Frames shown on this surface, so that a monitor-sized one is pushed in
     /// full once and only refreshed after.
     shown: u32,
+    /// With `all-monitors`, a surface on each of the other monitors, drawn
+    /// with the same frame. Rebuilt when the pointer changes monitor, as the
+    /// "other" ones are then different.
+    extras: Vec<Extra>,
+}
+
+/// A surface on a monitor the pointer is not on.
+struct Extra {
+    overlay: Overlay,
+    size: (i32, i32),
+    scale: f32,
+    origin: POINT,
+    shown: u32,
+}
+
+/// One surface on every monitor but `current`, when the look asks for it and
+/// its shape can.
+fn extras(look: &Look, current: &Monitor, monitors: &[Monitor]) -> Vec<Extra> {
+    if !docked(look) {
+        return Vec::new();
+    }
+    monitors
+        .iter()
+        .filter(|m| m.bounds != current.bounds)
+        .filter_map(|m| {
+            let (overlay, size, _, scale) = surface(look, m, monitors)?;
+            Some(Extra {
+                overlay,
+                size,
+                scale,
+                origin: paint::map_panel_origin(m.bounds, size, scale),
+                shown: 0,
+            })
+        })
+        .collect()
 }
 
 impl Player {
@@ -93,11 +128,13 @@ impl Player {
         monitor::sort_spatially(&mut monitors);
 
         let look = style.look;
-        let Some((overlay, size, radius, scale)) = surface(&look, &monitor) else {
+        let Some((overlay, size, radius, scale)) = surface(&look, &monitor, &monitors) else {
             return;
         };
+        let extras = extras(&look, &monitor, &monitors);
         self.run = Some(Run {
             look,
+            extras,
             overlay,
             size,
             radius,
@@ -143,12 +180,25 @@ impl Drop for Player {
     }
 }
 
-/// A surface for `look` on `monitor`: small around the pointer, or covering
-/// the monitor. Returns the radius and scale it was sized for.
-fn surface(look: &Look, monitor: &Monitor) -> Option<(Overlay, (i32, i32), f32, f32)> {
+/// Whether the look shows on every monitor, each with a small surface holding
+/// only the map panel: no border around the monitor, so little memory.
+fn docked(look: &Look) -> bool {
+    look.all_monitors && look.shape.spreads()
+}
+
+/// A surface for `look` on `monitor`: small around the pointer, docked to the
+/// monitor's map position, or covering the monitor. Returns the radius and
+/// scale it was sized for.
+fn surface(
+    look: &Look,
+    monitor: &Monitor,
+    all: &[Monitor],
+) -> Option<(Overlay, (i32, i32), f32, f32)> {
     let scale = monitor.dpi as f32 / 96.0;
     let radius = look.size as f32 * scale;
-    let size = if paint::is_small(look.shape) {
+    let size = if docked(look) {
+        paint::map_panel_size(all, scale)
+    } else if paint::is_small(look.shape) {
         let side = (radius * 2.6).ceil() as i32;
         (side, side)
     } else {
@@ -170,20 +220,25 @@ impl Run {
         // has to follow it, so build a new one there.
         let current = Monitor::from_point(pointer);
         if (current.bounds != self.monitor.bounds || current.dpi != self.monitor.dpi)
-            && let Some((overlay, size, radius, scale)) = surface(&self.look, &current)
+            && let Some((overlay, size, radius, scale)) =
+                surface(&self.look, &current, &self.monitors)
         {
             self.overlay = overlay;
             self.size = size;
             self.radius = radius;
             self.scale = scale;
             self.monitor = current;
+            self.extras = extras(&self.look, &self.monitor, &self.monitors);
             self.capture = None;
             self.shown = 0;
         }
 
         let small = paint::is_small(self.look.shape);
         let (w, h) = self.size;
-        let origin = if small {
+        let docked = docked(&self.look);
+        let origin = if docked {
+            paint::map_panel_origin(self.monitor.bounds, self.size, self.scale)
+        } else if small {
             POINT {
                 x: pointer.x - w / 2,
                 y: pointer.y - h / 2,
@@ -207,6 +262,7 @@ impl Run {
             dim: self.look.dim as f32 / 100.0,
             monitors: &self.monitors,
             bounds: self.monitor.bounds,
+            docked,
             pointer,
             backdrop: &self.backdrop,
             lum: self.lum,
@@ -217,6 +273,25 @@ impl Run {
         let canvas = self.overlay.canvas_mut();
         canvas.clear(Color::TRANSPARENT);
         paint::draw(canvas.pixels_mut(), (w, h), centre, &frame);
+
+        // The same map panel on the other monitors, at their own scale (see
+        // `Shape::spreads`); the map does not use the pointer's position on
+        // the surface.
+        for extra in &mut self.extras {
+            let other = Frame {
+                scale: extra.scale,
+                ..frame
+            };
+            let canvas = extra.overlay.canvas_mut();
+            canvas.clear(Color::TRANSPARENT);
+            paint::draw(canvas.pixels_mut(), extra.size, centre, &other);
+            let _ = if extra.shown == 0 {
+                extra.overlay.show_at(extra.origin)
+            } else {
+                extra.overlay.refresh()
+            };
+            extra.shown += 1;
+        }
 
         // A small surface moves with the pointer, so it is placed every time;
         // a monitor-sized one stays put and is only refreshed.

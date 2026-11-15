@@ -216,6 +216,7 @@ of the look attributes.
 | `size` | `160` | the radius in device-independent pixels (40–600) |
 | `color` | `#FFB000` | `#RRGGBB` |
 | `auto-color` | `false` | darken the colour on a light backdrop and lighten it on a dark one, so it never melts into what is behind |
+| `all-monitors` | `false` | show the indicator on every monitor, not only the pointer's, with one small overlay window per monitor while it plays. Only `monitor` honours it for now: each screen shows just the map panel (no border around the monitor, which keeps the surfaces small); the other shapes ignore it |
 | `dim` | `60` | how dark `spotlight` makes the screen, in percent (0–100) |
 | `recall` | `none` | `center` also moves the pointer to the middle of the focused application window before the indicator plays. With no such window the pointer stays where it is |
 | `guard` | `true` | automatic triggers stay quiet while a full-screen window is on the pointer's monitor, see [When it stays quiet](#when-it-stays-quiet). `<finder>` only, not a style |
@@ -248,7 +249,7 @@ application, for all styles.
 | --- | --- |
 | `name` | required, unique. What a `style="…"` on a hotkey or shortcut refers to |
 | `default` | `true` marks the style `find-mouse` plays when it names none. The first style is the default otherwise |
-| the look attributes | `shape`, `duration`, `size`, `color`, `auto-color`, `dim`, `recall`, each overriding `<finder>`'s |
+| the look attributes | `shape`, `duration`, `size`, `color`, `auto-color`, `dim`, `recall`, `all-monitors`, each overriding `<finder>`'s |
 
 A style holds any number of `<tap>` and `<shake>` elements. A second `default`, a
 style without a name, a second style of the same name, and a trigger declared

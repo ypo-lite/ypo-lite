@@ -83,6 +83,14 @@ impl Shape {
     pub fn is_persistent(self) -> bool {
         matches!(self, Self::Halo | Self::Negative | Self::Contrast)
     }
+
+    /// Whether `all-monitors` does something for the shape. Only the monitor
+    /// map for now: it reads the same on every screen. Spotlight and
+    /// crosshair first need a "the pointer is over there" cue for the other
+    /// monitors, still to be designed.
+    pub fn spreads(self) -> bool {
+        matches!(self, Self::Monitor)
+    }
 }
 
 impl fmt::Display for Shape {
@@ -134,6 +142,9 @@ pub struct Look {
     /// How dark the spotlight makes the screen, in percent.
     pub dim: u32,
     pub recall: Recall,
+    /// Show the indicator on every monitor, not only the pointer's. Only the
+    /// shapes that [`Shape::spreads`] honour it; the others ignore it.
+    pub all_monitors: bool,
 }
 
 impl Default for Look {
@@ -146,6 +157,7 @@ impl Default for Look {
             auto_color: false,
             dim: 60,
             recall: Recall::None,
+            all_monitors: false,
         }
     }
 }
@@ -413,6 +425,7 @@ const FINDER: &[&str] = &[
     "auto-color",
     "dim",
     "recall",
+    "all-monitors",
     "guard",
 ];
 const STYLE: &[&str] = &[
@@ -423,6 +436,7 @@ const STYLE: &[&str] = &[
     "auto-color",
     "dim",
     "recall",
+    "all-monitors",
     "name",
     "default",
 ];
@@ -561,6 +575,7 @@ impl Reader {
         self.ranged(element, "size", &mut look.size, range::SIZE);
         self.ranged(element, "dim", &mut look.dim, range::DIM);
         self.flag(element, "auto-color", &mut look.auto_color);
+        self.flag(element, "all-monitors", &mut look.all_monitors);
         if let Some(text) = element.attr("color") {
             match Color::parse(text) {
                 Some(color) => look.color = color,
@@ -815,6 +830,9 @@ fn write_look(out: &mut String, look: &Look, base: &Look) {
     }
     if look.recall != base.recall {
         put("recall", look.recall.name().to_owned());
+    }
+    if look.all_monitors != base.all_monitors {
+        put("all-monitors", look.all_monitors.to_string());
     }
 }
 
@@ -1150,6 +1168,7 @@ mod tests {
         let mut quick = Style::new("quick", finder.look);
         quick.look.shape = Shape::Halo;
         quick.look.auto_color = true;
+        quick.look.all_monitors = true;
         quick.taps.push(Tap::new(TapKey::Ctrl));
         let mut shake = Shake::new(MOD_CONTROL);
         shake.speed = 900;
@@ -1168,7 +1187,9 @@ mod tests {
 
         let xml = settings.to_xml();
         assert!(
-            xml.contains("<style name=\"quick\" shape=\"halo\" auto-color=\"true\">"),
+            xml.contains(
+                "<style name=\"quick\" shape=\"halo\" auto-color=\"true\" all-monitors=\"true\">"
+            ),
             "{xml}"
         );
         assert!(xml.contains("speed=\"900\""), "{xml}");

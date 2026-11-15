@@ -48,6 +48,7 @@ pub enum LookEdit {
     Dim(Option<f64>),
     Recall(Option<usize>),
     AutoColor(bool),
+    AllMonitors(bool),
     Color(Color),
 }
 
@@ -180,6 +181,7 @@ pub fn apply_look(look: &mut Look, edit: LookEdit) -> bool {
         }
         LookEdit::Recall(None) => {}
         LookEdit::AutoColor(on) => look.auto_color = on,
+        LookEdit::AllMonitors(on) => look.all_monitors = on,
         LookEdit::Color(color) => {
             // The picker has no alpha here: an indicator is always opaque.
             let mut color = from_ui_color(color);
@@ -852,9 +854,18 @@ fn look_editor(
         .is_persistent()
         .then(|| note("This shape stays up, for four times the duration (ten seconds at most)."));
 
+    let spread = look.shape.spreads().then(|| -> View {
+        labeled_switch(
+            "Show it on every monitor",
+            look.all_monitors,
+            context.callback(move |on| Msg::FinderLook(target, LookEdit::AllMonitors(on))),
+        )
+    });
+
     Stack::vertical(space::M)
         .child("fields", fields.build(viewport))
         .maybe("persistent", persistent)
+        .maybe("spread", spread)
         .child(
             "auto",
             labeled_switch(

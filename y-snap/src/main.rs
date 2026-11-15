@@ -13,10 +13,8 @@
 
 mod about;
 mod actions;
-mod finder;
 mod finder_detect;
 mod finder_input;
-mod finder_overlay;
 mod guard;
 mod hidden;
 mod min_overlay;
@@ -28,6 +26,7 @@ mod window;
 // instead, so `y-snap-config` can read and write `Settings` too — see there.
 use y_snap::action;
 use y_snap::config;
+use y_snap::finder;
 use y_snap::ipc;
 
 use windows::Win32::UI::{

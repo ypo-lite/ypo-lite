@@ -141,6 +141,9 @@ pub struct Frame<'a> {
     pub monitors: &'a [Monitor],
     /// The monitor the surface is on.
     pub bounds: RECT,
+    /// The surface holds only the map panel (the `monitor` shape on every
+    /// monitor), not the whole monitor.
+    pub docked: bool,
     pub pointer: POINT,
     /// The screen behind a small surface, same size as it (the shapes that
     /// read it only).
@@ -306,7 +309,90 @@ pub fn draw(pixels: &mut [u32], (w, h): (i32, i32), centre: (f32, f32), f: &Fram
     }
 }
 
+/// How the map of the monitors is laid out: the desktop's bounding box, the
+/// scale from desktop pixels to map pixels, the map's size and its padding.
+#[derive(Clone, Copy)]
+struct MapGeometry {
+    union: RECT,
+    k: f32,
+    w: f32,
+    h: f32,
+    pad: f32,
+}
+
+fn map_geometry(monitors: &[Monitor], scale: f32) -> Option<MapGeometry> {
+    let union = monitors.iter().fold(
+        RECT {
+            left: i32::MAX,
+            top: i32::MAX,
+            right: i32::MIN,
+            bottom: i32::MIN,
+        },
+        |u, m| RECT {
+            left: u.left.min(m.bounds.left),
+            top: u.top.min(m.bounds.top),
+            right: u.right.max(m.bounds.right),
+            bottom: u.bottom.max(m.bounds.bottom),
+        },
+    );
+    if union.right <= union.left || union.bottom <= union.top {
+        return None;
+    }
+    let (uw, uh) = (
+        (union.right - union.left) as f32,
+        (union.bottom - union.top) as f32,
+    );
+    let k = ((380.0 * scale) / uw).min((200.0 * scale) / uh);
+    Some(MapGeometry {
+        union,
+        k,
+        w: uw * k,
+        h: uh * k,
+        pad: 16.0 * scale,
+    })
+}
+
+/// The size of a surface that holds only the map panel (the `all-monitors`
+/// layout), so that a monitor that is not the pointer's costs little.
+pub fn map_panel_size(monitors: &[Monitor], scale: f32) -> (i32, i32) {
+    match map_geometry(monitors, scale) {
+        Some(g) => (
+            (g.w + 2.0 * g.pad).ceil() as i32,
+            (g.h + 2.0 * g.pad).ceil() as i32,
+        ),
+        None => (1, 1),
+    }
+}
+
+/// Where the map panel's top left goes on a monitor: centred, a fifth of the
+/// way down. Used to place the small surface so the map sits where the
+/// full-monitor layout would have put it.
+pub fn map_panel_origin(bounds: RECT, panel: (i32, i32), scale: f32) -> POINT {
+    POINT {
+        x: bounds.left + ((bounds.right - bounds.left) - panel.0) / 2,
+        y: bounds.top + ((bounds.bottom - bounds.top) as f32 * 0.22 - 16.0 * scale) as i32,
+    }
+}
+
 fn draw_monitor(s: &mut Surface<'_>, f: &Frame<'_>, fade: f32) {
+    let (w, h) = (s.w, s.h);
+    // Docked: the surface is the map panel itself, with no border around the
+    // monitor.
+    if !f.docked {
+        draw_border(s, f, fade);
+    }
+    let Some(g) = map_geometry(f.monitors, f.scale) else {
+        return;
+    };
+    let (mx, my) = if f.docked {
+        (g.pad, g.pad)
+    } else {
+        (w as f32 / 2.0 - g.w / 2.0, h as f32 * 0.22)
+    };
+    draw_map(s, f, fade, &g, (mx, my));
+}
+
+fn draw_border(s: &mut Surface<'_>, f: &Frame<'_>, fade: f32) {
     let (w, h) = (s.w, s.h);
     let pulse = 0.65 + 0.35 * (f.secs * std::f32::consts::TAU * 2.0).cos();
     let b = (10.0 * f.scale) as i32;
@@ -339,33 +425,18 @@ fn draw_monitor(s: &mut Surface<'_>, f: &Frame<'_>, fade: f32) {
     ] {
         s.fill_rect(rect, f.color, alpha);
     }
+}
 
-    let union = f.monitors.iter().fold(
-        RECT {
-            left: i32::MAX,
-            top: i32::MAX,
-            right: i32::MIN,
-            bottom: i32::MIN,
-        },
-        |u, m| RECT {
-            left: u.left.min(m.bounds.left),
-            top: u.top.min(m.bounds.top),
-            right: u.right.max(m.bounds.right),
-            bottom: u.bottom.max(m.bounds.bottom),
-        },
-    );
-    if union.right <= union.left || union.bottom <= union.top {
-        return;
-    }
-    let (uw, uh) = (
-        (union.right - union.left) as f32,
-        (union.bottom - union.top) as f32,
-    );
-    let (box_w, box_h) = (380.0 * f.scale, 200.0 * f.scale);
-    let k = (box_w / uw).min(box_h / uh);
-    let (map_w, map_h) = (uw * k, uh * k);
-    let pad = 16.0 * f.scale;
-    let (mx, my) = (w as f32 / 2.0 - map_w / 2.0, h as f32 * 0.22);
+/// The panel with every monitor in it, the pointer's highlighted, and the
+/// pointer as a dot; `(mx, my)` is where the map itself starts.
+fn draw_map(s: &mut Surface<'_>, f: &Frame<'_>, fade: f32, g: &MapGeometry, (mx, my): (f32, f32)) {
+    let MapGeometry {
+        union,
+        k,
+        w: map_w,
+        h: map_h,
+        pad,
+    } = *g;
     let panel = RECT {
         left: (mx - pad) as i32,
         top: (my - pad) as i32,
@@ -574,6 +645,7 @@ mod tests {
             dim: 0.6,
             monitors: &[],
             bounds: RECT::default(),
+            docked: false,
             pointer: POINT::default(),
             backdrop: &[],
             lum: 0.5,
@@ -585,6 +657,22 @@ mod tests {
         assert!(pixels.iter().any(|p| p >> 24 != 0));
         // The corner is out of reach of the effect.
         assert_eq!(pixels[0], 0);
+    }
+
+    #[test]
+    fn a_docked_map_fits_its_panel_and_draws_no_border() {
+        let panel = map_panel_size(&[], 1.0);
+        assert_eq!(panel, (1, 1), "no monitor, no map");
+
+        let bounds = RECT {
+            left: 100,
+            top: 50,
+            right: 1100,
+            bottom: 650,
+        };
+        let origin = map_panel_origin(bounds, (400, 200), 1.0);
+        assert_eq!(origin.x, 100 + (1000 - 400) / 2);
+        assert_eq!(origin.y, 50 + (600.0f32 * 0.22 - 16.0) as i32);
     }
 
     #[test]

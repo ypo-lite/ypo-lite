@@ -381,7 +381,10 @@ first, or the one marked `default="true"`.
 pointer), `crosshair` (lines across the monitor), `monitor` (the monitor flashes and a
 map shows where the others are), and three that stay up and follow the pointer: `halo`,
 `negative` (a lens showing the screen as a negative) and `contrast` (a black or white
-ring). `auto-color` keeps the colour visible on a light or a dark backdrop. The effect
+ring). `auto-color` keeps the colour visible on a light or a dark backdrop. With
+`all-monitors="true"` the `monitor` shape shows its map on every screen at once, not only
+the pointer's (a small overlay window per monitor while it plays, and no border around
+the screen); the other shapes do not use it yet. The effect
 cannot be clicked, takes no focus, and does not appear in screen recordings.
 
 **It stays quiet when you would not want it.**
