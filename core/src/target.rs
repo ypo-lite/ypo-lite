@@ -16,9 +16,9 @@ use std::fmt;
 
 use windows::Win32::Foundation::{HWND, POINT};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GA_ROOT, GWL_EXSTYLE, GetAncestor, GetClassNameW, GetCursorPos, GetDesktopWindow,
-    GetForegroundWindow, GetShellWindow, GetWindowLongW, IsWindowVisible, WS_EX_TOOLWINDOW,
-    WindowFromPoint,
+    GA_ROOT, GWL_EXSTYLE, GWL_STYLE, GetAncestor, GetClassNameW, GetCursorPos, GetDesktopWindow,
+    GetForegroundWindow, GetShellWindow, GetWindowLongW, IsWindowVisible, WS_CAPTION,
+    WS_EX_TOOLWINDOW, WindowFromPoint,
 };
 
 /// Which window an action applies to.
@@ -164,6 +164,13 @@ fn is_banished(window: HWND) -> bool {
     }
 
     // Every Ypo-Lite popup (an overlay, a HUD, a minimize button) is ours: a
-    // click or a wheel over one must not act on the popup itself.
-    class.starts_with("YpoLite.") || BANISHED.contains(&class.as_str())
+    // click or a wheel over one must not act on the popup itself. They are
+    // all captionless `WS_POPUP`s (`overlay::Overlay`). A Ypo-Lite window
+    // with a caption is an application window (y-plore's, even with its
+    // title bar drawn by itself: the style bit stays) and is fair game.
+    if class.starts_with("YpoLite.") {
+        let style = unsafe { GetWindowLongW(window, GWL_STYLE) } as u32;
+        return style & WS_CAPTION.0 != WS_CAPTION.0;
+    }
+    BANISHED.contains(&class.as_str())
 }

@@ -478,6 +478,7 @@ mod tests {
             bottom: 800,
         };
         Monitor {
+            handle: windows::Win32::Graphics::Gdi::HMONITOR::default(),
             bounds: area,
             work_area: area,
             dpi: 96,
