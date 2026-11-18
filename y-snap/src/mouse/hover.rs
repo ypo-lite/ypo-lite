@@ -238,8 +238,36 @@ pub fn confirm_min_button(window: HWND, pt: POINT) -> bool {
     match geometry::hit_test(window, pt) {
         Some(hit) if hit == HTMINBUTTON as i32 => true,
         Some(hit) if is_clearly_elsewhere(hit) => false,
-        _ => true,
+        // Inconclusive (custom title bars answer `HTCLIENT`/`HTCAPTION`): the
+        // hover region spans all caption buttons, so still refuse the close
+        // slot, which DWM can place for us.
+        _ => !in_close_slot(window, pt),
     }
+}
+
+/// Whether `pt` lies in the rightmost third of the caption-button strip as
+/// DWM reports it (`DWMWA_CAPTION_BUTTON_BOUNDS`: minimize, maximize and close
+/// are equally wide). `false` when DWM has no usable answer, so windows
+/// without one keep relying on the hit test alone.
+fn in_close_slot(window: HWND, pt: POINT) -> bool {
+    let mut bounds = RECT::default();
+    let ok = unsafe {
+        DwmGetWindowAttribute(
+            window,
+            DWMWA_CAPTION_BUTTON_BOUNDS,
+            &mut bounds as *mut RECT as *mut c_void,
+            size_of::<RECT>() as u32,
+        )
+    }
+    .is_ok();
+    let width = bounds.right - bounds.left;
+    if !ok || width <= 0 {
+        return false;
+    }
+    let Ok(frame) = geometry::window_rect(window) else {
+        return false;
+    };
+    pt.x >= frame.left + bounds.right - width / 3
 }
 
 /// Hit-test results that rule a point out of being the minimize button,
