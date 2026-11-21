@@ -124,7 +124,8 @@ fn without_mnemonic_markers(text: &[u16]) -> Vec<u16> {
 ///
 /// One match is executed straight away; several are cycled through, one per
 /// key press, starting after the highlighted item — Windows' own behaviour
-/// for duplicate mnemonics.
+/// for duplicate mnemonics. When no item has the key as its `&` mnemonic, the
+/// first letter of the labels is matched the same way (PortAL's type-to-select).
 pub fn handle_menu_char(wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
     const MNC_EXECUTE: isize = 2;
     const MNC_SELECT: isize = 3;
@@ -134,7 +135,11 @@ pub fn handle_menu_char(wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
         .next()?;
     let menu = HMENU(lparam.0 as *mut _);
 
+    // Two tiers, as in PortAL: an item whose mnemonic is the typed key wins
+    // outright; only when none has it does the key fall back to the first
+    // letter of the labels.
     let mut matches = Vec::new();
+    let mut by_initial = Vec::new();
     let mut highlighted = None;
     for index in 0..item_count(menu) {
         let mut info: MENUITEMINFOW = unsafe { std::mem::zeroed() };
@@ -153,11 +158,26 @@ pub fn handle_menu_char(wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
             continue;
         }
         let data = unsafe { &*(info.dwItemData as *const ItemData) };
-        if matches!(data.kind, ItemKind::Normal) && mnemonic(&data.text) == Some(typed) {
+        if !matches!(data.kind, ItemKind::Normal) {
+            continue;
+        }
+        if mnemonic(&data.text) == Some(typed) {
             matches.push(index);
+        }
+        let initial = without_mnemonic_markers(&data.text)
+            .first()
+            .and_then(|&unit| char::from_u32(unit as u32))
+            .and_then(|c| c.to_lowercase().next());
+        if initial == Some(typed) {
+            by_initial.push(index);
         }
     }
 
+    // A mnemonic executes (one) or cycles (several) like before; an initial
+    // letter does the same, so a single match launches and several select.
+    if matches.is_empty() {
+        matches = by_initial;
+    }
     let first = *matches.first()?;
     let (index, action) = match matches.as_slice() {
         [only] => (*only, MNC_EXECUTE),

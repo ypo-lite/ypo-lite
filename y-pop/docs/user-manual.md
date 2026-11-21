@@ -641,6 +641,14 @@ Not search settings, but they feed it: the `name`, `keywords`, `tooltip`,
 `exe` and `hotkey` of every item in `y-pop.xml` are searchable. Add
 `keywords="…"` to an item to make it findable under other words — in `y-pop-config`, the **Keywords** box of the item. A browsed folder's **Search inside it with /** switch is `index="true"`.
 
+### Typing a letter in a tray menu
+
+With a tray menu open, press a letter to jump to an item. An item whose name
+has that letter as its `&` accelerator wins: one match runs at once, several
+are cycled through, one per press. When no item has the accelerator, the
+letter matches the first letter of the names instead, the same way: a single
+match runs, several are selected one after the other.
+
 ---
 
 ## Not there yet
